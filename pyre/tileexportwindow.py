@@ -54,7 +54,7 @@ class TileExportWindow(window.Window):
             # time.sleep(0.5);
 
         data = imageBuffer.get_data(format=imageBuffer.format, pitch=imageBuffer.pitch)
-        components = map(int, list(data));
+        components = list(map(int, list(data)));
 
         rawData = numpy.array(components, dtype=numpy.int8);
 

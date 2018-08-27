@@ -57,23 +57,24 @@ ____
 
 '''
 
+from pyre.commandhistory import history
+from pyre import resources
+
 Windows = {}
 
-from commandhistory import history
-import resources 
 
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common']
 
 
 def Exit():
     '''Destroy all windows and exit the application'''
-    for w in Windows.values():
+    for w in list(Windows.values()):
         w.Destroy()
 
 
 def AnyVisibleWindows():
     AnyVisibleWindows = False
-    for w in Windows.values():
+    for w in list(Windows.values()):
         AnyVisibleWindows = AnyVisibleWindows or w.IsShown()
 
     return AnyVisibleWindows

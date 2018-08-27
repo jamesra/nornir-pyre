@@ -15,7 +15,7 @@ import numpy
 from scipy.misc import imsave
 from scipy.ndimage import imread
 
-import state
+from . import state
 from pyre import history, Windows
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
@@ -74,7 +74,7 @@ def SyncWindows(LookAt, scale):
 
 
 def RotateTranslateWarpedImage(LimitImageSize=False):
-    from state import currentStosConfig
+    from .state import currentStosConfig
 
     largestdimension = 2047
     if LimitImageSize:

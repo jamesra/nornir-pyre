@@ -4,7 +4,7 @@ import sys
 
 from pyglet import gl
 import pyglet
-    
+
 from wx import glcanvas
 import wx
 
@@ -34,6 +34,7 @@ class GLPanel(wx.Panel):
         # Create context
         if GLPanel.wxcontext is None:
             GLPanel.pygletcontext = gl.Context(gl.current_context)
+            
             self.canvas = glcanvas.GLCanvas(self, attribList=attribList)
             GLPanel.wxcontext = self.canvas.GetContext()
         else:
@@ -224,7 +225,7 @@ class TestFrame(wx.Frame):
         self.GLPanel2 = TestGlPanel(self, wx.ID_ANY, (20, 20))
         self.mainsizer.Add(self.GLPanel2, 1, wx.EXPAND)
 
-	print "init process"
+        print("init process")
         self.SetSizer(self.mainsizer)
         # self.mainsizer.Fit(self)
         self.Layout()
@@ -235,8 +236,8 @@ if __name__ == '__main__':
     # frame = TestFrame(None, wx.ID_ANY, 'GL Window', size=(400,400))
     frame = wx.Frame(None, -1, "GL Window", size=(400, 400))
     panel = TestGlPanel(frame)
-    print "show"
+    print("show")
     frame.Show(True)
-    print "main loop"
+    print("main loop")
     app.MainLoop()
     app.Destroy()

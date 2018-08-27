@@ -5,10 +5,10 @@ import pyglet
 from pyglet.gl import *
 from pyglet.graphics import vertexbuffer, vertexattribute, vertexdomain
 
-from compositetransformview import CompositeTransformView
-import compositetransformview
-from imagegridtransformview import ImageGridTransformView
-from mosaicview import MosaicView
+from .compositetransformview import CompositeTransformView
+from . import compositetransformview
+from .imagegridtransformview import ImageGridTransformView
+from .mosaicview import MosaicView
 import pyglet.gl as gl
 from pyre.views import imagegridtransformview
  

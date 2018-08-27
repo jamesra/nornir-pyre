@@ -11,7 +11,7 @@ import nornir_imageregistration.spatial
 from pyre.state import currentMosaicConfig
 import wx  
 
-import imagetransformpanelbase
+from . import imagetransformpanelbase
 import nornir_imageregistration.transforms.utils as utils
 import pyglet.gl as gl
 import pyre.ui
@@ -24,7 +24,7 @@ def _get_ITV_transform(ITV):
 
 
 def _get_transforms(ImageTransformViewList):
-    return map(_get_ITV_transform, ImageTransformViewList)
+    return list(map(_get_ITV_transform, ImageTransformViewList))
 
 
 class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):

@@ -139,12 +139,12 @@ class MosaicState(StateEvents):
         
         mosaic.TranslateToZeroOrigin()
         
-        tiles_dir = MosaicState.GetMosaicTilePath(mosaic.ImageToTransform.keys()[0], mosaicFullPath, tiles_dir)
+        tiles_dir = MosaicState.GetMosaicTilePath(list(mosaic.ImageToTransform.keys())[0], mosaicFullPath, tiles_dir)
         if tiles_dir is None:
             return None
         
         tilesPathList = mosaic.CreateTilesPathList(tiles_dir)
-        transform_scale = nornir_imageregistration.tileset.MostCommonScalar(mosaic.ImageToTransform.values(), tilesPathList)
+        transform_scale = nornir_imageregistration.tileset.MostCommonScalar(list(mosaic.ImageToTransform.values()), tilesPathList)
         
         ImageTransformViewList = []
         
@@ -155,7 +155,7 @@ class MosaicState(StateEvents):
         pools = nornir_pools.GetGlobalThreadPool()
         
         tasks = []
-        for image_filename, transform in mosaic.ImageToTransform.items():
+        for image_filename, transform in list(mosaic.ImageToTransform.items()):
             tile_full_path = os.path.join(tiles_dir, image_filename)
             
             task = pools.add_task(str(z), self.AllocateMosaicTile, transform, tile_full_path, transform_scale)

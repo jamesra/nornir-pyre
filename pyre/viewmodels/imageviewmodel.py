@@ -110,7 +110,7 @@ class ImageViewModel(object):
         Image = None
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
-        if isinstance(ImageInput, str) or isinstance(ImageInput, unicode):
+        if isinstance(ImageInput, str) or isinstance(ImageInput, str):
 
             Logger.info("Loading image: " + ImageInput)
             self._ImageFilename = ImageInput

@@ -11,10 +11,10 @@ import sys
 
 import nornir_shared.misc
 
-from PyreGui import StosWindow
+from .PyreGui import StosWindow
 from pyre import Windows
 from pyre.state import InitializeStateFromArguments
-import resources
+from . import resources
  
 import wx
  

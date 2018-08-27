@@ -8,7 +8,7 @@ import nornir_imageregistration.spatial
 import numpy
 import wx 
 
-import command_base
+from . import command_base
 import pyre.views
 
 

@@ -5,7 +5,7 @@ Created on Oct 19, 2012
 @author: u0490822
 '''
 
-from imageop import scale
+#from imageop import scale
 import logging
 import math
 import os

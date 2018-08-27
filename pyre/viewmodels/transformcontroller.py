@@ -269,7 +269,7 @@ class  TransformController(object):
         else:
             index = self.TransformModel.UpdateFixedPoint(index, NewPointPosition);
 
-        print "Set point " + str(index) + " " + str(NewPointPosition);
+        print("Set point " + str(index) + " " + str(NewPointPosition))
 
         return index;
 
@@ -295,7 +295,7 @@ class  TransformController(object):
         else:
             index = self.TransformModel.UpdateFixedPoint(index, NearestPoint);
 
-        print "Dragged point " + str(index) + " " + str(NearestPoint);
+        print("Dragged point " + str(index) + " " + str(NearestPoint))
 
         return index;
 
@@ -335,7 +335,7 @@ class  TransformController(object):
                 record = task.wait_return()
     
                 if record is None:
-                    print "point #" + str(i_point) + " returned None for alignment"
+                    print("point #" + str(i_point) + " returned None for alignment")
                     continue
     
                 (dy, dx) = record.peak
@@ -358,7 +358,7 @@ class  TransformController(object):
                                     anglesToSearch=currentStosConfig.AnglesToSearch)
             
             if record is None:
-                print "point #" + str(i_point) + " returned None for alignment"
+                print("point #" + str(i_point) + " returned None for alignment")
                 return
 
             (dy, dx) = record.peak

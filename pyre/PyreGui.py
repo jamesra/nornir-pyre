@@ -608,7 +608,7 @@ class FileDrop (wx.FileDropTarget):
                     else:
                         pass
 
-            except IOError, error:
+            except IOError as error:
                 dlg = wx.MessageDialog(None, "Error opening file\n" + str(error))
                 dlg.ShowModal()
 

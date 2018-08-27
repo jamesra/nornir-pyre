@@ -11,7 +11,7 @@ from pyglet import *
 from pyre import history, state
 import wx  
 
-import imagetransformpanelbase 
+from . import imagetransformpanelbase 
 from pyre.ui import Camera 
 from pyre.viewmodels import TransformController
 from pyre.views import CompositeTransformView, ImageGridTransformView, SetDrawTextureState, ClearDrawTextureState
@@ -193,13 +193,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
-            print multiplier
+            print(str(multiplier))
             if(e.ShiftDown()):
                 multiplier = multiplier * 5
-                print multiplier
+                print(str(multiplier))
             if(e.ControlDown()):
                 multiplier = multiplier * 25
-                print multiplier
+                print(str(multiplier))
 
             if keycode == wx.WXK_LEFT:
                 delta = [0, -1]
@@ -213,7 +213,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             delta[0] = delta[0] * multiplier
             delta[1] = delta[1] * multiplier
 
-            print multiplier
+            print(str(multiplier))
             self.TransformController.MovePoint(self.HighlightedPointIndex, delta[1], delta[0], FixedSpace=self.FixedSpace)
 
         elif symbol == 'a':  # "A" Character
@@ -442,7 +442,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 else:
                     distance, index = self.TransformController.NearestPoint([ImageY, ImageX], FixedSpace=True)
 
-                print "d: " + str(distance) + " to p# " + str(index) + " max d: " + str(self.SelectionMaxDistance)
+                print("d: " + str(distance) + " to p# " + str(index) + " max d: " + str(self.SelectionMaxDistance))
                 if distance < self.SelectionMaxDistance:
                         self.SelectedPointIndex = index
                 else:

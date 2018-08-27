@@ -6,12 +6,12 @@ Created on Sep 12, 2013
 
 import sys
 
-if not hasattr(sys, 'frozen'):
-    import wxversion
-    wxversion.select('2.8')
+#if not hasattr(sys, 'frozen'):
+    #import wxversion
+    #wxversion.select('2.8')
 
 from pyre import state
-import launcher
+from pyre import launcher
 
 def main():
     state.init()
