@@ -26,11 +26,13 @@ except ImportError:
 #----------------------------------------------------------------------
 
 buttonDefs = {
-    wx.NewId() : ('CubeCanvas',      'Cube'),
-    wx.NewId() : ('ConeCanvas',      'Cone'),
+    wx.NewId() : ('CubeCanvas', 'Cube'),
+    wx.NewId() : ('ConeCanvas', 'Cone'),
     }
 
+
 class ButtonPanel(wx.Panel):
+
     def __init__(self, parent):
         wx.Panel.__init__(self, parent, -1)
 
@@ -41,14 +43,14 @@ class ButtonPanel(wx.Panel):
         for k in keys:
             text = buttonDefs[k][1]
             btn = wx.Button(self, k, text)
-            box.Add(btn, 0, wx.ALIGN_CENTER|wx.ALL, 15)
+            box.Add(btn, 0, wx.ALIGN_CENTER | wx.ALL, 15)
             self.Bind(wx.EVT_BUTTON, self.OnButton, btn)
 
         # With this enabled, you see how you can put a GLCanvas on the wx.Panel
         if 1:
             c = CubeCanvas(self)
             c.SetMinSize((200, 200))
-            box.Add(c, 0, wx.ALIGN_CENTER|wx.ALL, 15)
+            box.Add(c, 0, wx.ALIGN_CENTER | wx.ALL, 15)
 
         self.SetAutoLayout(True)
         self.SetSizer(box)
@@ -74,11 +76,13 @@ class ButtonPanel(wx.Panel):
             canvasClass = eval(canvasClassName)
             cx = 0
             if canvasClassName == 'ConeCanvas': cx = 400
-            frame = wx.Frame(None, -1, canvasClassName, size=(400,400), pos=(cx,400))
-            canvasClass(frame) # CubeCanvas(frame) or ConeCanvas(frame); frame passed to MyCanvasBase
+            frame = wx.Frame(None, -1, canvasClassName, size=(400, 400), pos=(cx, 400))
+            canvasClass(frame)  # CubeCanvas(frame) or ConeCanvas(frame); frame passed to MyCanvasBase
             frame.Show(True)
 
+
 class MyCanvasBase(glcanvas.GLCanvas):
+
     def __init__(self, parent):
         glcanvas.GLCanvas.__init__(self, parent, -1)
         self.init = False
@@ -96,7 +100,7 @@ class MyCanvasBase(glcanvas.GLCanvas):
         self.Bind(wx.EVT_MOTION, self.OnMouseMotion)
 
     def OnEraseBackground(self, event):
-        pass # Do nothing, to avoid flashing on MSW.
+        pass  # Do nothing, to avoid flashing on MSW.
 
     def OnSize(self, event):
         wx.CallAfter(self.DoSetViewport)
@@ -128,7 +132,9 @@ class MyCanvasBase(glcanvas.GLCanvas):
             self.x, self.y = evt.GetPosition()
             self.Refresh(False)
 
+
 class CubeCanvas(MyCanvasBase):
+
     def InitGL(self):
         # set viewing projection
         glMatrixMode(GL_PROJECTION)
@@ -152,41 +158,41 @@ class CubeCanvas(MyCanvasBase):
 
         # draw six faces of a cube
         glBegin(GL_QUADS)
-        glNormal3f( 0.0, 0.0, 1.0)
-        glVertex3f( 0.5, 0.5, 0.5)
+        glNormal3f(0.0, 0.0, 1.0)
+        glVertex3f(0.5, 0.5, 0.5)
         glVertex3f(-0.5, 0.5, 0.5)
-        glVertex3f(-0.5,-0.5, 0.5)
-        glVertex3f( 0.5,-0.5, 0.5)
+        glVertex3f(-0.5, -0.5, 0.5)
+        glVertex3f(0.5, -0.5, 0.5)
 
-        glNormal3f( 0.0, 0.0,-1.0)
-        glVertex3f(-0.5,-0.5,-0.5)
-        glVertex3f(-0.5, 0.5,-0.5)
-        glVertex3f( 0.5, 0.5,-0.5)
-        glVertex3f( 0.5,-0.5,-0.5)
+        glNormal3f(0.0, 0.0, -1.0)
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(-0.5, 0.5, -0.5)
+        glVertex3f(0.5, 0.5, -0.5)
+        glVertex3f(0.5, -0.5, -0.5)
 
-        glNormal3f( 0.0, 1.0, 0.0)
-        glVertex3f( 0.5, 0.5, 0.5)
-        glVertex3f( 0.5, 0.5,-0.5)
-        glVertex3f(-0.5, 0.5,-0.5)
+        glNormal3f(0.0, 1.0, 0.0)
+        glVertex3f(0.5, 0.5, 0.5)
+        glVertex3f(0.5, 0.5, -0.5)
+        glVertex3f(-0.5, 0.5, -0.5)
         glVertex3f(-0.5, 0.5, 0.5)
 
-        glNormal3f( 0.0,-1.0, 0.0)
-        glVertex3f(-0.5,-0.5,-0.5)
-        glVertex3f( 0.5,-0.5,-0.5)
-        glVertex3f( 0.5,-0.5, 0.5)
-        glVertex3f(-0.5,-0.5, 0.5)
+        glNormal3f(0.0, -1.0, 0.0)
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(0.5, -0.5, -0.5)
+        glVertex3f(0.5, -0.5, 0.5)
+        glVertex3f(-0.5, -0.5, 0.5)
 
-        glNormal3f( 1.0, 0.0, 0.0)
-        glVertex3f( 0.5, 0.5, 0.5)
-        glVertex3f( 0.5,-0.5, 0.5)
-        glVertex3f( 0.5,-0.5,-0.5)
-        glVertex3f( 0.5, 0.5,-0.5)
+        glNormal3f(1.0, 0.0, 0.0)
+        glVertex3f(0.5, 0.5, 0.5)
+        glVertex3f(0.5, -0.5, 0.5)
+        glVertex3f(0.5, -0.5, -0.5)
+        glVertex3f(0.5, 0.5, -0.5)
 
         glNormal3f(-1.0, 0.0, 0.0)
-        glVertex3f(-0.5,-0.5,-0.5)
-        glVertex3f(-0.5,-0.5, 0.5)
+        glVertex3f(-0.5, -0.5, -0.5)
+        glVertex3f(-0.5, -0.5, 0.5)
         glVertex3f(-0.5, 0.5, 0.5)
-        glVertex3f(-0.5, 0.5,-0.5)
+        glVertex3f(-0.5, 0.5, -0.5)
         glEnd()
 
         if self.size is None:
@@ -201,8 +207,10 @@ class CubeCanvas(MyCanvasBase):
 
         self.SwapBuffers()
 
+
 class ConeCanvas(MyCanvasBase):
-    def InitGL( self ):
+
+    def InitGL(self):
         glMatrixMode(GL_PROJECTION)
         # camera frustrum setup
         glFrustum(-0.5, 0.5, -0.5, 0.5, 1.0, 3.0)
@@ -227,14 +235,13 @@ class ConeCanvas(MyCanvasBase):
         #
         glutInit(sys.argv)
 
-
     def OnDraw(self):
         # clear color and depth buffers
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         # use a fresh transformation matrix
         glPushMatrix()
         # position object
-        #glTranslate(0.0, 0.0, -2.0)
+        # glTranslate(0.0, 0.0, -2.0)
         glRotate(30.0, 1.0, 0.0, 0.0)
         glRotate(30.0, 0.0, 1.0, 0.0)
 
@@ -250,13 +257,14 @@ class ConeCanvas(MyCanvasBase):
 
 #----------------------------------------------------------------------
 class RunDemoApp(wx.App):
+
     def __init__(self):
         wx.App.__init__(self, redirect=False)
 
     def OnInit(self):
-        frame = wx.Frame(None, -1, "RunDemo: ", pos=(0,0),
+        frame = wx.Frame(None, -1, "RunDemo: ", pos=(0, 0),
                         style=wx.DEFAULT_FRAME_STYLE, name="run a sample")
-        #frame.CreateStatusBar()
+        # frame.CreateStatusBar()
 
         menuBar = wx.MenuBar()
         menu = wx.Menu()
@@ -271,7 +279,7 @@ class RunDemoApp(wx.App):
         win = runTest(frame)
 
         # set the frame to a good size for showing the two buttons
-        frame.SetSize((200,400))
+        frame.SetSize((200, 400))
         win.SetFocus()
         self.window = win
         frect = frame.GetRect()
@@ -288,9 +296,11 @@ class RunDemoApp(wx.App):
             self.window.ShutdownDemo()
         evt.Skip()
 
+
 def runTest(frame):
     win = ButtonPanel(frame)
     return win
+
 
 app = RunDemoApp()
 app.MainLoop()

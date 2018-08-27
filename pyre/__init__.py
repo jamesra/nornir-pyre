@@ -62,8 +62,8 @@ Windows = {}
 from commandhistory import history
 import resources 
 
-
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common']
+
 
 def Exit():
     '''Destroy all windows and exit the application'''

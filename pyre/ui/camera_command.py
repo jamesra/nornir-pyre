@@ -17,17 +17,15 @@ class CameraCommand(command_base.VolumeCommandBase):
         
         self._bind_events()
         
-        
     def _bind_events(self):
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
         self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
         self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag) 
-         
         
     def _unbind_events(self):
-        self.canvas.Unbind(wx.EVT_MOUSEWHEEL,  handler=self.on_mouse_scroll)
-        self.canvas.Unbind(wx.EVT_KEY_DOWN,  handler=self.on_key_press)
-        self.canvas.Unbind(wx.EVT_MOTION,  handler=self.on_mouse_drag) 
+        self.canvas.Unbind(wx.EVT_MOUSEWHEEL, handler=self.on_mouse_scroll)
+        self.canvas.Unbind(wx.EVT_KEY_DOWN, handler=self.on_key_press)
+        self.canvas.Unbind(wx.EVT_MOTION, handler=self.on_mouse_drag) 
         return 
     
     def on_key_press(self, e):
@@ -63,7 +61,6 @@ class CameraCommand(command_base.VolumeCommandBase):
                 LookAt = self.TransformController.Transform([LookAt])
                 LookAt = LookAt[0] 
             
-            
     def on_mouse_scroll(self, e):
 
         if self.camera is None:
@@ -87,13 +84,12 @@ class CameraCommand(command_base.VolumeCommandBase):
             
             self.statusBar.update_status_bar(self.LastMousePosition)
 
-
     def on_mouse_drag(self, e):
 
         (y, x) = self.GetCorrectedMousePosition(e)
 
         if self.LastMousePosition is None:
-            self.LastMousePosition = (y,x)
+            self.LastMousePosition = (y, x)
             return
 
         dx = x - self.LastMousePosition[nornir_imageregistration.iPoint.X]
@@ -101,7 +97,7 @@ class CameraCommand(command_base.VolumeCommandBase):
 
         self.LastMousePosition = (y, x)
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y,x)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
         if ImageX is None:
             return
 

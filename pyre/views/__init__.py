@@ -13,6 +13,7 @@ import pyglet.gl as gl
 from pyre.views import imagegridtransformview
  
 __all__ = ['CompositeTransformView', 'ImageGridTransformView', 'MosaicView']
+
  
 def LineIndiciesFromTri(T):
     '''
@@ -37,6 +38,7 @@ def LineIndiciesFromTri(T):
 
     return LineIndicies
 
+
 def DrawTriangles(verts, Triangles):
     LineIndicies = LineIndiciesFromTri(Triangles)
 
@@ -53,17 +55,18 @@ def DrawTriangles(verts, Triangles):
                                              LineIndicies,
                                              ('v3f', vertarray))
     pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+
     
 def VertsForRectangle(rect):
     
     verts = numpy.vstack((rect.BottomLeft,
                           rect.TopLeft,
-                          rect.TopRight, 
+                          rect.TopRight,
                           rect.BottomRight))
     
     verts = numpy.fliplr(verts)
     
-    Points = numpy.hstack((verts, numpy.ones((4,1))))
+    Points = numpy.hstack((verts, numpy.ones((4, 1))))
     
     print("rect: %s" % (str(rect)))
     
@@ -75,7 +78,6 @@ def VertsForRectangle(rect):
     
 def DrawRectangle(rect, color):
     '''Draw a rectangle'''
-      
     
     vertarray = VertsForRectangle(rect)
     
@@ -88,8 +90,8 @@ def DrawRectangle(rect, color):
                                              LineIndicies,
                                              ('v3f', vertarray))
     
-    
     pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+
     
 def SetDrawTextureState():
     gl.glEnable(gl.GL_TEXTURE_2D)
@@ -103,6 +105,7 @@ def SetDrawTextureState():
     gl.glEnable(gl.GL_BLEND)
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
     gl.glDepthFunc(gl.GL_LESS)
+
     
 def SetDrawMosaicState():
     gl.glEnable(gl.GL_TEXTURE_2D)
@@ -124,11 +127,12 @@ def ClearDrawTextureState():
     gl.glBlendEquation(gl.GL_FUNC_ADD)
     pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
     gl.glDisable(gl.GL_BLEND)
+
     
 def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FUNC_ADD):
     
     if color is None:
-        color = (1.0,1.0,1.0,1.0)
+        color = (1.0, 1.0, 1.0, 1.0)
          
     gl.glBlendEquation(glFunc)
     gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
@@ -145,11 +149,12 @@ def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FU
                                   verts.tolist(),
                                   ('v3f', vertarray),
                                   ('t2f', texarray))
+
     
 def DrawTextureWithBuffers(texture, vertarray, buffers, verts, color=None, glFunc=gl.GL_FUNC_ADD):
     
     if color is None:
-        color = (1.0,1.0,1.0,1.0)
+        color = (1.0, 1.0, 1.0, 1.0)
          
     gl.glBlendEquation(glFunc)
     gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
@@ -165,11 +170,10 @@ def DrawTextureWithBuffers(texture, vertarray, buffers, verts, color=None, glFun
                                   gl.GL_TRIANGLES,
                                   verts.tolist(),
                                   buffers)
-      
-    
 
 
 AttributeLookup = {}
+
 
 def GetOrCreateAttribute(format):
     global AttributeLookup
@@ -179,6 +183,7 @@ def GetOrCreateAttribute(format):
         AttributeLookup[format] = attribute
         
     return AttributeLookup[format] 
+
      
 def GetOrCreateBuffer(size, format, array):
     '''Generate the attributes used in the GL draw_indexed call
@@ -201,9 +206,10 @@ def GetOrCreateBuffers(size, *data):
     buffers = []
     for format, array in data:
         attribute, buffer = GetOrCreateBuffer(size, format, array)
-        buffers.append( (attribute, buffer) )
+        buffers.append((attribute, buffer))
         
     return buffers
+
 
 def draw_indexed_custom(size, mode, indices, *data):
     '''Draw a primitive with indexed vertices immediately.
@@ -223,7 +229,7 @@ def draw_indexed_custom(size, mode, indices, *data):
     
     buffers = []
     for format, array in data:
-        ##attribute = vertexattribute.create_attribute(format)
+        # #attribute = vertexattribute.create_attribute(format)
         attribute = GetOrCreateAttribute(format)
         assert size == len(array) // attribute.count, 'Data for %s is incorrect length' % format
         
@@ -267,9 +273,8 @@ def draw_indexed_from_buffer(size, mode, indices, buffers):
     glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT)
     
     for attribute, buffer in buffers: 
-        #attribute.enable()
+        # attribute.enable()
         attribute.set_pointer(buffer.ptr)
-        
          
     if size <= 0xff:
         index_type = GL_UNSIGNED_BYTE

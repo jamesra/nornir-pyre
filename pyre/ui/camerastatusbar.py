@@ -19,10 +19,9 @@ class CameraStatusBar(wx.StatusBar):
     def TransformController(self):
         return state.currentStosConfig.TransformController
 
-
     def __init__(self, parent, camera, **kwargs):
         self._camera = camera
-        #self._TransformController = transformController
+        # self._TransformController = transformController
         super(CameraStatusBar, self).__init__(parent, **kwargs)
         self.SetFieldsCount(3)
 
@@ -38,7 +37,7 @@ class CameraStatusBar(wx.StatusBar):
 
         ZoomValue = (1.0 / (float(self.camera.scale) / float(self.camera.WindowHeight))) * 100.0
         # mousePosStr = mousePosTemplate % (x, y, ZoomValue)
-        transformed_point = (0,0)
+        transformed_point = (0, 0)
 
         if not self.TransformController is None:
             transformed_point = self.TransformController.Transform(point)

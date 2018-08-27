@@ -20,6 +20,7 @@ import wx
  
 app = None
 
+
 def ProcessArgs():
 
     # conflict_handler = 'resolve' replaces old arguments with new if both use the same option flag
@@ -72,6 +73,7 @@ def ProcessArgs():
 
     return parser
 
+
 __profiler = None
 
 
@@ -104,13 +106,12 @@ def Run():
     args = ProcessArgs()
     arg_values = args.parse_args()
 
-
     app = wx.App(False)
 
     Windows["Fixed"] = StosWindow(None, "Fixed", 'Fixed Image', showFixed=True)
     Windows["Warped"] = StosWindow(None, "Warped", 'Warped Image')
     Windows["Composite"] = StosWindow(None, "Composite", 'Composite', showFixed=True, composite=True)
-    #Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
+    # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
  
     InitializeStateFromArguments(arg_values)
 
@@ -119,6 +120,7 @@ def Run():
     print("Exiting main loop")
 
     EndProfilerCheck()
+
 
 if __name__ == '__main__':
     pass

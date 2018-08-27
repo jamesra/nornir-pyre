@@ -1,4 +1,4 @@
-#from distutils.core import setup
+# from distutils.core import setup
 
 from distutils.core import setup
 from glob import glob
@@ -7,7 +7,6 @@ import sys
 import matplotlib
 import scipy
 import wx
-
 
 # from cx_Freeze import setup, Executable
 if not hasattr(sys, 'frozen'):
@@ -19,13 +18,12 @@ if not hasattr(sys, 'frozen'):
 
 data_files = []
 # data_files = {'pyre' : ['pyre/resources/*.png']}
-#data_files = [("Microsoft.VC90.CRT", glob(r'C:\Program Files\Microsoft Visual Studio 9.0\VC\redist\x86\Microsoft.VC90.CRT\*.*'))]     
+# data_files = [("Microsoft.VC90.CRT", glob(r'C:\Program Files\Microsoft Visual Studio 9.0\VC\redist\x86\Microsoft.VC90.CRT\*.*'))]     
 # data_files=matplotlib.get_py2exe_datafiles()
 # data_files.append(("Microsoft.VC90.CRT", ['msvcp90.dll']))
 # data_files.append(("", glob(r'*.png')))
 
-
-excludes = ["Tkconstants","Tkinter","tcl",'_gtkagg', '_tkagg']
+excludes = ["Tkconstants", "Tkinter", "tcl", '_gtkagg', '_tkagg']
 includes = [
                 r'matplotlib',
                 r'numpy',
@@ -61,7 +59,7 @@ base = None
 if sys.platform == "win32":
     base = "Win32GUI"
 
-#setup(data_files=data_files, console=['Pyre.py'])
+# setup(data_files=data_files, console=['Pyre.py'])
 setup(name="pyre",
       version="1.0.0",
       data_files=data_files,

@@ -14,6 +14,7 @@ from pyglet.gl import *
 def screen_to_volume(camera, point):
     camera.ImageCoordsForMouse(point)
 
+
 class Camera(object):
     '''
     classdocs
@@ -28,18 +29,15 @@ class Camera(object):
 #     def x(self, value):
 #         self._x = value)
 
-
     @property
     def y(self):
         '''Position in volume space'''
         return self._y
 
-
 #     @y.setter
 #     def y(self, value):
 #         self._y = value
 #         self._FireChangeEvent()
-        
     
     @property
     def WindowSize(self):
@@ -47,9 +45,9 @@ class Camera(object):
     
     @WindowSize.setter
     def WindowSize(self, value):
-        #print("Update window size: %d x %d" % (value[1], value[0]))
+        # print("Update window size: %d x %d" % (value[1], value[0]))
         self._window_size = numpy.array(value)
-        self._aspect = float(self._window_size[nornir_imageregistration.iPoint.X] ) / float(self._window_size[nornir_imageregistration.iPoint.Y])
+        self._aspect = float(self._window_size[nornir_imageregistration.iPoint.X]) / float(self._window_size[nornir_imageregistration.iPoint.Y])
         self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
         
     @property
@@ -74,7 +72,7 @@ class Camera(object):
     
     @classmethod
     def _Calc_ViewSize(cls, scale, aspect):
-        return numpy.array( (scale, aspect * scale))
+        return numpy.array((scale, aspect * scale))
     
     @property
     def ViewSize(self):
@@ -94,7 +92,6 @@ class Camera(object):
     def angle(self):
         return float(self._angle)
 
-
     @angle.setter
     def angle(self, value):
         self._angle = float(value)
@@ -109,7 +106,6 @@ class Camera(object):
         self._scale = float(value)
         self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
         self._FireChangeEvent()
-        
 
     def ImageCoordsForMouse(self, y, x):
         ImageX = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
@@ -124,7 +120,6 @@ class Camera(object):
 
         return nornir_imageregistration.Rectangle.CreateFromBounds((bottom, left, top, right))
 
-
     def __init__(self, position, scale=1, angle=0, size=None):
         '''
         :param tuple size: Size of the window the camera is within
@@ -135,22 +130,18 @@ class Camera(object):
         self._scale = scale  # zoom
         self.__OnChangeEventListeners = []
         self._aspect = None
-        
 
         if size is None:
-            self.WindowSize = numpy.array((480,640))
+            self.WindowSize = numpy.array((480, 640))
         else:
             self.WindowSize = numpy.array(size)
-            
  
     def AddOnChangeEventListener(self, func):
         self.__OnChangeEventListeners.append(func)
 
-
     def RemoveOnChangeEventListener(self, func):
         if func in self.__OnChangeEventListeners:
             self.__OnChangeEventListeners.remove(func)
-            
             
     def _FireChangeEvent(self):
         for func in self.__OnChangeEventListeners:
@@ -162,9 +153,9 @@ class Camera(object):
         '''
         self._x = point[nornir_imageregistration.iPoint.X]
         self._y = point[nornir_imageregistration.iPoint.Y]
-        #self._scale = scale
+        # self._scale = scale
         
-        #print("X: %g Y: %g S: %g" % (self.x, self.y, self.scale))
+        # print("X: %g Y: %g S: %g" % (self.x, self.y, self.scale))
          
         self._FireChangeEvent()
 
@@ -182,9 +173,9 @@ class Camera(object):
  
         scale = self.scale / 2.0
         gluOrtho2D(-scale * aspect,  # left
-                   + scale * aspect,  # right
-                   - scale,  # bottom
-                   + scale)  # top
+                   +scale * aspect,  # right
+                   -scale,  # bottom
+                   +scale)  # top
 
         # Set modelview matrix to move, scale & rotate
         glMatrixMode(GL_MODELVIEW)

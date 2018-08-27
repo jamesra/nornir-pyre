@@ -5,7 +5,6 @@ Created on Oct 19, 2012
 @author: u0490822
 '''
 
-
 from imageop import scale
 import logging
 import math
@@ -26,9 +25,9 @@ import pyre
 
 class RenderCache(object):
     '''This object stores variables that must be calculated every time the transform changes'''
-    
         
     pass
+
 
 class PointTextures(object):
     '''
@@ -115,7 +114,7 @@ class ImageTransformViewBase(object):
         raise NotImplementedError()
     
 
-class ImageGridTransformView(ImageTransformViewBase,PointTextures):
+class ImageGridTransformView(ImageTransformViewBase, PointTextures):
     '''
     Combines and image and a transform to render an image.  Read-only operations used for rendering the graphics.
     '''
@@ -162,7 +161,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
     @z.setter
     def z(self, value):
         self._z = value 
-        
 
     def __init__(self, ImageViewModel, Transform=None):
         '''
@@ -180,7 +178,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         
         self.Debug = False
 
-
     def OnTransformChanged(self):
 
         self._buffers = None
@@ -194,11 +191,9 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
 
         self.rendercache = None
         self.rendercache = RenderCache()
-        
 
         if not SavedPointCache is None:
             self.rendercache.PointCache = SavedPointCache
-             
     
     @classmethod
     def _update_sprite_position(cls, sprite, point, scale):
@@ -207,7 +202,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         
         if sprite.scale != scale:
             sprite.scale = scale
-        
     
     def _update_sprite_flash(self, sprite, is_selected, time_for_selected_to_flash=False):
         
@@ -222,8 +216,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
                 sprite.image = self.SelectedPointImage
             else:
                 sprite.image = self.PointImage
-        
-        
 
     def _draw_points(self, verts, SelectedIndex=None, BoundingBox=None, ScaleFactor=1.0):
 
@@ -280,7 +272,7 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
             for i in range(0, len(verts)):
                 point = verts[i]
                 
-                #if math.isnan(point[0]) or math.isnan(point[1]):
+                # if math.isnan(point[0]) or math.isnan(point[1]):
                 #    continue
 
                 Image = self.PointImage
@@ -294,7 +286,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
                 s = pyglet.sprite.Sprite(Image, x=point[1], y=point[0], group=self.PointGroup, batch=PointBatch)
                 s.scale = scale
                 spriteList.append(s)
-
 
             PointCache.Sprites = spriteList
             PointCache.PointBatch = PointBatch
@@ -316,7 +307,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
             verts = self.Transform.FixedPoints
 
         self._draw_points(verts, SelectedIndex, BoundingBox, ScaleFactor)
-
 
     def draw_lines(self, draw_in_fixed_space):
         '''
@@ -405,17 +395,14 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
                     cacheColumn[iy] = array
                 else:
                     array = cacheColumn[iy]
- 
 
                 gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
                 gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
                 gl.glInterleavedArrays(gl.GL_T4F_V4F, 0, array)
                 gl.glDrawArrays(gl.GL_QUADS, 0, 4)
                 gl.glPopClientAttrib()
-
         
         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-                
                  
     def WarpedImageDataGrid(self, grid_size):
         '''Grab the cached image data for a warped image
@@ -432,10 +419,9 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
             self.rendercache.WarpedImageDataGrid = WarpedImageDataGrid
             
         return WarpedImageDataGrid
-     
     
     @classmethod
-    def _tile_grid_points(cls, tile_bounding_rect, grid_size = (8.0, 8.0)):
+    def _tile_grid_points(cls, tile_bounding_rect, grid_size=(8.0, 8.0)):
         '''
         :return: Fills the tile area with a (MxN) grid of points.  Maps the points through the transform.  Then adds the known transform points to the results
         '''
@@ -459,9 +445,8 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         
         return WarpedCorners
     
-    
     @classmethod
-    def _tile_bounding_points(cls, tile_bounding_rect, grid_size = (3.0, 3.0)):
+    def _tile_bounding_points(cls, tile_bounding_rect, grid_size=(3.0, 3.0)):
         '''
         :return: Returns a set of point pairs mapping the boundaries of the image tile
         '''
@@ -505,18 +490,18 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         return numpy.hstack((FixedPoints, WarpedPoints))
     
     @classmethod
-    def _tile_bounding_rect(cls, Transform, tile_bounding_rect, ForwardTransform=True,  grid_size = (3.0, 3.0)):
+    def _tile_bounding_rect(cls, Transform, tile_bounding_rect, ForwardTransform=True, grid_size=(3.0, 3.0)):
         '''
         :return: Returns a bounding rectangle built from points placed around the edge of the tile
         '''
         BorderPoints = cls._tile_bounding_points(tile_bounding_rect=tile_bounding_rect, grid_size=grid_size)
         BorderPointPairs = cls._find_corresponding_points(Transform, BorderPoints, ForwardTransform=ForwardTransform)
-        return nornir_imageregistration.spatial.Rectangle.CreateFromBounds(nornir_imageregistration.spatial.BoundsArrayFromPoints(BorderPointPairs[:,0:2]))
+        return nornir_imageregistration.spatial.Rectangle.CreateFromBounds(nornir_imageregistration.spatial.BoundsArrayFromPoints(BorderPointPairs[:, 0:2]))
      
     @classmethod
     def _merge_point_pairs_with_transform(cls, PointsA, TransformPoints):
 
-        #This is a mess.  Transforms use the terminology Fixed & Warped to describe themselves.  The Transform function moves the warped points into fixed space.
+        # This is a mess.  Transforms use the terminology Fixed & Warped to describe themselves.  The Transform function moves the warped points into fixed space.
         PointsB = numpy.hstack((TransformPoints[:, 2:4], TransformPoints[:, 0:2]))
         if len(PointsA) > 0 and len(PointsB) > 0:
             AllPointPairs = numpy.vstack([PointsA, PointsB])
@@ -527,7 +512,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         
         if len(PointsB) > 0:
             return PointsB
-        
         
     @classmethod
     def _build_subtile_point_pairs(cls, Transform, z, rect, ForwardTransform=True,):
@@ -551,8 +535,8 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
            
     @classmethod
     def _z_values_for_points(cls, PointsYX):
-        center = numpy.mean(PointsYX,0)
-        Z = scipy.spatial.distance.cdist(numpy.resize(center, (1,2)), PointsYX, 'euclidean')
+        center = numpy.mean(PointsYX, 0)
+        Z = scipy.spatial.distance.cdist(numpy.resize(center, (1, 2)), PointsYX, 'euclidean')
         Z = numpy.transpose(Z)
         Z /= numpy.max(Z)
         Z = 1 - Z
@@ -561,17 +545,16 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
     @classmethod 
     def _texture_coordinates(cls, FixedPointsYX, fixed_bounding_rect): 
         
-        #tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(WarpedPoints)
+        # tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(WarpedPoints)
         (y, x) = fixed_bounding_rect.BottomLeft
         h = fixed_bounding_rect.Height
         w = fixed_bounding_rect.Width
          
         texturePoints = (FixedPointsYX - numpy.array(fixed_bounding_rect.BottomLeft)) / fixed_bounding_rect.Size
         
-        #Need to convert to X,Y coordinates
+        # Need to convert to X,Y coordinates
         texturePoints = numpy.fliplr(texturePoints) 
         return texturePoints
-        
     
     @classmethod
     def _render_data_for_transform_point_pairs(cls, PointPairs, tile_bounding_rect, z=None):
@@ -579,27 +562,26 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
          
         FixedPointsYX, WarpedPointsYX = numpy.hsplit(PointPairs, 2)
         
-        #tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(WarpedPoints)
+        # tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(WarpedPoints)
         # Need to convert from Y,x to X,Y coordinates
-        #FixedPointsXY = numpy.fliplr(FixedPointsYX)
+        # FixedPointsXY = numpy.fliplr(FixedPointsYX)
         WarpedPointsXY = numpy.fliplr(WarpedPointsYX)
         # Do triangulation before we transform the points to prevent concave edges having a texture mapped over them.
-        
 
-        #texturePoints = (FixedPointsXY - numpy.array((x,y))) / numpy.array((w,h))
+        # texturePoints = (FixedPointsXY - numpy.array((x,y))) / numpy.array((w,h))
         
         texturePoints = cls._texture_coordinates(FixedPointsYX, fixed_bounding_rect=tile_bounding_rect)
-        print(str(texturePoints[0,:]))
+        print(str(texturePoints[0, :]))
         tri = scipy.spatial.Delaunay(texturePoints)
-        #numpy.array([[(u - x) / float(w), (v - y) / float(h)] for u, v in FixedPointsXY], dtype=numpy.float32)
+        # numpy.array([[(u - x) / float(w), (v - y) / float(h)] for u, v in FixedPointsXY], dtype=numpy.float32)
 
-        #Set vertex z according to distance from center
+        # Set vertex z according to distance from center
         if not z is None: 
-            z_array = numpy.ones( (FixedPointsYX.shape[0],1) ) * z
+            z_array = numpy.ones((FixedPointsYX.shape[0], 1)) * z
         else:
             z_array = cls._z_values_for_points(FixedPointsYX)
         
-        Verts3D = numpy.hstack((WarpedPointsXY, z_array ))
+        Verts3D = numpy.hstack((WarpedPointsXY, z_array))
         vertarray = list(Verts3D.flat)
         texarray = list(texturePoints.flat)
           
@@ -611,18 +593,16 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         verts = verts.flatten()
         
         return (vertarray, texarray, verts)
-
     
     def DrawWarpedImage(self, ImageViewModel, ForwardTransform=True, tex_color=None, BoundingBox=None, z=None, glFunc=gl.GL_FUNC_ADD):
-        
             
         if ImageViewModel.NumCols > 1 or ImageViewModel.NumRows > 1:
             return self._draw_warped_imagegridviewmodel(ImageViewModel, ForwardTransform=True, tex_color=tex_color, BoundingBox=BoundingBox, z=z, glFunc=glFunc)
         
-        WarpedImageDataGrid = self.WarpedImageDataGrid( (ImageViewModel.NumRows, ImageViewModel.NumCols) )
+        WarpedImageDataGrid = self.WarpedImageDataGrid((ImageViewModel.NumRows, ImageViewModel.NumCols))
         
         if WarpedImageDataGrid[0][0] is None:
-            tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((0,0), ImageViewModel.TextureSize)
+            tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((0, 0), ImageViewModel.TextureSize)
             
             AllPointPairs = ImageGridTransformView._build_tile_point_pairs(self.Transform, z, tile_fixed_bounding_rect, ForwardTransform=ForwardTransform)
             (vertarray, texarray, verts) = ImageGridTransformView._render_data_for_transform_point_pairs(AllPointPairs, tile_fixed_bounding_rect, z) 
@@ -648,7 +628,7 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
         if tex_color is None:
             tex_color = (1.0, 1.0, 1.0, 1.0)
             
-        WarpedImageDataGrid = self.WarpedImageDataGrid( (ImageViewModel.NumRows, ImageViewModel.NumCols) )
+        WarpedImageDataGrid = self.WarpedImageDataGrid((ImageViewModel.NumRows, ImageViewModel.NumCols))
   
         for ix in range(0, ImageViewModel.NumCols):
             column = ImageViewModel.ImageArray[ix]
@@ -657,7 +637,7 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
                 x = ImageViewModel.TextureSize[1] * ix
                 y = ImageViewModel.TextureSize[0] * iy 
 
-                tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y,x), ImageViewModel.TextureSize)
+                tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), ImageViewModel.TextureSize)
 
                 vertarray = None
                 texarray = None
@@ -666,11 +646,11 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
 
                 if WarpedImageDataGrid[ix][iy] is None:
 
-                    #warped_bounding_rect = ImageGridTransformView._tile_bounding_rect(self.Transform, tile_fixed_bounding_rect, ForwardTransform)
-                    #if not nornir_imageregistration.spatial.Rectangle.contains(BoundingBox, warped_bounding_rect):
+                    # warped_bounding_rect = ImageGridTransformView._tile_bounding_rect(self.Transform, tile_fixed_bounding_rect, ForwardTransform)
+                    # if not nornir_imageregistration.spatial.Rectangle.contains(BoundingBox, warped_bounding_rect):
                     #    continue
 
-                    GridPoints = ImageGridTransformView._tile_grid_points(tile_fixed_bounding_rect,  grid_size = (8.0, 8.0))
+                    GridPoints = ImageGridTransformView._tile_grid_points(tile_fixed_bounding_rect, grid_size=(8.0, 8.0))
                     GridPointPairs = ImageGridTransformView._find_corresponding_points(self.Transform, GridPoints, ForwardTransform=ForwardTransform)
                     TransformPoints = self.Transform.GetPointsInWarpedRect(tile_fixed_bounding_rect)
                     if TransformPoints is None:
@@ -718,7 +698,6 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
 #                 pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 #                 gl.glDisable(gl.GL_BLEND)
 
-
     def CreateLabelVertexNumberBatch(self, verts):
         LabelBatch = pyglet.graphics.Batch()
 
@@ -728,12 +707,11 @@ class ImageGridTransformView(ImageTransformViewBase,PointTextures):
 
         return LabelBatch
 
-
     def draw_textures(self, ShowWarped=True, BoundingBox=None, z=None, glFunc=None):
         if self.ImageViewModel is None:
             return
 
         if ShowWarped:
-            self.DrawWarpedImage(self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z )
+            self.DrawWarpedImage(self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z)
         else:
             self.DrawFixedImage(self.ImageViewModel, color=None, BoundingBox=BoundingBox, z=z)

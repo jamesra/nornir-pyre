@@ -22,8 +22,10 @@ def _get_ITV_transform(ITV):
     '''Return the transform for an ImageTransformView'''
     return ITV.Transform
 
+
 def _get_transforms(ImageTransformViewList):
     return map(_get_ITV_transform, ImageTransformViewList)
+
 
 class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
     '''
@@ -45,7 +47,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
     @Command.setter
     def Command(self, value):
         self._command = value
-    
 
     def __init__(self, parent, window_id=-1, imageTransformViewList=None, **kwargs):
         '''
@@ -71,7 +72,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.ImageTransformViewList = currentMosaicConfig.ImageTransformViewList
         self.center_camera()
         
-        
     def _bind_mouse_events(self):
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
         self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
@@ -82,7 +82,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def AddStatusBar(self):
         self.statusBar = pyre.ui.camerastatusbar.CameraStatusBar(self, self.camera)
         self.sizer.Add(self.statusBar, flag=wx.BOTTOM | wx.EXPAND) 
-        
     
     def center_camera(self):
         '''Center the camera at whatever interesting thing this class displays
@@ -90,10 +89,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         
         transforms = _get_transforms(self.ImageTransformViewList)
         bbox = utils.FixedBoundingBox(transforms)
-        bbox_rect =  nornir_imageregistration.spatial.Rectangle.CreateFromBounds(bbox)
+        bbox_rect = nornir_imageregistration.spatial.Rectangle.CreateFromBounds(bbox)
         self.camera.lookat(bbox_rect.Center)
         self.camera.scale = bbox_rect.Width 
-         
     
     def draw_objects(self):
           
@@ -115,21 +113,19 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
             
         if not self.Command is None:
             self.Command.draw()
-            
          
     def on_mouse_press(self, e):
         (y, x) = self.GetCorrectedMousePosition(e)
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y,x)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
 
         if ImageX is None or ImageY is None:
             return
         
         if e.LeftIsDown():
-            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.canvas, self.on_rectange_command_completed, self.camera, (ImageY, ImageX), )
+            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.canvas, self.on_rectange_command_completed, self.camera, (ImageY, ImageX),)
             
         if e.MiddleIsDown():
             self.center_camera()
-        
             
     def on_mouse_drag(self, e):
 
@@ -145,9 +141,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         dx = x - self.LastMousePosition[nornir_imageregistration.iPoint.X]
         dy = (y - self.LastMousePosition[nornir_imageregistration.iPoint.Y])
 
-        self.LastMousePosition = (y,x)
+        self.LastMousePosition = (y, x)
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y,x)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
         if ImageX is None:
             return
 

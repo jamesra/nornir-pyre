@@ -573,7 +573,7 @@ class TextDrop (wx.TextDropTarget):
         return wx.TextDropTarget.OnDragOver(self, *args, **kwargs)
 
     def OnDropText(self, x, y, data):
-        print str(data)
+        print(str(data))
 
 class FileDrop (wx.FileDropTarget):
     def __init__(self, window):

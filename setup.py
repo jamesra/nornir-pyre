@@ -9,7 +9,6 @@ import sys
 from ez_setup import use_setuptools
 from setuptools import setup, find_packages
 
-
 if __name__ == '__main__':
     use_setuptools()
 
@@ -20,8 +19,7 @@ if __name__ == '__main__':
     # data_files.append(("Microsoft.VC90.CRT", ['msvcp90.dll']))
     # data_files.append(("", glob(r'*.png')))
     
-    
-    #OK to use pools v1.3.1, no changes made for v1.3.2
+    # OK to use pools v1.3.1, no changes made for v1.3.2
 
     required_packages = ["numpy>=1.8",
                          "scipy>=0.13.2",
@@ -36,8 +34,6 @@ if __name__ == '__main__':
     dependency_links = ["git+http://github.com/jamesra/nornir-pools#egg=nornir_pools-1.3.1",
                         "git+http://github.com/jamesra/nornir-shared#egg=nornir_shared-1.3.2",
                         "git+http://github.com/jamesra/nornir-imageregistration#egg=nornir_imageregistration-1.3.2"]
-
-
 
     includes = []
     packages = find_packages()

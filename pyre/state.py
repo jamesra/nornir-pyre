@@ -17,11 +17,10 @@ import wx
 from pyre import Windows
 from pyre.viewmodels import ImageViewModel, TransformController
 from pyre.views import ImageGridTransformView
-
-
  
 currentStosConfig = None
 currentMosaicConfig = None
+
 
 def InitializeStateFromArguments(arg_values):
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
@@ -55,7 +54,6 @@ class StateEvents(object):
 
     def AddOnImageViewModelChangeEventListener(self, func):
         self._OnImageChangeEventListeners.append(func)
-
 
     def FireOnImageChanged(self, FixedImage):
         for func in self._OnImageChangeEventListeners:
@@ -114,13 +112,11 @@ class MosaicState(StateEvents):
             
         return None
     
-    
     def __init__(self):
         self._TransformControllerList = []
         self._ImageViewModelList = []
         self._ImageTransformViewList = []
         self._OnMosaicChangedEventListeners = []
-    
     
     def AllocateMosaicTile(self, transform, image_path, scalar):
         ivm = ImageViewModel(image_path)
@@ -133,7 +129,6 @@ class MosaicState(StateEvents):
         image_transform_view = ImageGridTransformView(ivm, transform)
                 
         return image_transform_view
-        
     
     def LoadMosaic(self, mosaicFullPath, tiles_dir=None):
         '''Return a list of image transform views for the mosaic file'''
@@ -167,10 +162,10 @@ class MosaicState(StateEvents):
             task.z = z
             tasks.append(task) 
                     
-            #image_transform_view = self.AllocateMosaicTile(transform, tile_full_path, transform_scale)
-            #image_transform_view.z = z
+            # image_transform_view = self.AllocateMosaicTile(transform, tile_full_path, transform_scale)
+            # image_transform_view.z = z
             z += z_step
-            #ImageTransformViewList.append(image_transform_view)
+            # ImageTransformViewList.append(image_transform_view)
             
         wx.Yield()
         
@@ -181,11 +176,10 @@ class MosaicState(StateEvents):
             
             output = '%g' % (z * 100.0)
             
-            sys.stdout.write('\b'*output_len)
+            sys.stdout.write('\b' * output_len)
             sys.stdout.write(output)
             
             output_len = len(output)
-
             
         self.ImageTransformViewList = ImageTransformViewList
         return ImageTransformViewList
@@ -258,7 +252,6 @@ class StosState(StateEvents):
     @property
     def Transform(self):
         return self.TransformController.TransformModel
-    
 
     @property
     def TransformController(self):
@@ -305,11 +298,9 @@ class StosState(StateEvents):
     def AddOnImageViewModelChangeEventListener(self, func):
         self._OnImageChangeEventListeners.append(func)
 
-
     def FireOnImageChanged(self, FixedImage):
         for func in self._OnImageChangeEventListeners:
             func(FixedImage)
-
 
     def LoadTransform(self, StosData):
         ''':return: A Transform'''
@@ -327,14 +318,11 @@ class StosState(StateEvents):
         if not stostransform is None:
             self.TransformController.SetPoints(stostransform.points)
 
-
     def LoadFixedImage(self, ImageFileFullPath):
         self.LoadImage(ImageFileFullPath, FixedImage=True)
 
-
     def LoadWarpedImage(self, ImageFileFullPath):
         self.LoadImage(ImageFileFullPath, FixedImage=False)
-
 
     def LoadImage(self, imageFullPath, FixedImage=True):
 
@@ -347,7 +335,6 @@ class StosState(StateEvents):
             self.FixedImageViewModel = ivm
         else:
             self.WarpedImageViewModel = ivm
-
 
     def LoadStos(self, stosFullPath):
 

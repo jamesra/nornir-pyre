@@ -4,8 +4,6 @@ Created on Oct 26, 2012
 @author: u0490822
 '''
 
-
-
 import PIL
 import numpy
 from  pyglet import *
@@ -18,14 +16,12 @@ class TileExportWindow(window.Window):
     classdocs
     '''
 
-
     def __init__(self, **kwargs):
         '''
         Constructor
         '''
 
         super(TileExportWindow, self).__init__(visible=False, **kwargs);
-
 
     def FetchTile(self, View, LookAt, ShowWarped, Filename, Tilesize=None, Scale=None):
 
@@ -48,7 +44,6 @@ class TileExportWindow(window.Window):
         self.camera.focus(self.width, self.height);
 
         View.draw_textures(BoundingBox=boundingBox, ShowWarped=ShowWarped)
-
 
         imageBuffer = image.get_buffer_manager().get_color_buffer().get_image_data();
 

@@ -10,6 +10,7 @@ import wx
 
 pyglet.options['shadow_window'] = False
 
+
 class GLPanel(wx.Panel):
 
     '''A simple class for using OpenGL with wxPython.'''
@@ -17,8 +18,8 @@ class GLPanel(wx.Panel):
     pygletcontext = None
     wxcontext = None
 
-    def __init__(self, parent, window_id, pos = wx.DefaultPosition,
-                 size = wx.DefaultSize, style = 0):
+    def __init__(self, parent, window_id, pos=wx.DefaultPosition,
+                 size=wx.DefaultSize, style=0):
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
         # call super function
@@ -33,10 +34,10 @@ class GLPanel(wx.Panel):
         # Create context
         if GLPanel.wxcontext is None:
             GLPanel.pygletcontext = gl.Context(gl.current_context)
-            self.canvas = glcanvas.GLCanvas(self, attribList = attribList)
+            self.canvas = glcanvas.GLCanvas(self, attribList=attribList)
             GLPanel.wxcontext = self.canvas.GetContext()
         else:
-            self.canvas = glcanvas.GLCanvasWithContext(self, shared = GLPanel.wxcontext, attribList = attribList)
+            self.canvas = glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
 
         # Create the canvas
 
@@ -100,7 +101,6 @@ class GLPanel(wx.Panel):
         # call the super method
         super(GLPanel, self).Destroy()
 
-
     #==========================================================================
     # GLFrame OpenGL Event Handlers
     #==========================================================================
@@ -130,8 +130,8 @@ class GLPanel(wx.Panel):
         gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glShadeModel(gl.GL_SMOOTH)
         gl.glClearColor(0, 0, 0, 1)
-        #Rotated images can have a z-distance of more than one
-        gl.glDepthRangef(0,2)
+        # Rotated images can have a z-distance of more than one
+        gl.glDepthRangef(0, 2)
 
     def OnReshape(self, width, height):
         '''Reshape the OpenGL viewport based on the dimensions of the window.'''
@@ -187,7 +187,7 @@ class GLPanel(wx.Panel):
 
 class TestGlPanel(GLPanel):
 
-    def __init__(self, parent, window_id = wx.ID_ANY, pos = (10, 10)):
+    def __init__(self, parent, window_id=wx.ID_ANY, pos=(10, 10)):
         super(TestGlPanel, self).__init__(parent, window_id, wx.DefaultPosition, wx.DefaultSize, 0)
         self.spritepos = pos
 
@@ -195,10 +195,10 @@ class TestGlPanel(GLPanel):
         '''create opengl objects when opengl is initialized'''
         FOO_IMAGE = pyglet.image.load('foo.png')
         self.batch = pyglet.graphics.Batch()
-        self.sprite = pyglet.sprite.Sprite(FOO_IMAGE, batch = self.batch)
+        self.sprite = pyglet.sprite.Sprite(FOO_IMAGE, batch=self.batch)
         self.sprite.x = self.spritepos[0]
         self.sprite.y = self.spritepos[1]
-        self.sprite2 = pyglet.sprite.Sprite(FOO_IMAGE, batch = self.batch)
+        self.sprite2 = pyglet.sprite.Sprite(FOO_IMAGE, batch=self.batch)
         self.sprite2.x = self.spritepos[0] + 100
         self.sprite2.y = self.spritepos[1] + 200
 
@@ -210,11 +210,12 @@ class TestGlPanel(GLPanel):
         '''called in the middle of ondraw after the buffer has been cleared'''
         self.batch.draw()
 
+
 class TestFrame(wx.Frame):
     '''A simple class for using OpenGL with wxPython.'''
 
-    def __init__(self, parent, ID, title, pos = wx.DefaultPosition,
-            size = wx.DefaultSize, style = wx.DEFAULT_FRAME_STYLE):
+    def __init__(self, parent, ID, title, pos=wx.DefaultPosition,
+            size=wx.DefaultSize, style=wx.DEFAULT_FRAME_STYLE):
         super(TestFrame, self).__init__(parent, ID, title, pos, size, style)
 
         self.mainsizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -222,18 +223,17 @@ class TestFrame(wx.Frame):
         self.mainsizer.Add(self.GLPanel1, 1, wx.EXPAND)
         self.GLPanel2 = TestGlPanel(self, wx.ID_ANY, (20, 20))
         self.mainsizer.Add(self.GLPanel2, 1, wx.EXPAND)
+
 	print "init process"
         self.SetSizer(self.mainsizer)
         # self.mainsizer.Fit(self)
         self.Layout()
 
 
-
-
 if __name__ == '__main__':
-    app = wx.App(redirect = False)
+    app = wx.App(redirect=False)
     # frame = TestFrame(None, wx.ID_ANY, 'GL Window', size=(400,400))
-    frame = wx.Frame(None, -1, "GL Window", size = (400, 400))
+    frame = wx.Frame(None, -1, "GL Window", size=(400, 400))
     panel = TestGlPanel(frame)
     print "show"
     frame.Show(True)

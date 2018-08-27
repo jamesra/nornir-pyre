@@ -4,7 +4,6 @@ Created on Oct 19, 2012
 @author: u0490822
 '''
 
-
 import logging
 import os
 
@@ -18,10 +17,11 @@ from pyre.views import imagegridtransformview
 import pyre.views
 
 
-class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
+class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
     '''
     Combines and image and a transform to render an image
     '''
+
     @property
     def width(self):
         if self.FixedImageArray is None:
@@ -46,7 +46,6 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
             return None
         return self.FixedImageArray.height
 
-
     def __init__(self, FixedImageArray, WarpedImageArray, Transform):
         '''
         Constructor
@@ -66,17 +65,15 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
         
         self._tranformed_verts_cache = None
 
-
     def OnTransformChanged(self):
         
         super(CompositeTransformView, self).OnTransformChanged()
         
         self._tranformed_verts_cache = None 
-        
     
     def PopulateTransformedVertsCache(self):
-        #verts = self.Transform.WarpedPoints
-        #self._tranformed_verts_cache = self.Transform.Transform(verts)
+        # verts = self.Transform.WarpedPoints
+        # self._tranformed_verts_cache = self.Transform.Transform(verts)
         self._tranformed_verts_cache = self.Transform.FixedPoints
         return
 
@@ -91,7 +88,6 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
         
         if not self._tranformed_verts_cache is None:
             self._draw_points(self._tranformed_verts_cache, SelectedIndex, BoundingBox=BoundingBox, ScaleFactor=ScaleFactor)
-
 
     def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
         Triangles = numpy.array(T)
@@ -145,16 +141,15 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
 #                                                          ('v2f', vertarray))
 #         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
-
     def setup_composite_rendering(self):
         
-        #gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        #gl.glBlendColor(1.0,1.0,1.0,1.0)
+        # gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        # gl.glBlendColor(1.0,1.0,1.0,1.0)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
         return 
                 
     def clear_composite_rendering(self):
-        #gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
+        # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
         return 
 
     def draw_textures(self, BoundingBox=None, glFunc=None):

@@ -45,7 +45,6 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
         pass
 
-
     def AddStatusBar(self):
         self.statusBar = CameraStatusBar(self, self.camera)
         self.sizer.Add(self.statusBar, flag=wx.BOTTOM | wx.EXPAND)
@@ -89,7 +88,6 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         '''
 
         raise NotImplementedError("Abstract function center_camera not implemented")
-
 
     def draw_objects(self):
         raise NotImplementedError("draw object is not implemented")

@@ -83,11 +83,10 @@ class RectangleCommand(command_base.VolumeCommandBase):
         :return: Volume coordinates in numpy array (Y,X)
         '''
         (y, x) = self.GetCorrectedMousePosition(e)
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y,x) 
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x) 
         self.LastMousePosition = numpy.array((ImageY, ImageX))
         
         return numpy.array((ImageY, ImageX))
-         
         
     def on_mouse_drag(self, e):
         '''

@@ -20,7 +20,6 @@ import scipy.ndimage
 import nornir_imageregistration.core as core
 import nornir_shared.images as images
 
-
 Logger = logging.getLogger("ImageArray")
 
 
@@ -29,7 +28,7 @@ class ImageViewModel(object):
     Represents a numpy image as an array of textures.  Read-only.
     '''
     
-    #The largest dimension we allow a texture to have
+    # The largest dimension we allow a texture to have
     MaxTextureDimension = int(4096)
 
     @property
@@ -78,7 +77,6 @@ class ImageViewModel(object):
         '''Size of a texture'''
         return self._TextureSize
 
-
     @property
     def ImageFilename(self):
         '''Filename we loaded'''
@@ -95,7 +93,6 @@ class ImageViewModel(object):
             _TextureSize[1] = cls.MaxTextureDimension
             
         return _TextureSize
-        
 
     def __init__(self, ImageInput):
         '''
@@ -140,7 +137,6 @@ class ImageViewModel(object):
 
         self._ImageArray = None
 
-
     def ResizeToPowerOfTwo(self, InputImage, Tilesize=None):
 
         if Tilesize is None:
@@ -166,7 +162,6 @@ class ImageViewModel(object):
     def CreateArrayTile(self, ix, iy):
         '''Create a texture for the tile at given coordinates'''
         return
-
 
     def CreateImageArray(self):
         '''
@@ -231,6 +226,4 @@ class ImageViewModel(object):
             
         Logger.info("Completed CreateImageArray")
         return TextureGrid
-
-
 
