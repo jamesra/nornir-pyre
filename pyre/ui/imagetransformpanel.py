@@ -58,7 +58,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         else:
             assert(isinstance(value, ImageGridTransformView))
 
-        (self.width, self.height) = self.canvas.GetSizeTuple() 
+        (self.width, self.height) = self.canvas.GetSize() 
 
         self.center_camera()
 
@@ -79,11 +79,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         # self.schedule = clock.schedule_interval(func = self.update, interval = 1 / 2.)
         self.timer = wx.Timer(self)
-        self.canvas.Bind(wx.EVT_TIMER, self.on_timer, self.timer)
+        self.Bind(wx.EVT_TIMER, self.on_timer)
+        
+        (self.width, self.height) = self.canvas.GetSize()
 
-        (self.width, self.height) = self.canvas.GetSizeTuple()
-
-        wx.EVT_TIMER(self, -1, self.on_timer)
+        #wx.EVT_TIMER(self, -1, self.on_timer)
 
         self.ShowLines = False
 
@@ -426,8 +426,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
             elif e.RightDown():
                 self.TransformController.TryDeletePoint(ImageX, ImageY, self.SelectionMaxDistance, FixedSpace=self.FixedSpace)
-                if self.SelectedPointIndex > self.TransformController.NumPoints:
-                    self.SelectedPointIndex = self.Tra7nsformController.NumPoints - 1
+                if self.SelectedPointIndex is not None:
+                    if self.SelectedPointIndex > self.TransformController.NumPoints:
+                        self.SelectedPointIndex = self.Tra7nsformController.NumPoints - 1
 
                 history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
 
@@ -473,8 +474,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if(e.LeftIsDown()):
             if e.CmdDown():
-               # Translate all points
-               self.TransformController.TranslateFixed((ImageDY, ImageDX))
+                # Translate all points
+                self.TransformController.TranslateFixed((ImageDY, ImageDX))
             else:
                 # Create a point or drag a point
                 if(not self.SelectedPointIndex is None):

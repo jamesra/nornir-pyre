@@ -7,6 +7,7 @@ import pyglet
 
 from wx import glcanvas
 import wx
+import wx.glcanvas
 
 pyglet.options['shadow_window'] = False
 
@@ -15,15 +16,14 @@ class GLPanel(wx.Panel):
 
     '''A simple class for using OpenGL with wxPython.'''
 
-    pygletcontext = None
-    wxcontext = None
+    SharedGLContext = None
 
     def __init__(self, parent, window_id, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, style=0):
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
         # call super function
-        super(GLPanel, self).__init__(parent, window_id, pos, size, style)
+        super(GLPanel, self).__init__(parent=parent, id=window_id, pos=pos, size=size, style=style)
 
         # init gl canvas data
         self.GLinitialized = False
@@ -32,13 +32,18 @@ class GLPanel(wx.Panel):
                       glcanvas.WX_GL_DEPTH_SIZE, 32)  # 24 bit
 
         # Create context
-        if GLPanel.wxcontext is None:
-            GLPanel.pygletcontext = gl.Context(gl.current_context)
-            
-            self.canvas = glcanvas.GLCanvas(self, attribList=attribList)
-            GLPanel.wxcontext = self.canvas.GetContext()
-        else:
-            self.canvas = glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
+        self.canvas = wx.glcanvas.GLCanvas(self, attribList=attribList)
+
+        if GLPanel.SharedGLContext is None:
+            GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas)
+
+        self.canvas.SetCurrent(GLPanel.SharedGLContext)
+
+        #    GLPanel.pygletcontext = gl.Context(gl.current_context)
+
+            #GLPanel.wxcontext = self.canvas.GetContext()
+        #else:
+            #self.canvas = glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
 
         # Create the canvas
 
@@ -77,7 +82,7 @@ class GLPanel(wx.Panel):
         if self.canvas.GetContext():
             # Make sure the frame is shown before calling SetCurrent.
             self.Show()
-            self.canvas.SetCurrent()
+            self.canvas.SetCurrent(GLPanel.SharedGLContext)
             size = self.GetGLExtents()
             self.winsize = (size.width, size.height)
             self.width, self.height = size.width, size.height
@@ -87,7 +92,7 @@ class GLPanel(wx.Panel):
 
     def processPaintEvent(self, event):
         '''Process the drawing event.'''
-        self.canvas.SetCurrent()
+        self.canvas.SetCurrent(GLPanel.SharedGLContext)
 
         # This is a 'perfect' time to initialize OpenGL ... only if we need to
         if not self.GLinitialized:
@@ -112,10 +117,10 @@ class GLPanel(wx.Panel):
         if self.GLinitialized:
             return
 
-        GLPanel.pygletcontext = gl.Context(gl.current_context)
-        GLPanel.pygletcontext.canvas = self
-
-        GLPanel.pygletcontext.set_current()
+#         GLPanel.pygletcontext = gl.Context(gl.current_context)
+#         GLPanel.pygletcontext.canvas = self
+# 
+#         GLPanel.pygletcontext.set_current()
 
         # normal gl init
         self._InitGLState()
@@ -162,8 +167,7 @@ class GLPanel(wx.Panel):
         if not self.IsShown():
             return
 
-        self.canvas.SetCurrent()
-        GLPanel.pygletcontext.set_current()
+        self.canvas.SetCurrent(GLPanel.SharedGLContext)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         # draw objects
         self.draw_objects()

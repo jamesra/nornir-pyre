@@ -42,7 +42,7 @@ class PyreWindowBase(wx.Frame):
 
     def OnRight1WindowView(self, e):
 
-        count = wx.Display_GetCount()
+        count = wx.Display.GetCount()
 
         if count == 2:
             pyre.Windows['Fixed'].setPosition(position=1, desiredDisplays=1)
@@ -77,7 +77,7 @@ class PyreWindowBase(wx.Frame):
 
     def findDisplayOrder(self, position=None):
 
-        displays = (wx.Display(i) for i in range(wx.Display_GetCount()))
+        displays = (wx.Display(i) for i in range(wx.Display.GetCount()))
         sizes = [display.GetClientArea() for display in displays]
 
         orderedSizeList = []
@@ -126,38 +126,38 @@ class PyreWindowBase(wx.Frame):
             halfX = sizes[position][2] / 2
             halfY = sizes[position][3] / 2
             if self.Title == "Fixed Image" or self.Title == pyre.Windows['Fixed'].Title:
-                self.MoveXY(sizes[position][0], sizes[position][1])
-                self.SetSizeWH(halfX, halfY)
+                self.Move(sizes[position][0], sizes[position][1])
+                self.SetSize(halfX, halfY)
             elif self.Title == "Warped Image" or self.Title == pyre.Windows['Warped'].Title:
-                self.MoveXY(sizes[position][0] + halfX, sizes[position][1])
-                self.SetSizeWH(halfX, halfY)
+                self.Move(sizes[position][0] + halfX, sizes[position][1])
+                self.SetSize(halfX, halfY)
             else:
-                self.MoveXY(sizes[position][0], halfY)
-                self.SetSizeWH(sizes[position][2], halfY)
+                self.Move(sizes[position][0], halfY)
+                self.SetSize(sizes[position][2], halfY)
 
         elif desiredDisplays == 2 and count >= 2:
             halfX = sizes[position[1]][2] / 2
             halfY = sizes[position[1]][3] / 2
             if self.Title == "Fixed Image" or self.Title == pyre.Windows['Fixed'].Title:
-                self.MoveXY(sizes[position[1]][0], sizes[position[1]][1])
-                self.SetSizeWH(sizes[position[1]][2], halfY)
+                self.Move(sizes[position[1]][0], sizes[position[1]][1])
+                self.SetSize(sizes[position[1]][2], halfY)
             elif self.Title == "Warped Image" or self.Title == pyre.Windows['Warped'].Title:
-                self.MoveXY(sizes[position[1]][0], halfY + sizes[position[1]][1])
-                self.SetSizeWH(sizes[position[1]][2], halfY)
+                self.Move(sizes[position[1]][0], halfY + sizes[position[1]][1])
+                self.SetSize(sizes[position[1]][2], halfY)
             else:
-                self.MoveXY(sizes[position[0]][0], sizes[position[0]][1])
-                self.SetSizeWH(sizes[position[0]][2], sizes[position[0]][3])
+                self.Move(sizes[position[0]][0], sizes[position[0]][1])
+                self.SetSize(sizes[position[0]][2], sizes[position[0]][3])
 
         elif desiredDisplays >= 3 and count >= 3:
             if self.Title == "Fixed Image" or self.Title == pyre.Windows['Fixed'].Title:
-                self.MoveXY(sizes[position[0]][0], sizes[position[0]][1])
-                self.SetSizeWH(sizes[0][2], sizes[0][3])
+                self.Move(sizes[position[0]][0], sizes[position[0]][1])
+                self.SetSize(sizes[0][2], sizes[0][3])
             elif self.Title == "Warped Image" or self.Title == pyre.Windows['Warped'].Title:
-                self.MoveXY(sizes[position[2]][0], sizes[position[2]][1])
-                self.SetSizeWH(sizes[position[2]][2], sizes[position[2]][3])
+                self.Move(sizes[position[2]][0], sizes[position[2]][1])
+                self.SetSize(sizes[position[2]][2], sizes[position[2]][3])
             else:
-                self.MoveXY(sizes[position[1]][0], sizes[position[1]][1])
-                self.SetSizeWH(sizes[position[1]][2], sizes[position[1]][3])
+                self.Move(sizes[position[1]][0], sizes[position[1]][1])
+                self.SetSize(sizes[position[1]][2], sizes[position[1]][3])
         self.Update()
         
     def OnClose(self, e):
@@ -326,7 +326,7 @@ class StosWindow(PyreWindowBase):
         menu = wx.Menu()
         windowSubMenu = wx.Menu()
 
-        displayCount = wx.Display_GetCount()
+        displayCount = wx.Display.GetCount()
 
         if displayCount == 1:
             pass
@@ -340,7 +340,7 @@ class StosWindow(PyreWindowBase):
             self.Bind(wx.EVT_MENU, self.OnRight1WindowView, submenuWindow2)
             self.Bind(wx.EVT_MENU, self.On2WindowView, submenuWindow3)
 
-            menu.AppendMenu(wx.ID_ANY, "&Window Options", windowSubMenu)
+            menu.Append(wx.ID_ANY, "&Window Options", windowSubMenu)
 
         elif displayCount >= 3:
             submenuWindow1 = windowSubMenu.Append(wx.ID_ANY, "Left 1 Window View")
@@ -488,7 +488,7 @@ class StosWindow(PyreWindowBase):
 
 
     def OnOpenFixedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.OPEN)
+        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
@@ -501,7 +501,7 @@ class StosWindow(PyreWindowBase):
 
 
     def OnOpenWarpedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.OPEN)
+        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
@@ -515,7 +515,7 @@ class StosWindow(PyreWindowBase):
 
     def OnOpenStos(self, e):
         self.dirname = ''
-        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.stos", wx.OPEN)
+        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.stos", wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename = str(dlg.GetFilename())
             dirname = str(dlg.GetDirectory())
@@ -529,7 +529,7 @@ class StosWindow(PyreWindowBase):
     def OnSaveWarpedImage(self, e):
         # Set the path for the output directory.
         if not (pyre.state.currentStosConfig.FixedImageViewModel is None or pyre.state.currentStosConfig.WarpedImageViewModel is None):
-            dlg = wx.FileDialog(self, "Choose a Directory", StosWindow.imagedirname, "", "*.png", wx.SAVE)
+            dlg = wx.FileDialog(self, "Choose a Directory", StosWindow.imagedirname, "", "*.png", wx.FD_SAVE)
             if dlg.ShowModal() == wx.ID_OK:
                 StosWindow.imagedirname = dlg.GetDirectory()
                 self.filename = dlg.GetFilename()

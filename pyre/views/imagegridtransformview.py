@@ -79,13 +79,13 @@ class PointTextures(object):
     def LoadTextures(cls):
         if cls.__pointImage is None:
             cls.__pointImage = pyglet.image.load(os.path.join(pyre.resources.ResourcePath(), "Point.png"))
-            cls.__pointImage.anchor_x = cls.__pointImage.width / 2
-            cls.__pointImage.anchor_y = cls.__pointImage.height / 2
+            cls.__pointImage.anchor_x = cls.__pointImage.width // 2
+            cls.__pointImage.anchor_y = cls.__pointImage.height // 2
             
         if cls.__selectedPointImage is None:
             cls.__selectedPointImage = pyglet.image.load(os.path.join(pyre.resources.ResourcePath(), "SelectedPoint.png"));
-            cls.__selectedPointImage.anchor_x = cls.__selectedPointImage.width / 2
-            cls.__selectedPointImage.anchor_y = cls.__selectedPointImage.height / 2
+            cls.__selectedPointImage.anchor_x = cls.__selectedPointImage.width // 2
+            cls.__selectedPointImage.anchor_y = cls.__selectedPointImage.height // 2
  
         if cls.__pointGroup is None:
             cls.__pointGroup = pyglet.sprite.SpriteGroup(texture=cls.__pointImage.get_texture(), blend_src=pyglet.gl.GL_SRC_ALPHA, blend_dest=pyglet.gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -229,11 +229,11 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
             if not self.rendercache.PointCache is None:
                 PointCache = self.rendercache.PointCache
 
-        self.PointImage.anchor_x = self.PointImage.width / 2
-        self.PointImage.anchor_y = self.PointImage.height / 2
+        self.PointImage.anchor_x = self.PointImage.width // 2
+        self.PointImage.anchor_y = self.PointImage.height // 2
 
-        self.SelectedPointImage.anchor_x = self.PointImage.width / 2
-        self.SelectedPointImage.anchor_y = self.PointImage.height / 2
+        self.SelectedPointImage.anchor_x = self.PointImage.width // 2
+        self.SelectedPointImage.anchor_y = self.PointImage.height // 2
 
         scale = (PointBaseScale / float(self.PointImage.width)) * float(ScaleFactor)
 
@@ -421,7 +421,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         return WarpedImageDataGrid
     
     @classmethod
-    def _tile_grid_points(cls, tile_bounding_rect, grid_size=(8.0, 8.0)):
+    def _tile_grid_points(cls, tile_bounding_rect, grid_size=(8, 8)):
         '''
         :return: Fills the tile area with a (MxN) grid of points.  Maps the points through the transform.  Then adds the known transform points to the results
         '''
@@ -430,18 +430,26 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         h = int(tile_bounding_rect.Height)
         w = int(tile_bounding_rect.Width)
      
-        WarpedCorners = [[y, x],
+        WarpedCornersO = [[y, x],
                         [ y, x + w, ],
                         [y + h, x],
                         [ y + h, x + w]]
         
+        grid_size = (int(grid_size[0]), int(grid_size[1]))
+        WarpedCorners = numpy.zeros(((grid_size[0]+1) * (grid_size[1]+1), 2), dtype=numpy.float32)
+        
         xstep = int(w / grid_size[1])
-        ystep = int(h / grid_size[0]) 
-        for xtemp in range(0, w + 1, xstep):
-            for ytemp in range(0, h + 1, ystep):
-                WarpedCorners.append([ytemp + y, xtemp + x])
+        ystep = int(h / grid_size[0])
+        
+        for iX in range(0, grid_size[1]+1):
+            for iY in range(0, grid_size[0]+1):
+                WarpedCorners[(iX * (grid_size[0]+1)) + iY] = ( y + (iY * ystep), x + (iX * xstep))
+
+        #for xtemp in range(0, w + 1, xstep):
+            #for ytemp in range(0, h + 1, ystep):
+                #WarpedCorners.append([ytemp + y, xtemp + x])
                 
-        WarpedCorners = numpy.array(WarpedCorners, dtype=numpy.float32)
+        #WarpedCorners = numpy.array(WarpedCorners, dtype=numpy.float32)
         
         return WarpedCorners
     
@@ -460,8 +468,8 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                         [y + h, x],
                         [ y + h, x + w]]
         
-        xstep = int(w / grid_size[1])
-        ystep = int(h / grid_size[0]) 
+        xstep = w // grid_size[1]
+        ystep = h // grid_size[0] 
                         
         for ytemp in range(0, h + 1, ystep):
             WarpedCorners.append([ytemp + y, 0 + x])
@@ -571,7 +579,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         # texturePoints = (FixedPointsXY - numpy.array((x,y))) / numpy.array((w,h))
         
         texturePoints = cls._texture_coordinates(FixedPointsYX, fixed_bounding_rect=tile_bounding_rect)
-        print(str(texturePoints[0, :]))
+        #print(str(texturePoints[0, :]))
         tri = scipy.spatial.Delaunay(texturePoints)
         # numpy.array([[(u - x) / float(w), (v - y) / float(h)] for u, v in FixedPointsXY], dtype=numpy.float32)
 
@@ -645,21 +653,21 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                 tilecolor = None
 
                 if WarpedImageDataGrid[ix][iy] is None:
-
+    
                     # warped_bounding_rect = ImageGridTransformView._tile_bounding_rect(self.Transform, tile_fixed_bounding_rect, ForwardTransform)
                     # if not nornir_imageregistration.spatial.Rectangle.contains(BoundingBox, warped_bounding_rect):
                     #    continue
-
-                    GridPoints = ImageGridTransformView._tile_grid_points(tile_fixed_bounding_rect, grid_size=(8.0, 8.0))
+    
+                    GridPoints = ImageGridTransformView._tile_grid_points(tile_fixed_bounding_rect, grid_size=(8, 8))
                     GridPointPairs = ImageGridTransformView._find_corresponding_points(self.Transform, GridPoints, ForwardTransform=ForwardTransform)
                     TransformPoints = self.Transform.GetPointsInWarpedRect(tile_fixed_bounding_rect)
                     if TransformPoints is None:
                         AllPointPairs = GridPointPairs
                     else:
                         AllPointPairs = ImageGridTransformView._merge_point_pairs_with_transform(GridPointPairs, TransformPoints)
-
+    
                     vertarray, texarray, verts = ImageGridTransformView._render_data_for_transform_point_pairs(AllPointPairs, tile_fixed_bounding_rect, z=z)
-
+    
                     WarpedImageDataGrid[ix][iy] = (vertarray, texarray, verts)
                 else:
                     vertarray, texarray, verts = WarpedImageDataGrid[ix][iy]

@@ -60,7 +60,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         return self.camera.ImageCoordsForMouse(y, x)
     
     def on_resize(self, e):
-        (self.width, self.height) = self.canvas.GetSizeTuple()
+        (self.width, self.height) = self.canvas.GetSize()
         if not self.camera is None:
             # try:
             self.camera.focus(self.height, self.width)
@@ -69,7 +69,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
     def GetCorrectedMousePosition(self, e):
         '''wxPython inverts the mouse position, flip it back'''
-        (x, y) = e.GetPositionTuple()
+        (x, y) = e.GetPosition()
         return (self.height - y, x)
 
     def OnTransformChanged(self):

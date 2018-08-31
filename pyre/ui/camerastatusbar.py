@@ -42,8 +42,8 @@ class CameraStatusBar(wx.StatusBar):
         if not self.TransformController is None:
             transformed_point = self.TransformController.Transform(point)
 
-        self.SetFields(['%dx, %dy' % (point[nornir_imageregistration.iPoint.X], point[nornir_imageregistration.iPoint.Y]),
-                        '%dx, %dy' % (transformed_point[0][nornir_imageregistration.iPoint.X], transformed_point[0][nornir_imageregistration.iPoint.Y]),
-                                  '%4.2f%%' % ZoomValue])
-
+        self.SetStatusText('%dx, %dy' % (point[nornir_imageregistration.iPoint.X], point[nornir_imageregistration.iPoint.Y]), 0)
+        self.SetStatusText('%dx, %dy' % (transformed_point[0][nornir_imageregistration.iPoint.X], transformed_point[0][nornir_imageregistration.iPoint.Y]), 1)
+        self.SetStatusText('%4.2f%%' % ZoomValue, 1)
+        
         self.Refresh()

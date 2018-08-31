@@ -26,7 +26,7 @@ def LineIndiciesFromTri(T):
 
     Triangles = numpy.array(T)
     if Triangles.ndim == 1:
-        Triangles = Triangles.reshape(len(Triangles) / 3, 3)
+        Triangles = Triangles.reshape(len(Triangles) // 3, 3)
 
     for tri in Triangles:
         LineIndicies.append(tri[0])
@@ -50,7 +50,7 @@ def DrawTriangles(verts, Triangles):
 
     gl.glDisable(gl.GL_TEXTURE_2D)
     pyglet.gl.glColor4f(1.0, 0, 0, 1.0)
-    pyglet.graphics.draw_indexed(len(vertarray) / 3,
+    pyglet.graphics.draw_indexed(len(vertarray) // 3,
                                              gl.GL_LINES,
                                              LineIndicies,
                                              ('v3f', vertarray))
@@ -191,8 +191,8 @@ def GetOrCreateBuffer(size, format, array):
     attribute = vertexattribute.create_attribute(format)
     assert size == len(array) // attribute.count, 'Data for %s is incorrect length' % format
     
-    buffer = vertexbuffer.create_mappable_buffer(size * attribute.stride, vbo=False) 
-    attribute.set_region(buffer, 0, size, array)
+    buffer = vertexbuffer.create_mappable_buffer(int(size * attribute.stride), vbo=False) 
+    attribute.set_region(buffer, 0, int(size), array)
     attribute.enable()
     attribute.set_pointer(buffer.ptr) 
          
@@ -227,13 +227,15 @@ def draw_indexed_custom(size, mode, indices, *data):
     '''
     glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT)
     
+    size = int(size)
+    
     buffers = []
     for format, array in data:
         # #attribute = vertexattribute.create_attribute(format)
         attribute = GetOrCreateAttribute(format)
         assert size == len(array) // attribute.count, 'Data for %s is incorrect length' % format
         
-        buffer = vertexbuffer.create_mappable_buffer(size * attribute.stride, vbo=False) 
+        buffer = vertexbuffer.create_mappable_buffer(size * int(attribute.stride), vbo=False) 
         attribute.set_region(buffer, 0, size, array)
         attribute.enable()
         attribute.set_pointer(buffer.ptr)
