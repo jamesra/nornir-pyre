@@ -549,7 +549,7 @@ class StosWindow(PyreWindowBase):
     def OnSaveStos(self, e):
         if not (state.currentStosConfig.TransformController is None):
             self.dirname = ''
-            dlg = wx.FileDialog(self, "Choose a Directory", StosWindow.stosdirname, StosWindow.stosfilename, "*.stos", wx.SAVE)
+            dlg = wx.FileDialog(self, "Choose a Directory", StosWindow.stosdirname, StosWindow.stosfilename, "*.stos", wx.FD_SAVE)
             if dlg.ShowModal() == wx.ID_OK:
                 StosWindow.stosdirname = dlg.GetDirectory()
                 StosWindow.stosfilename = dlg.GetFilename()

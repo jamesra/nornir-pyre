@@ -148,7 +148,7 @@ class  TransformController(object):
         self.TransformModel = TransformModel
 
         if TransformModel is None:
-            self.TransformModel = _DefaultTransform()
+            self.TransformModel = CreateDefaultTransform()
 
         self.Debug = False;
         self.ShowWarped = False;

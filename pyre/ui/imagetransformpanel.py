@@ -103,6 +103,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self._bind_mouse_events()
         
+        self.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
         self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
         self.canvas.Bind(wx.EVT_SIZE, self.on_resize)
  
