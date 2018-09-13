@@ -103,7 +103,7 @@ def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, warpedpo
     FixedRectangle = nornir_imageregistration.Rectangle.SafeRound(FixedRectangle)
     FixedRectangle = nornir_imageregistration.Rectangle.change_area(FixedRectangle, alignmentArea)
     
-    # Pull image subregions
+    # Pull image subregions 
     warpedImageROI = assemble.WarpedImageToFixedSpace(transform,
                             fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
 
@@ -116,9 +116,60 @@ def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, warpedpo
     # task = pool.add_task("AttemptAlignPoint", core.FindOffset, fixedImageROI, warpedImageROI, MinOverlap = 0.2)
     # apoint = task.wait_return()
     # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
+    #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
  
-    apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False)
+    apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.5, SingleThread=True, Cluster=False, TestFlip=False)
 
     print("Auto-translate result: " + str(apoint))
     return apoint
 
+
+def FindIndiciesOutsideImage(points, image):
+    '''
+    :param ndarray points: A nx2 array of coordinates in the image
+    :param ndarray image: A nxm image
+    :return: An nx1 array of bits, where 1 indicates the point was outside the image boundaries
+    '''
+    dims = image.shape
+    outside = numpy.greater_equal(points, image.shape)
+    too_large = numpy.any(outside, axis=1)
+
+    outside_small = numpy.less(points, numpy.asarray([0, 0], dtype=numpy.int32))
+    too_small = numpy.any(outside_small, axis=1)
+    
+    return numpy.maximum(too_large, too_small)
+
+def ClearPointsOnMask(transform, FixedMaskImage, WarpedMaskImage):
+    '''Remove all transform points that are positioned in the mask image'''
+    
+#     if FixedMaskImage:
+#         FixedPoints = transform.TransformModel.FixedPoints
+#         FixedPointIndicies = numpy.asarray(numpy.round(FixedPoints), dtype=numpy.int32)
+#         FixedPointIndiciesOutsideImage = FixedPointIndicies < 0 
+#         FixedPointsInMask = FixedMaskImage[FixedPointIndicies]
+#         FixedPointsToRemove = FixedPointsInMask == 0
+#         transform.TryDeletePoint(FixedPointsToRemove)
+
+    if not WarpedMaskImage is None:
+        WarpedPoints = transform.TransformModel.WarpedPoints
+        NumPoints = WarpedPoints.shape[0]
+        WarpedPointIndicies = numpy.asarray(numpy.floor(WarpedPoints), dtype=numpy.int32)
+
+        OutOfBounds = FindIndiciesOutsideImage(WarpedPointIndicies, WarpedMaskImage)
+        
+        Indicies =  numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
+        
+        OutOfBoundsIndicies = Indicies[OutOfBounds]
+        
+        WarpedPointsAndIndex = numpy.hstack((WarpedPoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
+        
+        #transform.RemovePoints(OutOfBounds)
+        InBoundsPointsAndIndex = WarpedPointsAndIndex[OutOfBounds==0, :]
+        
+        WarpedPointsInMask = WarpedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
+        WarpedPointsToRemove = WarpedPointsInMask == 0
+        MaskedPointIndicies = InBoundsPointsAndIndex[WarpedPointsToRemove,2]
+        
+        AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies)) 
+        AllMaskedIndicies.sort()
+        transform.RemovePoints(AllMaskedIndicies)

@@ -106,29 +106,27 @@ class ImageViewModel(object):
         # self.ViewTransform = transform
 
         # self.RawImageSize = Utils.Images.GetImageSize(ImageInput)
-
-        Image = None
+ 
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
-        if isinstance(ImageInput, str) or isinstance(ImageInput, str):
+        if isinstance(ImageInput, str):
 
             Logger.info("Loading image: " + ImageInput)
             self._ImageFilename = ImageInput
 
             self._Image = scipy.ndimage.imread(ImageInput, flatten=True)
 
-           # self._Image = numpy.flipud(self._Image)
-            # self.RawImageSize = self._Image.shape[1], self._Image.shape[0]
-
-            Logger.info("Done")
+            Logger.info("Loading done")
+        elif isinstance(ImageInput, np.ndarray):
+            self._Image = ImageInput
         else:
-            Image = ImageInput
+            raise TypeError("Expected a path to an image file or a numpy ndarray")
 
         # Images are read only, create a memory mapped file for the image for use with multithreading
         # self._Image = core.npArrayToReadOnlySharedArray(self._Image)
 
         self.RawImageSize = self._Image.shape
-        
+
         self._TextureSize = ImageViewModel.FindTextureSize(self.RawImageSize)
         self._NumCols = int(math.ceil(self._Image.shape[1] / float(self.TextureSize[1])))
         self._NumRows = int(math.ceil(self._Image.shape[0] / float(self.TextureSize[0])))

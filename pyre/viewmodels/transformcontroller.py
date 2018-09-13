@@ -226,7 +226,11 @@ class  TransformController(object):
 
         self.TransformModel.RemovePoint(index);
         return True;
-
+    
+    def RemovePoints(self, indicies):
+        self.TransformModel.RemovePoint(indicies)
+        
+        
     def TryDrag(self, ImageX, ImageY, ImageDX, ImageDY, maxDistance, FixedSpace=True):
 
         NearestPoint = None;

@@ -126,7 +126,7 @@ class MosaicState(StateEvents):
         self._ImageViewModelList.append(ivm)
         self._TransformControllerList.append(tvm)
         
-        image_transform_view = ImageGridTransformView(ivm, transform)
+        image_transform_view = ImageGridTransformView(ivm, Transform=transform)
                 
         return image_transform_view
     
@@ -207,11 +207,25 @@ class StosState(StateEvents):
     
     @property
     def FixedImageFullPath(self):
-        return self.fixedImageViewModel.ImageFilename
+        return self.FixedImageViewModel.ImageFilename
 
     @property
     def WarpedImageFullPath(self):
-        return self.warpedImageViewModel.ImageFilename
+        return self.WarpedImageViewModel.ImageFilename
+
+    @property
+    def FixedImageMaskFullPath(self):
+        if self.FixedImageMaskViewModel is None:
+            return None
+
+        return self.FixedImageMaskViewModel.ImageFilename
+
+    @property
+    def WarpedImageMaskFullPath(self):
+        if self.WarpedImageMaskViewModel is None:
+            return None
+
+        return self.WarpedImageMaskViewModel.ImageFilename
 
     @property
     def FixedImageViewModel(self):
@@ -236,6 +250,30 @@ class StosState(StateEvents):
             assert(isinstance(val, ImageViewModel))
 
         self.FireOnImageChanged(False)
+        
+    @property
+    def FixedImageMaskViewModel(self):
+        return self._FixedImageMaskViewModel
+
+    @FixedImageMaskViewModel.setter
+    def FixedImageMaskViewModel(self, val):
+        self._FixedImageMaskViewModel = val
+        if not val is None:
+            assert(isinstance(val, ImageViewModel))
+
+        self.FireOnImageChanged(True)
+
+    @property
+    def WarpedImageMaskViewModel(self):
+        return self._WarpedImageMaskViewModel
+
+    @WarpedImageMaskViewModel.setter
+    def WarpedImageMaskViewModel(self, val):
+        self._WarpedImageMaskViewModel = val
+        if not val is None:
+            assert(isinstance(val, ImageViewModel))
+
+        self.FireOnImageChanged(False)
 
     @property
     def CompositeImageViewModel(self):
@@ -248,7 +286,7 @@ class StosState(StateEvents):
             assert(isinstance(val, ImageViewModel))
 
         self.FireOnImageChanged(False)
-        
+
     @property
     def Transform(self):
         return self.TransformController.TransformModel
@@ -283,7 +321,9 @@ class StosState(StateEvents):
         self._TransformViewModel = None
         self._WarpedImageViewModel = None
         self._FixedImageViewModel = None
-        self._CompositeImageViewModel = None
+        self._FixedImageMaskViewModel = None
+        self._WarpedImageMaskViewModel = None
+        self._CompositeImageViewModel = None 
 
         self._OnTransformControllerChangeEventListeners = []
         self._OnImageChangeEventListeners = []
@@ -319,22 +359,38 @@ class StosState(StateEvents):
             self.TransformController.SetPoints(stostransform.points)
 
     def LoadFixedImage(self, ImageFileFullPath):
-        self.LoadImage(ImageFileFullPath, FixedImage=True)
+        self.FixedImageViewModel = self.LoadImage(ImageFileFullPath)
 
     def LoadWarpedImage(self, ImageFileFullPath):
-        self.LoadImage(ImageFileFullPath, FixedImage=False)
+        self.WarpedImageViewModel = self.LoadImage(ImageFileFullPath)
 
-    def LoadImage(self, imageFullPath, FixedImage=True):
+    def LoadFixedMaskImage(self, ImageFileFullPath):
+        self.FixedImageMaskViewModel = self.LoadImage(ImageFileFullPath)
+
+    def LoadWarpedMaskImage(self, ImageFileFullPath):
+        self.WarpedImageMaskViewModel = self.LoadImage(ImageFileFullPath)
+
+    def LoadImage(self, imageFullPath):
 
         if not os.path.exists(imageFullPath):
             print("Image passed to load image does not exist: " + imageFullPath)
             return
 
-        ivm = ImageViewModel(imageFullPath)
-        if FixedImage:
-            self.FixedImageViewModel = ivm
+        return ImageViewModel(imageFullPath)
+    
+    def _try_locate_file(self, ImageFullPath, listAltDirs):
+        '''
+        '''
+        if os.path.exists(ImageFullPath):
+            return ImageFullPath
         else:
-            self.WarpedImageViewModel = ivm
+            filename = os.path.basename(ImageFullPath)
+            for dirname in listAltDirs:
+                nextPath = os.path.join(dirname, filename)
+                if os.path.exists(nextPath):
+                    return nextPath
+            
+        return None
 
     def LoadStos(self, stosFullPath):
 
@@ -348,26 +404,49 @@ class StosState(StateEvents):
 
         obj = StosFile.Load(os.path.join(dirname, filename))
         self.LoadTransform(stosFullPath)
+        
+        pool = nornir_pools.GetGlobalThreadPool()
+        ControlImageTask = None
+        WarpedImageTask = None
+        ControlImageMaskTask = None
+        WarpedImageMaskTask = None
 
-        if os.path.exists(obj.ControlImageFullPath):
-            self.LoadFixedImage(obj.ControlImageFullPath)
+        # First check the absolute path in the .stos file for images, then 
+        # check relative to the .stos file's directory
+        ControlImagePath = self._try_locate_file(obj.ControlImageFullPath, [dirname])
+        if ControlImagePath is not None:
+            ControlImageTask = pool.add_task('load fixed %s' % ControlImagePath, self.LoadImage, ControlImagePath)
         else:
-            nextPath = os.path.join(dirname, obj.ControlImageName)
-            if os.path.exists(nextPath):
-                self.LoadFixedImage(nextPath)
-            else:
-                print("Could not find fixed image: " + obj.ControlImageFullPath)
-                success = False
+            print("Could not find fixed image: " + obj.ControlImageFullPath)
+            success = False
 
-        if os.path.exists(obj.MappedImageFullPath):
-            self.LoadWarpedImage(obj.MappedImageFullPath)
+        WarpedImagePath = self._try_locate_file(obj.MappedImageFullPath, [dirname])
+        if WarpedImagePath is not None:
+            WarpedImageTask = pool.add_task('load warped %s' % WarpedImagePath, self.LoadImage, WarpedImagePath)
         else:
-            nextPath = os.path.join(dirname, obj.MappedImageName)
-            if os.path.exists(nextPath):
-                self.LoadWarpedImage(nextPath)
-            else:
-                print("Could not find fixed image: " + obj.MappedImageFullPath)
-                success = False
+            print("Could not find warped image: " + obj.MappedImageFullPath)
+            success = False
+
+        if obj.HasMasks and success:
+            ControlMaskImagePath = self._try_locate_file(obj.ControlMaskFullPath, [dirname])
+            if ControlMaskImagePath:
+                ControlImageMaskTask = pool.add_task('load fixed mask %s' % ControlMaskImagePath, self.LoadImage, ControlMaskImagePath)
+
+            WarpedMaskImagePath = self._try_locate_file(obj.MappedMaskFullPath, [dirname])
+            if WarpedMaskImagePath:
+                WarpedImageMaskTask = pool.add_task('load warped mask %s' % WarpedMaskImagePath, self.LoadImage, WarpedMaskImagePath)
+
+        if ControlImageTask is not None:
+            self.FixedImageViewModel = ControlImageTask.wait_return()
+
+        if WarpedImageTask is not None: 
+            self.WarpedImageViewModel = WarpedImageTask.wait_return()
+
+        if ControlImageMaskTask is not None:
+            self.FixedImageMaskViewModel = ControlImageMaskTask.wait_return()
+
+        if WarpedImageMaskTask is not None:
+            self.WarpedImageMaskViewModel = WarpedImageMaskTask.wait_return()
 
         return success
 

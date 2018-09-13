@@ -144,8 +144,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self.UpdateRawImageWindow()
         elif self.FixedSpace == FixedImage:
             self.UpdateRawImageWindow()
-            self.TopLevelParent.Label = self._LabelPreamble() + os.path.basename(self.ImageGridTransformView.ImageViewModel.ImageFilename)
-            
+            if self.ImageGridTransformView.ImageViewModel is not None:
+                self.TopLevelParent.Label = self._LabelPreamble() + os.path.basename(self.ImageGridTransformView.ImageViewModel.ImageFilename)
+
         # self.lookatfixedpoint((0,0), 1.0)
 
         self.center_camera()
@@ -158,9 +159,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                  state.currentStosConfig.WarpedImageViewModel,
                                                                  state.currentStosConfig.TransformController.TransformModel)
         elif not self.FixedSpace:
-            self.ImageGridTransformView = ImageGridTransformView(state.currentStosConfig.WarpedImageViewModel, state.currentStosConfig.TransformController.TransformModel)
+            self.ImageGridTransformView = ImageGridTransformView(state.currentStosConfig.WarpedImageViewModel, state.currentStosConfig.WarpedImageMaskViewModel, Transform=state.currentStosConfig.TransformController.TransformModel)
         else:
-            self.ImageGridTransformView = ImageGridTransformView(state.currentStosConfig.FixedImageViewModel, state.currentStosConfig.TransformController.TransformModel)
+            self.ImageGridTransformView = ImageGridTransformView(state.currentStosConfig.FixedImageViewModel, state.currentStosConfig.FixedImageMaskViewModel, Transform=state.currentStosConfig.TransformController.TransformModel)
 
     def NextGLFunction(self):
         if self.glFunc == gl.GL_FUNC_ADD:

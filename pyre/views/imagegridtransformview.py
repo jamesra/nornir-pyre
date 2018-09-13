@@ -135,7 +135,11 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
     @property
     def ImageViewModel(self):
-        return self._ImageViewModel;
+        return self._ImageViewModel
+    
+    @property
+    def ImageMaskViewModel(self):
+        return self._ImageMaskViewModel;
 
     @property
     def Transform(self):
@@ -162,7 +166,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
     def z(self, value):
         self._z = value 
 
-    def __init__(self, ImageViewModel, Transform=None):
+    def __init__(self, ImageViewModel, ImageMaskViewModel = None, Transform=None):
         '''
         Constructor
         :param imageviewmodel ImageViewModel: Textures for image
@@ -172,10 +176,11 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         self.rendercache = RenderCache()
         self._ImageViewModel = ImageViewModel
+        self._ImageMaskViewModel = ImageMaskViewModel
         self.Transform = Transform
         self._z = 0.5
         self._buffers = None
-        
+
         self.Debug = False
 
     def OnTransformChanged(self):
@@ -194,6 +199,44 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         if not SavedPointCache is None:
             self.rendercache.PointCache = SavedPointCache
+            
+    @classmethod
+    def get_sprite_position(cls, sprites):
+        if sprites is None:
+            return None
+        
+        return numpy.asarray(list(map(lambda s: numpy.asarray((s.y, s.x)), sprites)))
+            
+    @property
+    def sprite_position(self):
+        if not hasattr(self.PointCache, 'Sprites'):
+            return None
+        
+        return ImageGridTransformView.get_sprite_position(self.PointCache.sprites)
+
+    @classmethod 
+    def _batch_update_sprite_position(cls, sprites, points, scales):
+        
+        iChanged = ImageGridTransformView.get_sprite_position(sprites) != points
+        iChanged = numpy.max(iChanged, 1)
+        
+        ChangedSprites = [s for i, s in enumerate(sprites) if iChanged[i]]
+        ChangedPoints = points[iChanged]
+        
+        for i,s in enumerate(ChangedSprites):
+            s.set_position(ChangedPoints[nornir_imageregistration.iPoint.X], point[nornir_imageregistration.iPoint.Y])
+
+        iChangedScale = list(map(lambda s: s.scale, sprites)) != scales
+        ChangedSprites = [s for i, s in enumerate(sprites) if iChanged[i]]
+        
+        if isinstance(scales, numpy.ndarray) or isinstance(scales, list):
+            ChangedScales = scales[iChangedScale]
+        else:  
+            ChangedScales = scales
+           
+        for i,s in enumerate(ChangedSprites):
+            s.scale = ChangedScales[i]
+        
     
     @classmethod
     def _update_sprite_position(cls, sprite, point, scale):
@@ -229,11 +272,11 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
             if not self.rendercache.PointCache is None:
                 PointCache = self.rendercache.PointCache
 
-        self.PointImage.anchor_x = self.PointImage.width // 2
-        self.PointImage.anchor_y = self.PointImage.height // 2
-
-        self.SelectedPointImage.anchor_x = self.PointImage.width // 2
-        self.SelectedPointImage.anchor_y = self.PointImage.height // 2
+#         self.PointImage.anchor_x = self.PointImage.width // 2
+#         self.PointImage.anchor_y = self.PointImage.height // 2
+# 
+#         self.SelectedPointImage.anchor_x = self.PointImage.width // 2
+#         self.SelectedPointImage.anchor_y = self.PointImage.height // 2
 
         scale = (PointBaseScale / float(self.PointImage.width)) * float(ScaleFactor)
 
@@ -253,10 +296,12 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                 sprites = PointCache.Sprites
                 PointBatch = PointCache.PointBatch
         
-                for i in range(0, len(verts)):
-                    ImageGridTransformView._update_sprite_position(sprites[i], verts[i], scale)
+                ImageGridTransformView._batch_update_sprite_position(sprites, verts, scale)
+                
+                for i,s in enumerate(sprites):
+                    #ImageGridTransformView._update_sprite_position(sprites[i], verts[i], scale)
                     is_selected = i == SelectedIndex
-                    self._update_sprite_flash(sprites[i], is_selected, time_for_selected_to_flash) 
+                    self._update_sprite_flash(s, is_selected, time_for_selected_to_flash) 
                 
                 gl.glDisable(gl.GL_DEPTH_TEST)
                 PointBatch.draw()

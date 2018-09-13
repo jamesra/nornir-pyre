@@ -391,9 +391,13 @@ class StosWindow(PyreWindowBase):
 
         menuInstructions = menu.Append(wx.ID_ABOUT, "&Keyboard Instructions")
         self.Bind(wx.EVT_MENU, self.OnInstructions, menuInstructions)
+        
+        menuClearMasked = menu.Append(wx.ID_ANY, "&Clear All Masked Points")
+        self.Bind(wx.EVT_MENU, self.OnClearMaskedPoints, menuClearMasked)
 
         menuClear = menu.Append(wx.ID_ANY, "&Clear All Points")
         self.Bind(wx.EVT_MENU, self.OnClearAllPoints, menuClear)
+        
 
         return menu
 
@@ -411,6 +415,12 @@ class StosWindow(PyreWindowBase):
 
         menuOpenWarpedImage = filemenu.Append(wx.ID_ANY, "&Open Warped Image")
         self.Bind(wx.EVT_MENU, self.OnOpenWarpedImage, menuOpenWarpedImage)
+        
+        menuOpenFixedImageMask = filemenu.Append(wx.ID_ANY, "&Open Fixed Image Mask")
+        self.Bind(wx.EVT_MENU, self.OnOpenFixedImageMask, menuOpenFixedImageMask)
+
+        menuOpenWarpedImageMask = filemenu.Append(wx.ID_ANY, "&Open Warped Image Mask")
+        self.Bind(wx.EVT_MENU, self.OnOpenWarpedImageMask, menuOpenWarpedImageMask)
 
         filemenu.AppendSeparator()
 
@@ -444,7 +454,7 @@ class StosWindow(PyreWindowBase):
                 imageViewModel = state.currentStosConfig.WarpedImageViewModel
 
             imageTransformView = pyre.views.ImageGridTransformView(imageViewModel,
-                                                    state.currentStosConfig.Transform)
+                                                    Transform=state.currentStosConfig.Transform)
  
         self.imagepanel.ImageGridTransformView = imageTransformView
 
@@ -476,11 +486,19 @@ class StosWindow(PyreWindowBase):
         dlg = wx.MessageDialog(self, readme, "Keyboard Instructions", wx.OK)
         dlg.ShowModal()
         dlg.Destroy()
-        
+
 
     def OnClearAllPoints(self, e):
         state.currentStosConfig.TransformController.SetPoints( pyre.viewmodels.transformcontroller.CreateDefaultTransform(state.currentStosConfig.FixedImageViewModel.RawImageSize,
                                                                                            state.currentStosConfig.WarpedImageViewModel.RawImageSize).points)
+
+
+    def OnClearMaskedPoints(self, e):
+        if state.currentStosConfig.FixedImageMaskViewModel:
+            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, state.currentStosConfig.FixedImageMaskViewModel.Image, None)
+
+        if state.currentStosConfig.WarpedImageMaskViewModel:
+            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, None, state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
 
     def OnRotateTranslate(self, e):
@@ -488,7 +506,7 @@ class StosWindow(PyreWindowBase):
 
 
     def OnOpenFixedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
+        dlg = wx.FileDialog(self, "Choose a fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
@@ -501,12 +519,35 @@ class StosWindow(PyreWindowBase):
 
 
     def OnOpenWarpedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose a file", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
+        dlg = wx.FileDialog(self, "Choose an image to warp", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
 
             state.currentStosConfig.LoadWarpedImage(os.path.join(StosWindow.imagedirname, filename))
+
+        dlg.Destroy()
+        
+    def OnOpenFixedImageMask(self, e):
+        dlg = wx.FileDialog(self, "Choose a mask for the fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            filename = str(dlg.GetFilename())
+            StosWindow.imagedirname = str(dlg.GetDirectory())
+
+            state.currentStosConfig.FixedImageMaskViewModel = state.currentStosConfig.LoadImage(os.path.join(StosWindow.imagedirname, filename))
+
+        dlg.Destroy()
+        # if Config.FixedImageFullPath is not None and Config.WarpedImageFullPath is not None:
+        #    pyre.IrTweakInit(Config.FixedImageFullPath, Config.WarpedImageFullPath)
+
+
+    def OnOpenWarpedImageMask(self, e):
+        dlg = wx.FileDialog(self, "Choose a mask for the warped image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            filename = str(dlg.GetFilename())
+            StosWindow.imagedirname = str(dlg.GetDirectory())
+
+            state.currentStosConfig.WarpedImageMaskViewModel = state.currentStosConfig.LoadImage(os.path.join(StosWindow.imagedirname, filename))
 
         dlg.Destroy()
 
@@ -555,9 +596,11 @@ class StosWindow(PyreWindowBase):
                 StosWindow.stosfilename = dlg.GetFilename()
                 saveFileFullPath = os.path.join(StosWindow.stosdirname, StosWindow.stosfilename)
 
-                stosObj = StosFile.Create(state.currentStosConfig.FixedImageViewModel.ImageFilename,
-                                          state.currentStosConfig.WarpedImageViewModel.ImageFilename,
-                                          state.currentStosConfig.Transform)
+                stosObj = StosFile.Create(state.currentStosConfig.FixedImageFullPath,
+                                          state.currentStosConfig.WarpedImageFullPath,
+                                          state.currentStosConfig.Transform,
+                                          state.currentStosConfig.FixedImageMaskFullPath,
+                                          state.currentStosConfig.WarpedImageMaskFullPath)
                 stosObj.Save(saveFileFullPath)
             dlg.Destroy()
 
