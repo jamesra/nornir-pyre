@@ -94,7 +94,7 @@ def RotateTranslateWarpedImage(LimitImageSize=False):
         history.SaveState(state.currentStosConfig.TransformController.SetPoints, state.currentStosConfig.TransformController.points)
 
 
-def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, warpedpoint, alignmentArea, anglesToSearch):
+def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, alignmentArea, anglesToSearch):
     '''Try to use the Composite view to render the two tiles we need for alignment'''
     FixedRectangle = nornir_imageregistration.Rectangle.CreateFromPointAndArea(point=[controlpoint[0] - (alignmentArea[0] / 2.0),
                                                                                    controlpoint[1] - (alignmentArea[1] / 2.0)],
@@ -107,7 +107,7 @@ def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, warpedpo
     warpedImageROI = assemble.WarpedImageToFixedSpace(transform,
                             fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
 
-    fixedImageROI = nornir_imageregistration.core.CropImage(fixedImage.copy(), FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
+    fixedImageROI = nornir_imageregistration.core.CropImage(fixedImage, FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
 
     # nornir_imageregistration.core.ShowGrayscale([fixedImageROI, warpedImageROI])
 
@@ -118,7 +118,7 @@ def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, warpedpo
     # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
     #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
  
-    apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.5, SingleThread=True, Cluster=False, TestFlip=False)
+    apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False, TestFlip=False)
 
     print("Auto-translate result: " + str(apoint))
     return apoint
@@ -141,35 +141,52 @@ def FindIndiciesOutsideImage(points, image):
 
 def ClearPointsOnMask(transform, FixedMaskImage, WarpedMaskImage):
     '''Remove all transform points that are positioned in the mask image'''
-    
-#     if FixedMaskImage:
-#         FixedPoints = transform.TransformModel.FixedPoints
-#         FixedPointIndicies = numpy.asarray(numpy.round(FixedPoints), dtype=numpy.int32)
-#         FixedPointIndiciesOutsideImage = FixedPointIndicies < 0 
-#         FixedPointsInMask = FixedMaskImage[FixedPointIndicies]
-#         FixedPointsToRemove = FixedPointsInMask == 0
-#         transform.TryDeletePoint(FixedPointsToRemove)
+
+    if not FixedMaskImage is None:
+        WarpedPoints = transform.TransformModel.SourcePoints
+        NumPoints = WarpedPoints.shape[0]
+        WarpedPointIndicies = numpy.asarray(numpy.floor(WarpedPoints), dtype=numpy.int32)
+
+        OutOfBounds = FindIndiciesOutsideImage(WarpedPointIndicies, FixedMaskImage)
+
+        Indicies =  numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
+
+        OutOfBoundsIndicies = Indicies[OutOfBounds]
+
+        WarpedPointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
+
+        #transform.RemovePoints(OutOfBounds)
+        InBoundsPointsAndIndex = WarpedPointsAndIndex[OutOfBounds==0, :]
+
+        WarpedPointsInMask = FixedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
+        WarpedPointsToRemove = WarpedPointsInMask == 0
+        MaskedPointIndicies = InBoundsPointsAndIndex[WarpedPointsToRemove,2]
+
+        AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies)) 
+        AllMaskedIndicies.sort()
+        transform.RemovePoints(AllMaskedIndicies)
+
 
     if not WarpedMaskImage is None:
-        WarpedPoints = transform.TransformModel.WarpedPoints
+        WarpedPoints = transform.TransformModel.SourcePoints
         NumPoints = WarpedPoints.shape[0]
         WarpedPointIndicies = numpy.asarray(numpy.floor(WarpedPoints), dtype=numpy.int32)
 
         OutOfBounds = FindIndiciesOutsideImage(WarpedPointIndicies, WarpedMaskImage)
-        
+
         Indicies =  numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
-        
+
         OutOfBoundsIndicies = Indicies[OutOfBounds]
-        
-        WarpedPointsAndIndex = numpy.hstack((WarpedPoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
-        
+
+        WarpedPointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
+
         #transform.RemovePoints(OutOfBounds)
         InBoundsPointsAndIndex = WarpedPointsAndIndex[OutOfBounds==0, :]
-        
+
         WarpedPointsInMask = WarpedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
         WarpedPointsToRemove = WarpedPointsInMask == 0
         MaskedPointIndicies = InBoundsPointsAndIndex[WarpedPointsToRemove,2]
-        
+
         AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies)) 
         AllMaskedIndicies.sort()
         transform.RemovePoints(AllMaskedIndicies)

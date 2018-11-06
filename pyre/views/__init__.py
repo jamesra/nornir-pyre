@@ -56,26 +56,26 @@ def DrawTriangles(verts, Triangles):
                                              ('v3f', vertarray))
     pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
-    
+
 def VertsForRectangle(rect):
-    
+
     verts = numpy.vstack((rect.BottomLeft,
                           rect.TopLeft,
                           rect.TopRight,
                           rect.BottomRight))
-    
+
     verts = numpy.fliplr(verts)
-    
+
     Points = numpy.hstack((verts, numpy.ones((4, 1))))
-    
+
     print("rect: %s" % (str(rect)))
-    
+
     FlatPoints = Points.ravel().tolist()
     vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
-    
+
     return vertarray
-    
-    
+
+
 def DrawRectangle(rect, color):
     '''Draw a rectangle'''
     

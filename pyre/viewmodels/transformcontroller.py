@@ -67,12 +67,12 @@ class  TransformController(object):
         return copy.deepcopy(self.TransformModel.points)
 
     @property
-    def WarpedPoints(self):
-        return copy.deepcopy(self.TransformModel.WarpedPoints)
+    def SourcePoints(self):
+        return copy.deepcopy(self.TransformModel.SourcePoints)
 
     @property
-    def FixedPoints(self):
-        return copy.deepcopy(self.TransformModel.FixedPoints)
+    def TargetPoints(self):
+        return copy.deepcopy(self.TransformModel.TargetPoints)
 
     @property
     def WarpedTriangles(self):
@@ -166,10 +166,10 @@ class  TransformController(object):
             self.ShowWarped = False;
 
     def GetFixedPoint(self, index):
-        return self.TransformModel.FixedPoints[index];
+        return self.TransformModel.TargetPoints[index];
 
     def GetWarpedPoint(self, index):
-        return self.TransformModel.WarpedPoints[index];
+        return self.TransformModel.SourcePoints[index];
 
     def GetWarpedPointsInRect(self, bounds):
         return self.TransformModel.GetWarpedPointsInRect(bounds)
@@ -249,13 +249,13 @@ class  TransformController(object):
 
     def GetNearestPoint(self, index, FixedSpace=False):
         NearestPoint = None
-        if index > len(self.TransformModel.WarpedPoints):
+        if index > len(self.TransformModel.SourcePoints):
             return None
         
         if(not FixedSpace  and not self.ShowWarped):
-            NearestPoint = copy.copy(self.TransformModel.WarpedPoints[index])
+            NearestPoint = copy.copy(self.TransformModel.SourcePoints[index])
         else:
-            NearestPoint = copy.copy(self.TransformModel.FixedPoints[index])
+            NearestPoint = copy.copy(self.TransformModel.TargetPoints[index])
 
         return NearestPoint
 
@@ -294,7 +294,7 @@ class  TransformController(object):
 
                 TranslatedPoint = NewWarpedPoint - OldWarpedPoint 
 
-                FinalPoint = self.TransformModel.WarpedPoints[index] + TranslatedPoint 
+                FinalPoint = self.TransformModel.SourcePoints[index] + TranslatedPoint 
                 index = self.TransformModel.UpdateWarpedPoint(index, FinalPoint);
         else:
             index = self.TransformModel.UpdateFixedPoint(index, NearestPoint);
@@ -329,7 +329,6 @@ class  TransformController(object):
                                                 currentStosConfig.FixedImageViewModel.Image,
                                                 currentStosConfig.WarpedImageViewModel.Image,
                                                 fixed,
-                                                warped,
                                                 alignmentArea=currentStosConfig.AlignmentTileSize,
                                                 anglesToSearch=currentStosConfig.AnglesToSearch)
                 indextotask[i_point] = task       
@@ -357,7 +356,6 @@ class  TransformController(object):
                                     currentStosConfig.FixedImageViewModel.Image,
                                     currentStosConfig.WarpedImageViewModel.Image,
                                     fixed,
-                                    warped,
                                     alignmentArea=currentStosConfig.AlignmentTileSize,
                                     anglesToSearch=currentStosConfig.AnglesToSearch)
             

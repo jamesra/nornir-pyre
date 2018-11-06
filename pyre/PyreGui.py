@@ -494,10 +494,13 @@ class StosWindow(PyreWindowBase):
 
 
     def OnClearMaskedPoints(self, e):
-        if state.currentStosConfig.FixedImageMaskViewModel:
+        if not (state.currentStosConfig.FixedImageMaskViewModel is None or state.currentStosConfig.WarpedImageMaskViewModel is None):
+            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, state.currentStosConfig.FixedImageMaskViewModel.Image,  state.currentStosConfig.WarpedImageMaskViewModel.Image)
+            
+        elif not state.currentStosConfig.FixedImageMaskViewModel is None:
             pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, state.currentStosConfig.FixedImageMaskViewModel.Image, None)
 
-        if state.currentStosConfig.WarpedImageMaskViewModel:
+        elif not state.currentStosConfig.WarpedImageMaskViewModel is None:
             pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, None, state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
 

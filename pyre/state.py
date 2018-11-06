@@ -384,7 +384,13 @@ class StosState(StateEvents):
         if os.path.exists(ImageFullPath):
             return ImageFullPath
         else:
-            filename = os.path.basename(ImageFullPath)
+            
+            filename = ImageFullPath
+             
+            #Do not use the base filename if the ImagePath is relative
+            if os.path.isabs(ImageFullPath):
+                filename = os.path.basename(ImageFullPath)
+                        
             for dirname in listAltDirs:
                 nextPath = os.path.join(dirname, filename)
                 if os.path.exists(nextPath):
