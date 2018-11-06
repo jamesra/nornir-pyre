@@ -21,15 +21,20 @@ if __name__ == '__main__':
     
     # OK to use pools v1.3.1, no changes made for v1.3.2
 
-    required_packages = ["numpy>=1.8",
-                         "scipy>=0.13.2",
+    required_packages = ["numpy>=1.15.0",
+                         "scipy>=1.1.0",
                          "matplotlib",
-                         "pyglet",
-                         "nornir_pools>=1.3.1",
-                         "nornir_shared>=1.3.2",
-                         "nornir_imageregistration>=1.3.2",
+                         "pyglet>=1.3.2",
+                         "nornir_pools>=1.3.3",
+                         "nornir_shared>=1.3.5",
+                         "nornir_imageregistration>=1.3.5",
                          "PyOpenGL>=3.0",
-                         "pillow>=2.3"]
+                         "pillow>=2.3",
+                         "wxPython>=4.0"]
+    
+    extras_require={
+        'PyOpenGL':  ["PyOpenGL-accelerate"]
+        }
 
     dependency_links = ["git+http://github.com/jamesra/nornir-pools#egg=nornir_pools-1.3.1",
                         "git+http://github.com/jamesra/nornir-shared#egg=nornir_shared-1.3.2",
@@ -48,7 +53,7 @@ if __name__ == '__main__':
 
     # setup(data_files=data_files, console=['Pyre.py'])
     setup(name="pyre",
-          version="1.3.2",
+          version="1.3.3",
           entry_points=entry_points,
           data_files=data_files,
           description='Python Image Registration Tool',
@@ -57,4 +62,5 @@ if __name__ == '__main__':
           install_requires=required_packages,
           dependency_links=dependency_links,
           packages=packages,
+          extras_require=extras_require,
           package_data={'pyre' : ['resources/*.png', 'README.txt']})
