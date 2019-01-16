@@ -40,6 +40,8 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         self._camera = pyre.ui.camera.Camera((0, 0), 1)
 
         super(ImageTransformPanelBase, self).__init__(parent, window_id, **kwargs)
+        
+        (self.width, self.height) = self.canvas.GetSize()
 
         self.AddStatusBar()
 

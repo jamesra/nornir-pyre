@@ -13,8 +13,7 @@ import nornir_imageregistration.transforms.factory as factory
 import nornir_pools
 import numpy
 import wx
-
-from pyre import Windows
+ 
 from pyre.viewmodels import ImageViewModel, TransformController
 from pyre.views import ImageGridTransformView
  

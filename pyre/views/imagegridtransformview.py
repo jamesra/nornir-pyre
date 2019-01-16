@@ -249,7 +249,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
     def _update_sprite_flash(self, sprite, is_selected, time_for_selected_to_flash=False):
         
         if not is_selected:
-            if sprite.image.id != self.PointImage.image_data.image_data.texture.id: 
+            if sprite.image.id != self.PointImage._current_texture.id: 
 #                if sprite.image != self.PointImage:
                 sprite.image = self.PointImage
                 return
@@ -266,6 +266,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         
         current_time = time.time()
         time_for_selected_to_flash = current_time % 1 > 0.5
+        #print('%g = %d' % (current_time % 1, time_for_selected_to_flash))
 
         PointCache = RenderCache()
         if hasattr(self.rendercache, 'PointCache'):
@@ -325,7 +326,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                     continue  
 
                 if SelectedIndex is not None:
-                    if(i == SelectedIndex and  time.time() % 1 > .5):
+                    if(i == SelectedIndex and time_for_selected_to_flash):
                         Image = self.SelectedPointImage
 
                 s = pyglet.sprite.Sprite(Image, x=point[1], y=point[0], group=self.PointGroup, batch=PointBatch)

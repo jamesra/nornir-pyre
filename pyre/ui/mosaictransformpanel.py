@@ -8,7 +8,7 @@ import operator
 
 import nornir_imageregistration
 import nornir_imageregistration.spatial
-from pyre.state import currentMosaicConfig
+import pyre.state as state
 import wx  
 
 from . import imagetransformpanelbase
@@ -54,11 +54,12 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         '''
         if imageTransformViewList is None:
             imageTransformViewList = [] 
-         
-        currentMosaicConfig.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
-        self._imageTransformViewList = imageTransformViewList
         
         super(MosaicTransformPanel, self).__init__(parent, window_id, **kwargs)
+         
+        state.currentMosaicConfig.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
+        self._imageTransformViewList = imageTransformViewList
+        
         
         self.LastMousePosition = None
         
@@ -69,7 +70,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.Command = None
         
     def OnMosaicChanged(self):
-        self.ImageTransformViewList = currentMosaicConfig.ImageTransformViewList
+        self.ImageTransformViewList = state.currentMosaicConfig.ImageTransformViewList
         self.center_camera()
         
     def _bind_mouse_events(self):

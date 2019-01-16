@@ -58,7 +58,7 @@ ____
 '''
 
 from pyre.commandhistory import history
-from pyre import resources
+from pyre import resources, state
 
 Windows = {}
 

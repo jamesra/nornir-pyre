@@ -8,15 +8,13 @@ import logging
 import os
 import sys
 
-import nornir_imageregistration
-from nornir_imageregistration.transforms import *
+import nornir_imageregistration 
 import nornir_shared.misc
 import numpy 
 from scipy.misc import imsave
 from scipy.ndimage import imread
 
-from . import state
-from pyre import history, Windows
+import pyre
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
 
@@ -25,8 +23,8 @@ def SaveRegisteredWarpedImage(fileFullPath, transform, warpedImage):
 
     # registeredImage = assemble.WarpedImageToFixedSpace(transform, Config.FixedImageArray.Image.shape, Config.WarpedImageArray.Image)
     registeredImage = AssembleHugeRegisteredWarpedImage(transform,
-                                                        state.currentStosConfig.FixedImageViewModel.Image.shape,
-                                                        state.currentStosConfig.WarpedImageViewModel.Image)
+                                                        pyre.state.currentStosConfig.FixedImageViewModel.Image.shape,
+                                                        pyre.state.currentStosConfig.WarpedImageViewModel.Image)
 
     imsave(fileFullPath, registeredImage)
 
@@ -60,7 +58,7 @@ def SyncWindows(LookAt, scale):
 
     warpedLookAt = LookAt
     if(Windows['Warped'].IsShown()):
-        warpedLookAt = state.currentStosConfig._TransformViewModel.InverseTransform([LookAt])
+        warpedLookAt = pyre.state.currentStosConfig._TransformViewModel.InverseTransform([LookAt])
         warpedLookAt = warpedLookAt[0]
 
 
@@ -74,24 +72,50 @@ def SyncWindows(LookAt, scale):
 
 
 def RotateTranslateWarpedImage(LimitImageSize=False):
-    from .state import currentStosConfig
 
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
 
-    if not (currentStosConfig.FixedImageViewModel is None or currentStosConfig.WarpedImageViewModel is None):
-        alignRecord = stos.SliceToSliceBruteForce(state.currentStosConfig.FixedImageViewModel.Image,
-                                                                 state.currentStosConfig.WarpedImageViewModel.Image,
-                                                                  LargestDimension=largestdimension,
-                                                                  Cluster=False)
+    if not (pyre.state.currentStosConfig.FixedImageViewModel is None or
+            pyre.state.currentStosConfig.WarpedImageViewModel is None):
+        alignRecord = stos.SliceToSliceBruteForce(pyre.state.currentStosConfig.FixedImageViewModel.Image,
+                                                                 pyre.state.currentStosConfig.WarpedImageViewModel.Image,
+                                                                 LargestDimension=largestdimension,
+                                                                 Cluster=False)
         # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
         print("Alignment found: " + str(alignRecord))
-        transform = alignRecord.ToTransform(state.currentStosConfig.FixedImageViewModel.RawImageSize,
-                                             state.currentStosConfig.WarpedImageViewModel.RawImageSize)
-        state.currentStosConfig.TransformController.SetPoints(transform.points)
+        transform = alignRecord.ToTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
+                                             pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
+        pyre.state.currentStosConfig.TransformController.SetPoints(transform.points)
 
-        history.SaveState(state.currentStosConfig.TransformController.SetPoints, state.currentStosConfig.TransformController.points)
+        pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.SetPoints, pyre.state.currentStosConfig.TransformController.points)
+
+
+def GridRefineTransform():
+
+    if not (pyre.state.currentStosConfig.FixedImageViewModel is None or
+            pyre.state.currentStosConfig.WarpedImageViewModel is None):
+        
+        updatedTransform = nornir_imageregistration.RefineTransform(
+                                            pyre.state.currentStosConfig.TransformController.TransformModel,
+                                            target_image=pyre.state.currentStosConfig.FixedImageViewModel.Image,
+                                            source_image=pyre.state.currentStosConfig.WarpedImageViewModel.Image,
+                                            target_mask=pyre.state.currentStosConfig.FixedImageMaskViewModel.Image,
+                                            source_mask=pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image,
+                                            num_iterations=None,
+                                            cell_size=None,
+                                            grid_spacing=None,
+                                            angles_to_search=None,
+                                            min_travel_for_finalization=None,
+                                            min_alignment_overlap=None,
+                                            SaveImages=False,
+                                            SavePlots=False,
+                                            outputDir=None)
+                
+        pyre.state.currentStosConfig.TransformController.SetPoints(updatedTransform.points)
+        pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.SetPoints,
+                               pyre.state.currentStosConfig.TransformController.points)
 
 
 def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, alignmentArea, anglesToSearch):
@@ -122,7 +146,7 @@ def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, alignmen
 
     print("Auto-translate result: " + str(apoint))
     return apoint
-
+ 
 
 def FindIndiciesOutsideImage(points, image):
     '''
@@ -143,24 +167,24 @@ def ClearPointsOnMask(transform, FixedMaskImage, WarpedMaskImage):
     '''Remove all transform points that are positioned in the mask image'''
 
     if not FixedMaskImage is None:
-        WarpedPoints = transform.TransformModel.SourcePoints
-        NumPoints = WarpedPoints.shape[0]
-        WarpedPointIndicies = numpy.asarray(numpy.floor(WarpedPoints), dtype=numpy.int32)
+        SourcePoints = transform.TransformModel.SourcePoints
+        NumPoints = SourcePoints.shape[0]
+        SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
 
-        OutOfBounds = FindIndiciesOutsideImage(WarpedPointIndicies, FixedMaskImage)
+        OutOfBounds = FindIndiciesOutsideImage(SourcePointIndicies, FixedMaskImage)
 
         Indicies =  numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
 
         OutOfBoundsIndicies = Indicies[OutOfBounds]
 
-        WarpedPointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
+        SourcePointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
 
         #transform.RemovePoints(OutOfBounds)
-        InBoundsPointsAndIndex = WarpedPointsAndIndex[OutOfBounds==0, :]
+        InBoundsPointsAndIndex = SourcePointsAndIndex[OutOfBounds==0, :]
 
-        WarpedPointsInMask = FixedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
-        WarpedPointsToRemove = WarpedPointsInMask == 0
-        MaskedPointIndicies = InBoundsPointsAndIndex[WarpedPointsToRemove,2]
+        SourcePointsInMask = FixedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
+        SourcePointsToRemove = SourcePointsInMask == 0
+        MaskedPointIndicies = InBoundsPointsAndIndex[SourcePointsToRemove,2]
 
         AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies)) 
         AllMaskedIndicies.sort()
@@ -168,24 +192,24 @@ def ClearPointsOnMask(transform, FixedMaskImage, WarpedMaskImage):
 
 
     if not WarpedMaskImage is None:
-        WarpedPoints = transform.TransformModel.SourcePoints
-        NumPoints = WarpedPoints.shape[0]
-        WarpedPointIndicies = numpy.asarray(numpy.floor(WarpedPoints), dtype=numpy.int32)
+        SourcePoints = transform.TransformModel.SourcePoints
+        NumPoints = SourcePoints.shape[0]
+        SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
 
-        OutOfBounds = FindIndiciesOutsideImage(WarpedPointIndicies, WarpedMaskImage)
+        OutOfBounds = FindIndiciesOutsideImage(SourcePointIndicies, WarpedMaskImage)
 
         Indicies =  numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
 
         OutOfBoundsIndicies = Indicies[OutOfBounds]
 
-        WarpedPointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
+        SourcePointsAndIndex = numpy.hstack((SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints,1))).astype(numpy.int32)
 
         #transform.RemovePoints(OutOfBounds)
-        InBoundsPointsAndIndex = WarpedPointsAndIndex[OutOfBounds==0, :]
+        InBoundsPointsAndIndex = SourcePointsAndIndex[OutOfBounds==0, :]
 
-        WarpedPointsInMask = WarpedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
-        WarpedPointsToRemove = WarpedPointsInMask == 0
-        MaskedPointIndicies = InBoundsPointsAndIndex[WarpedPointsToRemove,2]
+        SourcePointsInMask = WarpedMaskImage[InBoundsPointsAndIndex[:,0], InBoundsPointsAndIndex[:,1]]
+        SourcePointsToRemove = SourcePointsInMask == 0
+        MaskedPointIndicies = InBoundsPointsAndIndex[SourcePointsToRemove,2]
 
         AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies)) 
         AllMaskedIndicies.sort()

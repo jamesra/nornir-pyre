@@ -11,7 +11,7 @@ import sys
 
 import nornir_shared.misc
 
-from .PyreGui import StosWindow
+from .PyreGui import StosWindow, MosaicWindow
 from pyre import Windows
 from pyre.state import InitializeStateFromArguments
 from . import resources
@@ -98,7 +98,7 @@ def Run():
  
     StartProfilerCheck()
 
-    nornir_shared.misc.SetupLogging(os.curdir, Level=logging.WARNING)
+    nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir,"PyreLogs"), Level=logging.WARNING)
 
     readmetxt = resources.README()
     print(readmetxt) 

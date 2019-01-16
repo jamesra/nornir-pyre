@@ -386,6 +386,9 @@ class StosWindow(PyreWindowBase):
 
         menuRotationTranslation = menu.Append(wx.ID_ANY, "&Rotate translate estimate")
         self.Bind(wx.EVT_MENU, self.OnRotateTranslate, menuRotationTranslation)
+        
+        menuGridRefine = menu.Append(wx.ID_ANY, "&Convert to refined grid")
+        self.Bind(wx.EVT_MENU, self.OnRefineGrid, menuGridRefine)
 
         menu.AppendSeparator()
 
@@ -506,7 +509,9 @@ class StosWindow(PyreWindowBase):
 
     def OnRotateTranslate(self, e):
         pyre.common.RotateTranslateWarpedImage()
-
+        
+    def OnRefineGrid(self, e):
+        pyre.common.GridRefineTransform()
 
     def OnOpenFixedImage(self, e):
         dlg = wx.FileDialog(self, "Choose a fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)

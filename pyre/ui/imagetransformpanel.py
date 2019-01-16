@@ -66,7 +66,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         '''
         Constructor
         '''
-        self._camera = Camera((0.5, 0.5), 1) 
         self._ImageTransformView = None
         self.SelectionMaxDistance = 1 
 

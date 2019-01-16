@@ -79,7 +79,7 @@ class GLPanel(wx.Panel):
 
     def processSizeEvent(self, event):
         '''Process the resize event.'''
-        if self.canvas.GetContext():
+        if self.canvas is not None:
             # Make sure the frame is shown before calling SetCurrent.
             self.Show()
             self.canvas.SetCurrent(GLPanel.SharedGLContext)
