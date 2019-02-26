@@ -14,6 +14,7 @@ import nornir_pools
 import numpy
 import wx
  
+import pyre
 from pyre.viewmodels import ImageViewModel, TransformController
 from pyre.views import ImageGridTransformView
  
@@ -190,19 +191,21 @@ class StosState(StateEvents):
     ExportTileSize = [1024, 1024]
 
     AlignmentTileSize = [128, 128]
-    AnglesToSearch = numpy.linspace(-7.5, 7.5, 11)
+    AngleSearchStepSize = 3
+    AngleSearchMax = 15
+    AnglesToSearch = numpy.arange(start=-AngleSearchMax, stop=AngleSearchMax + AngleSearchStepSize, step=AngleSearchStepSize) #numpy.linspace(-7.5, 7.5, 11)
     
     @property
     def FixedWindow(self):
-        return Windows["Fixed"]
+        return pyre.Windows["Fixed"]
     
     @property
     def WarpedWindow(self):
-        return Windows["Warped"]
+        return pyre.Windows["Warped"]
     
     @property
     def CompositeWindow(self):
-        return Windows["Composite"]
+        return pyre.Windows["Composite"]
     
     @property
     def FixedImageFullPath(self):
