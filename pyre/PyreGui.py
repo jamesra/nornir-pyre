@@ -637,11 +637,10 @@ class FileDrop (wx.FileDropTarget):
         return wx.FileDropTarget.OnDragOver(self, *args, **kwargs)
 
     def OnDropFiles(self, x, y, filenames):
-        for name in filenames:
-            try:
-                fullpath = name.encode('ascii')
-                dirname, filename = os.path.split(name)
-                root, extension = os.path.splitext(name)
+        for fullpath in filenames:
+            try: 
+                dirname, filename = os.path.split(fullpath)
+                root, extension = os.path.splitext(fullpath)
 
                 if extension == ".stos":
                     StosWindow.stosdirname = dirname
@@ -662,6 +661,8 @@ class FileDrop (wx.FileDropTarget):
             except IOError as error:
                 dlg = wx.MessageDialog(None, "Error opening file\n" + str(error))
                 dlg.ShowModal()
+                
+        return True
 
 
 if __name__ == '__main__':
