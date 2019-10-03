@@ -40,16 +40,16 @@ def SyncWindows(LookAt, scale):
 #    Config.CompositeWin.camera.x = LookAt[0]
 #    Config.CompositeWin.camera.y = LookAt[1]
 #    Config.CompositeWin.camera.scale = scale
-    Windows['Composite'].imagepanel.camera.x = LookAt[0]
-    Windows['Composite'].imagepanel.camera.y = LookAt[1]
-    Windows['Composite'].imagepanel.camera.scale = scale
+    pyre.Windows['Composite'].imagepanel.camera.x = LookAt[0]
+    pyre.Windows['Composite'].imagepanel.camera.y = LookAt[1]
+    pyre.Windows['Composite'].imagepanel.camera.scale = scale
 
 #    Config.FixedWindow.camera.x = LookAt[0]
 #    Config.FixedWindow.camera.y = LookAt[1]
 #    Config.FixedWindow.camera.scale = scale
-    Windows['Fixed'].imagepanel.camera.x = LookAt[0]
-    Windows['Fixed'].imagepanel.camera.y = LookAt[1]
-    Windows['Fixed'].imagepanel.camera.scale = scale
+    pyre.Windows['Fixed'].imagepanel.camera.x = LookAt[0]
+    pyre.Windows['Fixed'].imagepanel.camera.y = LookAt[1]
+    pyre.Windows['Fixed'].imagepanel.camera.scale = scale
 
 #    warpedLookAt = LookAt
 #    if(not Config.WarpedWindow.ShowWarped):
@@ -57,7 +57,7 @@ def SyncWindows(LookAt, scale):
 #        warpedLookAt = warpedLookAt[0]
 
     warpedLookAt = LookAt
-    if(Windows['Warped'].IsShown()):
+    if(pyre.Windows['Warped'].IsShown()):
         warpedLookAt = pyre.state.currentStosConfig._TransformViewModel.InverseTransform([LookAt])
         warpedLookAt = warpedLookAt[0]
 
@@ -66,9 +66,9 @@ def SyncWindows(LookAt, scale):
 #    Config.WarpedWindow.camera.x = warpedLookAt[0]
 #    Config.WarpedWindow.camera.y = warpedLookAt[1]
 #    Config.WarpedWindow.camera.scale = scale
-    Windows['Warped'].imagepanel.camera.x = LookAt[0]
-    Windows['Warped'].imagepanel.camera.y = LookAt[1]
-    Windows['Warped'].imagepanel.camera.scale = scale
+    pyre.Windows['Warped'].imagepanel.camera.x = LookAt[0]
+    pyre.Windows['Warped'].imagepanel.camera.y = LookAt[1]
+    pyre.Windows['Warped'].imagepanel.camera.scale = scale
 
 
 def RotateTranslateWarpedImage(LimitImageSize=False):
@@ -120,32 +120,42 @@ def GridRefineTransform():
 
 def AttemptAlignPoint(transform, fixedImage, warpedImage, controlpoint, alignmentArea, anglesToSearch):
     '''Try to use the Composite view to render the two tiles we need for alignment'''
-    FixedRectangle = nornir_imageregistration.Rectangle.CreateFromPointAndArea(point=[controlpoint[0] - (alignmentArea[0] / 2.0),
-                                                                                   controlpoint[1] - (alignmentArea[1] / 2.0)],
-                                                                             area=alignmentArea)
-
-    FixedRectangle = nornir_imageregistration.Rectangle.SafeRound(FixedRectangle)
-    FixedRectangle = nornir_imageregistration.Rectangle.change_area(FixedRectangle, alignmentArea)
-    
-    # Pull image subregions 
-    warpedImageROI = assemble.WarpedImageToFixedSpace(transform,
-                            fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
-
-    fixedImageROI = nornir_imageregistration.core.CropImage(fixedImage, FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
-
-    # nornir_imageregistration.core.ShowGrayscale([fixedImageROI, warpedImageROI])
-
-    # pool = Pools.GetGlobalMultithreadingPool()
-
-    # task = pool.add_task("AttemptAlignPoint", core.FindOffset, fixedImageROI, warpedImageROI, MinOverlap = 0.2)
-    # apoint = task.wait_return()
-    # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
-    #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
- 
-    apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False, TestFlip=False)
-
-    print("Auto-translate result: " + str(apoint))
-    return apoint
+    return nornir_imageregistration.local_distortion_correction.AttemptAlignPoint(transform=transform,
+                                                                                  fixedImage=fixedImage,
+                                                                                  warpedImage=warpedImage,
+                                                                                  controlpoint=controlpoint,
+                                                                                  alignmentArea=alignmentArea,
+                                                                                  anglesToSearch=anglesToSearch)
+#     
+#     FixedRectangle = nornir_imageregistration.Rectangle.CreateFromPointAndArea(point=[controlpoint[0] - (alignmentArea[0] / 2.0),
+#                                                                                    controlpoint[1] - (alignmentArea[1] / 2.0)],
+#                                                                              area=alignmentArea)
+# 
+#     FixedRectangle = nornir_imageregistration.Rectangle.SafeRound(FixedRectangle)
+#     FixedRectangle = nornir_imageregistration.Rectangle.change_area(FixedRectangle, alignmentArea)
+#     
+#     # Pull image subregions 
+#     rigid_transforms = nornir_imageregistration.local_distortion_correction.ApproximateRigidTransform(input_transform=transform,
+#                                                                                                       target_points=controlpoint)
+#     
+#     warpedImageROI = assemble.WarpedImageToFixedSpace(rigid_transforms[0],
+#                             fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
+# 
+#     fixedImageROI = nornir_imageregistration.CropImage(fixedImage, FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
+# 
+#     nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI])
+# 
+#     # pool = Pools.GetGlobalMultithreadingPool()
+# 
+#     # task = pool.add_task("AttemptAlignPoint", core.FindOffset, fixedImageROI, warpedImageROI, MinOverlap = 0.2)
+#     # apoint = task.wait_return()
+#     # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
+#     #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
+#  
+#     apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False, TestFlip=False)
+# 
+#     print("Auto-translate result: " + str(apoint))
+#     return apoint
  
 
 def FindIndiciesOutsideImage(points, image):
