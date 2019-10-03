@@ -40,10 +40,6 @@ if __name__ == '__main__':
         'PyOpenGL':  ["PyOpenGL-accelerate"]
         }
 
-    dependency_links = ["git+http://github.com/jamesra/nornir-pools#egg=nornir_pools-1.4.1",
-                        "git+http://github.com/jamesra/nornir-shared#egg=nornir_shared-1.4.1",
-                        "git+http://github.com/jamesra/nornir-imageregistration#egg=nornir_imageregistration-1.4.1"]
-
     includes = []
     packages = find_packages()
 
