@@ -25,9 +25,9 @@ if __name__ == '__main__':
                          "scipy>=1.1.0",
                          "matplotlib",
                          "pyglet>=1.3.2",
-                         "nornir_pools>=1.3.3",
-                         "nornir_shared>=1.3.5",
-                         "nornir_imageregistration>=1.3.5",
+                         "nornir_pools>=1.4.1",
+                         "nornir_shared>=1.4.1",
+                         "nornir_imageregistration>=1.4.1",
                          "PyOpenGL>=3.0",
                          "pillow>=2.3",
                          "wxPython>=4.0"]
@@ -36,9 +36,9 @@ if __name__ == '__main__':
         'PyOpenGL':  ["PyOpenGL-accelerate"]
         }
 
-    dependency_links = ["git+http://github.com/jamesra/nornir-pools#egg=nornir_pools-1.3.1",
-                        "git+http://github.com/jamesra/nornir-shared#egg=nornir_shared-1.3.2",
-                        "git+http://github.com/jamesra/nornir-imageregistration#egg=nornir_imageregistration-1.3.2"]
+    dependency_links = ["git+http://github.com/jamesra/nornir-pools#egg=nornir_pools-1.4.1",
+                        "git+http://github.com/jamesra/nornir-shared#egg=nornir_shared-1.4.1",
+                        "git+http://github.com/jamesra/nornir-imageregistration#egg=nornir_imageregistration-1.4.1"]
 
     includes = []
     packages = find_packages()
@@ -53,7 +53,7 @@ if __name__ == '__main__':
 
     # setup(data_files=data_files, console=['Pyre.py'])
     setup(name="pyre",
-          version="1.3.3",
+          version="1.4.1",
           entry_points=entry_points,
           data_files=data_files,
           description='Python Image Registration Tool',
