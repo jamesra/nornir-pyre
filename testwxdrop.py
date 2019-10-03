@@ -3,7 +3,6 @@ import sys
 
 import wx
 
-
 if not hasattr(sys, 'frozen'):
     import wxversion
     print "Wx version: " + str(wxversion.getInstalled())
@@ -11,8 +10,8 @@ if not hasattr(sys, 'frozen'):
 
 print "Python version: " + sys.version
 
-class TestWxDrop(wx.Frame):
 
+class TestWxDrop(wx.Frame):
 
     def __init__(self, parent):
         '''
@@ -26,6 +25,7 @@ class TestWxDrop(wx.Frame):
 
 
 class FileDrop (wx.FileDropTarget):
+
     def __init__(self, window):
 
         super(FileDrop, self).__init__()

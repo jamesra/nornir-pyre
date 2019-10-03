@@ -36,7 +36,9 @@ def CreateDefaultTransform(FixedShape=None, WarpedShape=None):
     return alignRecord.ToTransform(FixedShape,
                                         WarpedShape)
 
+
 debugid = 0
+
 
 class  TransformController(object):
     '''
@@ -65,12 +67,12 @@ class  TransformController(object):
         return copy.deepcopy(self.TransformModel.points)
 
     @property
-    def WarpedPoints(self):
-        return copy.deepcopy(self.TransformModel.WarpedPoints)
+    def SourcePoints(self):
+        return copy.deepcopy(self.TransformModel.SourcePoints)
 
     @property
-    def FixedPoints(self):
-        return copy.deepcopy(self.TransformModel.FixedPoints)
+    def TargetPoints(self):
+        return copy.deepcopy(self.TransformModel.TargetPoints)
 
     @property
     def WarpedTriangles(self):
@@ -84,7 +86,6 @@ class  TransformController(object):
     def TransformModel(self):
         return self._TransformModel;
 
-
     @TransformModel.setter
     def TransformModel(self, value):
 
@@ -97,23 +98,18 @@ class  TransformController(object):
             assert(isinstance(value, triangulation.Triangulation))
             self._TransformModel.AddOnChangeEventListener(self.OnTransformChanged)
 
-
     def Transform(self, points, **kwargs):
         return self.TransformModel.Transform(points, **kwargs)
-
 
     def InverseTransform(self, points, **kwargs):
         return self.TransformModel.InverseTransform(points, **kwargs)
 
-
     def AddOnChangeEventListener(self, func):
         self.__OnChangeEventListeners.append(func)
-
 
     def RemoveOnChangeEventListener(self, func):
         if func in self.__OnChangeEventListeners:
             self.__OnChangeEventListeners.remove(func)
-
 
     def OnTransformChanged(self):
         # If the transform is getting complicated then use InitializeDataStructures to parallelize the
@@ -121,7 +117,6 @@ class  TransformController(object):
         if self.NumPoints > 25:
             self._TransformModel.InitializeDataStructures()
         self.FireOnChangeEvent()
-
 
     def FireOnChangeEvent(self):
         '''Calls every function registered to be notified when the transform changes.'''
@@ -135,7 +130,6 @@ class  TransformController(object):
 
         # for task in tlist:
             # task.wait()
-
 
     def __init__(self, TransformModel=None, DefaultToForwardTransform=True):
         '''
@@ -154,18 +148,16 @@ class  TransformController(object):
         self.TransformModel = TransformModel
 
         if TransformModel is None:
-            self.TransformModel = _DefaultTransform()
+            self.TransformModel = CreateDefaultTransform()
 
         self.Debug = False;
         self.ShowWarped = False;
         
-        #print("Create transform controller %d" % self._id)
-
+        # print("Create transform controller %d" % self._id)
 
     def SetPoints(self, points):
         '''Set transform points to the passed array'''
         self.TransformModel.points = points
-
 
     def NextViewMode(self):
         self.ShowWarped = not self.ShowWarped;
@@ -173,22 +165,17 @@ class  TransformController(object):
         if self.DefaultToForwardTransform == False:
             self.ShowWarped = False;
 
-
     def GetFixedPoint(self, index):
-        return self.TransformModel.FixedPoints[index];
-
+        return self.TransformModel.TargetPoints[index];
 
     def GetWarpedPoint(self, index):
-        return self.TransformModel.WarpedPoints[index];
-
+        return self.TransformModel.SourcePoints[index];
 
     def GetWarpedPointsInRect(self, bounds):
         return self.TransformModel.GetWarpedPointsInRect(bounds)
 
-
     def GetFixedPointsInRect(self, bounds):
         return self.TransformModel.GetFixedPointsInRect(bounds)
-
 
     def NearestPoint(self, ImagePoint, FixedSpace=True):
         if(not FixedSpace):
@@ -198,18 +185,14 @@ class  TransformController(object):
 
         return (Distance, index);
 
-
     def TranslateFixed(self, offset):
         self.TransformModel.TranslateFixed(offset)
-
 
     def TranslateWarped(self, offset):
         self.TransformModel.TranslateWarped(offset)
 
-
     def RotateWarped(self, angle, center):
         self.TransformModel.RotateWarped(angle, center)
-
 
     def TryAddPoint(self, ImageX, ImageY, FixedSpace=True):
 
@@ -223,7 +206,6 @@ class  TransformController(object):
             NewPointPair = [ImageY, ImageX, OppositePoint[0][0], OppositePoint[0][1]];
 
         return self.TransformModel.AddPoint(NewPointPair);
-
 
     def TryDeletePoint(self, ImageX, ImageY, maxDistance, FixedSpace=True):
 
@@ -244,7 +226,11 @@ class  TransformController(object):
 
         self.TransformModel.RemovePoint(index);
         return True;
-
+    
+    def RemovePoints(self, indicies):
+        self.TransformModel.RemovePoint(indicies)
+        
+        
     def TryDrag(self, ImageX, ImageY, ImageDX, ImageDY, maxDistance, FixedSpace=True):
 
         NearestPoint = None;
@@ -255,26 +241,23 @@ class  TransformController(object):
         else:
             Distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX]);
 
-
         if(Distance > maxDistance):
             return None;
 
         index = self.MovePoint(index, ImageDY, ImageDX);
         return index;
 
-
     def GetNearestPoint(self, index, FixedSpace=False):
         NearestPoint = None
-        if index > len(self.TransformModel.WarpedPoints):
+        if index > len(self.TransformModel.SourcePoints):
             return None
         
         if(not FixedSpace  and not self.ShowWarped):
-            NearestPoint = copy.copy(self.TransformModel.WarpedPoints[index])
+            NearestPoint = copy.copy(self.TransformModel.SourcePoints[index])
         else:
-            NearestPoint = copy.copy(self.TransformModel.FixedPoints[index])
+            NearestPoint = copy.copy(self.TransformModel.TargetPoints[index])
 
         return NearestPoint
-
 
     def SetPoint(self, index, X, Y, FixedSpace=True):
         OldPointPosition = self.GetNearestPoint(index, FixedSpace)
@@ -290,7 +273,7 @@ class  TransformController(object):
         else:
             index = self.TransformModel.UpdateFixedPoint(index, NewPointPosition);
 
-        print "Set point " + str(index) + " " + str(NewPointPosition);
+        print("Set point " + str(index) + " " + str(NewPointPosition))
 
         return index;
 
@@ -299,8 +282,8 @@ class  TransformController(object):
         NearestPoint = self.GetNearestPoint(index, FixedSpace)
 
         NearestPoint += numpy.array((ImageDY, ImageDX))
-        #NearestPoint[0] = NearestPoint[0] + ImageDY;
-        #NearestPoint[1] = NearestPoint[1] + ImageDX;
+        # NearestPoint[0] = NearestPoint[0] + ImageDY;
+        # NearestPoint[1] = NearestPoint[1] + ImageDX;
 
         if(not FixedSpace):
             if not self.ShowWarped:
@@ -311,15 +294,14 @@ class  TransformController(object):
 
                 TranslatedPoint = NewWarpedPoint - OldWarpedPoint 
 
-                FinalPoint = self.TransformModel.WarpedPoints[index] + TranslatedPoint 
+                FinalPoint = self.TransformModel.SourcePoints[index] + TranslatedPoint 
                 index = self.TransformModel.UpdateWarpedPoint(index, FinalPoint);
         else:
             index = self.TransformModel.UpdateFixedPoint(index, NearestPoint);
 
-        print "Dragged point " + str(index) + " " + str(NearestPoint);
+        print("Dragged point " + str(index) + " " + str(NearestPoint))
 
         return index;
-
 
     def AutoAlignPoints(self, i_points):
         '''Attemps to align the specified point indicies'''
@@ -347,7 +329,6 @@ class  TransformController(object):
                                                 currentStosConfig.FixedImageViewModel.Image,
                                                 currentStosConfig.WarpedImageViewModel.Image,
                                                 fixed,
-                                                warped,
                                                 alignmentArea=currentStosConfig.AlignmentTileSize,
                                                 anglesToSearch=currentStosConfig.AnglesToSearch)
                 indextotask[i_point] = task       
@@ -357,7 +338,7 @@ class  TransformController(object):
                 record = task.wait_return()
     
                 if record is None:
-                    print "point #" + str(i_point) + " returned None for alignment"
+                    print("point #" + str(i_point) + " returned None for alignment")
                     continue
     
                 (dy, dx) = record.peak
@@ -375,12 +356,11 @@ class  TransformController(object):
                                     currentStosConfig.FixedImageViewModel.Image,
                                     currentStosConfig.WarpedImageViewModel.Image,
                                     fixed,
-                                    warped,
                                     alignmentArea=currentStosConfig.AlignmentTileSize,
                                     anglesToSearch=currentStosConfig.AnglesToSearch)
             
             if record is None:
-                print "point #" + str(i_point) + " returned None for alignment"
+                print("point #" + str(i_point) + " returned None for alignment")
                 return
 
             (dy, dx) = record.peak
@@ -390,9 +370,7 @@ class  TransformController(object):
 
             offsets[i_point, :] = np.array([dy, dx])
             
-            
         # Translate all points
         self.TranslateFixed(offsets)
-
 
         # return self.TransformController.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)

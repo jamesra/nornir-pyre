@@ -4,10 +4,12 @@ Created on Feb 10, 2015
 @author: u0490822
 '''
 
+
 class CommandBase(object):
     '''
     interface for commands
     ''' 
+
     @property
     def parent(self):
         '''Parent window the command is bound to and subscribes to events from'''
@@ -32,13 +34,13 @@ class CommandBase(object):
         self._parent = parent
         self._command_completed = completed_func
         pass
-    
          
 
 class VolumeCommandBase(CommandBase):
     '''
     A command that needs to handle the mouse position in terms 
     '''
+
     @property
     def camera(self):
         '''The camera used by the command.'''
@@ -46,13 +48,13 @@ class VolumeCommandBase(CommandBase):
     
     def GetCorrectedMousePosition(self, e):
         '''wxPython inverts the mouse position, flip it back'''
-        (x,y) = e.GetPositionTuple()
-        return ( self.camera.WindowHeight - y, x)
+        (x, y) = e.GetPositionTuple()
+        return (self.camera.WindowHeight - y, x)
         
     def _mouse_position_in_volume(self, e):
-        (x,y) = e.GetPositionTuple()
-        ( self.camera.WindowHeight - y, x)
-        (y,x) = self._get_corrected_mouse_position_func (e)
+        (x, y) = e.GetPositionTuple()
+        (self.camera.WindowHeight - y, x)
+        (y, x) = self._get_corrected_mouse_position_func (e)
 
     def __init__(self, parent, completed_func, camera):
         '''
@@ -64,8 +66,5 @@ class VolumeCommandBase(CommandBase):
         super(VolumeCommandBase, self).__init__(parent, completed_func)
         
         self._camera = camera
-        
-    
-    
     
         

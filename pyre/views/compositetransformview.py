@@ -4,7 +4,6 @@ Created on Oct 19, 2012
 @author: u0490822
 '''
 
-
 import logging
 import os
 
@@ -18,10 +17,44 @@ from pyre.views import imagegridtransformview
 import pyre.views
 
 
-class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
+class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
     '''
     Combines and image and a transform to render an image
     '''
+    
+    def _ClearVertexAngleDelta(self):
+        self._transformVertexAngleDeltas = None
+        self._vertexMaxAngleDelta = None
+        self._MaxAngleDelta = None
+    
+    def _UpdateVertexAngleDelta(self, transform):
+        self._transformVertexAngleDeltas = metrics.TriangleVertexAngleDelta(transform)
+        self._vertexMaxAngleDelta = numpy.asarray(list(map(numpy.max, self._transformVertexAngleDeltas)))
+        self._MaxAngleDelta = numpy.max(self._vertexMaxAngleDelta)
+        if self._MaxAngleDelta != 0:
+            self._normalized_vertex_max_angle_delta = self._vertexMaxAngleDelta / self._MaxAngleDelta
+        else:
+            self._normalized_vertex_max_angle_delta = self._vertexMaxAngleDelta
+    
+    @property
+    def TransformVertexAngleDelta(self):
+        if self._transformVertexAngleDeltas is None:
+            self._UpdateVertexAngleDelta(self.TransformController)
+        
+        return self._transformVertexAngleDeltas
+    
+    @property
+    def VertexMaxAngleDelta(self):
+        return self._vertexMaxAngleDelta
+    
+    @property
+    def NormalizedVertexMaxAngleDelta(self):
+        return self._vertexMaxAngleDelta
+    
+    @property
+    def MaxAngleDelta(self):
+        return self._MaxAngleDelta
+
     @property
     def width(self):
         if self.FixedImageArray is None:
@@ -46,7 +79,6 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
             return None
         return self.FixedImageArray.height
 
-
     def __init__(self, FixedImageArray, WarpedImageArray, Transform):
         '''
         Constructor
@@ -56,6 +88,8 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
         self.FixedImageArray = FixedImageArray
         self.WarpedImageArray = WarpedImageArray
         self.TransformController = Transform 
+        
+        self._transformVertexAngleDeltas = None
 
         # imageFullPath = os.path.join(resources.ResourcePath(), "Point.png")
         # self.PointImage = pyglet.image.load(imageFullPath)
@@ -66,18 +100,17 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
         
         self._tranformed_verts_cache = None
 
-
     def OnTransformChanged(self):
         
         super(CompositeTransformView, self).OnTransformChanged()
         
         self._tranformed_verts_cache = None 
-        
+        self._ClearVertexAngleDelta()
     
     def PopulateTransformedVertsCache(self):
-        #verts = self.Transform.WarpedPoints
-        #self._tranformed_verts_cache = self.Transform.Transform(verts)
-        self._tranformed_verts_cache = self.Transform.FixedPoints
+        # verts = self.Transform.WarpedPoints
+        # self._tranformed_verts_cache = self.Transform.Transform(verts)
+        self._tranformed_verts_cache = self.Transform.TargetPoints
         return
 
     def draw_points(self, ForwardTransform=True, SelectedIndex=None, FixedSpace=True, BoundingBox=None, ScaleFactor=1):
@@ -88,10 +121,12 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
 
         if self._tranformed_verts_cache is None:
             self.PopulateTransformedVertsCache()
+            
+        #if self._vertexMaxAngleDelta is None:
+        #    self._UpdateVertexAngleDelta(self.TransformController)
         
         if not self._tranformed_verts_cache is None:
             self._draw_points(self._tranformed_verts_cache, SelectedIndex, BoundingBox=BoundingBox, ScaleFactor=ScaleFactor)
-
 
     def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
         Triangles = numpy.array(T)
@@ -145,16 +180,15 @@ class CompositeTransformView(  imagegridtransformview.ImageGridTransformView):
 #                                                          ('v2f', vertarray))
 #         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
-
     def setup_composite_rendering(self):
         
-        #gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        #gl.glBlendColor(1.0,1.0,1.0,1.0)
+        # gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        # gl.glBlendColor(1.0,1.0,1.0,1.0)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
         return 
                 
     def clear_composite_rendering(self):
-        #gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
+        # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
         return 
 
     def draw_textures(self, BoundingBox=None, glFunc=None):

@@ -13,6 +13,7 @@ import numpy
 from pkg_resources import resource_filename
 from scipy.misc import imread
 
+
 def ResourcePath():
     Logger = logging.getLogger("resources")
     rpath = resource_filename(__name__, "resources")
@@ -51,6 +52,7 @@ def TextureForNumpyImage(image):
                                GL_LUMINANCE, GL_FLOAT, image)
 
     return textureid
+
 
 def LoadTexture(image):
     data = imread(image, flatten=True)

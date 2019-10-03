@@ -1,0 +1,100 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{e23d945b-a9e5-4fcb-8f7d-6f003b3fa658}</ProjectGuid>
+    <ProjectHome />
+    <StartupFile>pyre\__main__.py</StartupFile>
+    <SearchPath />
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <ProjectTypeGuids>{888888a0-9f3d-457c-b088-3a5042f75d52}</ProjectTypeGuids>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <InterpreterId>Global|VisualStudio|Python 2.7</InterpreterId>
+    <IsWindowsApplication>True</IsWindowsApplication>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" />
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" />
+  <PropertyGroup>
+    <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="pyre.egg-info\dependency_links.txt" />
+    <Content Include="pyre.egg-info\entry_points.txt" />
+    <Content Include="pyre.egg-info\requires.txt" />
+    <Content Include="pyre.egg-info\SOURCES.txt" />
+    <Content Include="pyre.egg-info\top_level.txt" />
+    <Content Include="pyre\README-SDL.txt" />
+    <Content Include="pyre\README.txt" />
+    <Content Include="pyre\resources\Point.png" />
+    <Content Include="pyre\resources\SelectedPoint.png" />
+    <Content Include="test_checklist.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="ez_setup.py" />
+    <Compile Include="pyre\commandhistory.py" />
+    <Compile Include="pyre\common.py" />
+    <Compile Include="pyre\launcher.py" />
+    <Compile Include="pyre\PyreGui.py" />
+    <Compile Include="pyre\resources.py" />
+    <Compile Include="pyre\state.py" />
+    <Compile Include="pyre\tileexportwindow.py" />
+    <Compile Include="pyre\ui\camera.py" />
+    <Compile Include="pyre\ui\camerastatusbar.py" />
+    <Compile Include="pyre\ui\camera_command.py" />
+    <Compile Include="pyre\ui\command_base.py" />
+    <Compile Include="pyre\ui\glpanel.py" />
+    <Compile Include="pyre\ui\imagetransformpanel.py" />
+    <Compile Include="pyre\ui\imagetransformpanelbase.py" />
+    <Compile Include="pyre\ui\mosaictransformpanel.py" />
+    <Compile Include="pyre\ui\rectangle_command.py" />
+    <Compile Include="pyre\ui\__init__.py" />
+    <Compile Include="pyre\viewmodels\imageviewmodel.py" />
+    <Compile Include="pyre\viewmodels\mosaicviewmodel.py" />
+    <Compile Include="pyre\viewmodels\transformcontroller.py" />
+    <Compile Include="pyre\viewmodels\__init__.py" />
+    <Compile Include="pyre\views\compositetransformview.py" />
+    <Compile Include="pyre\views\imagegridtransformview.py" />
+    <Compile Include="pyre\views\mosaicview.py" />
+    <Compile Include="pyre\views\__init__.py" />
+    <Compile Include="pyre\__init__.py" />
+    <Compile Include="pyre\__main__.py" />
+    <Compile Include="scripts\start_pyre.py" />
+    <Compile Include="setup.py" />
+    <Compile Include="setup2.py" />
+    <Compile Include="testwxdrop.py" />
+    <Compile Include="wxDemo.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="pyre" />
+    <Folder Include="pyre.egg-info" />
+    <Folder Include="pyre\resources" />
+    <Folder Include="pyre\ui" />
+    <Folder Include="pyre\viewmodels" />
+    <Folder Include="pyre\views" />
+    <Folder Include="scripts" />
+  </ItemGroup>
+  <ItemGroup>
+    <InterpreterReference Include="Global|PythonCore|2.7" />
+    <InterpreterReference Include="Global|VisualStudio|Python 2.7" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\nornir-imageregistration\nornir-imageregistration.pyproj">
+      <Name>nornir-imageregistration</Name>
+      <Project>{f9a77e5a-6d48-488f-bae5-db812178a4e9}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\nornir-pools\nornir-pools.pyproj">
+      <Name>nornir-pools</Name>
+      <Project>{8563d924-0a68-4d31-85eb-02f00220e41b}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\nornir-shared\nornir-shared.pyproj">
+      <Name>nornir-shared</Name>
+      <Project>{84b705d8-97f3-450d-8bec-a8c6d9d19cd2}</Project>
+      <Private>True</Private>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+</Project>

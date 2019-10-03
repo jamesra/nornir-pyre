@@ -4,6 +4,7 @@ Created on Apr 10, 2013
 @author: u0388504
 '''
 
+
 class CommandHistory (object):
     """Saves and returns objects along with indicies"""
 
@@ -42,7 +43,6 @@ class CommandHistory (object):
         self.HistoryIndex += 1
         self.RestoreState(self.HistoryIndex)
 
-
     def Redo(self):
         self.HistoryIndex -= 1
         self.RestoreState(self.HistoryIndex)
@@ -66,5 +66,6 @@ class CommandHistory (object):
         (recoveryfunction, args, kwargs) = self.History[index]
 
         recoveryfunction(*args, **kwargs)
+
 
 history = CommandHistory()

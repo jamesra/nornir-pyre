@@ -10,6 +10,7 @@ class MosaicView(imagegridtransformview.ImageGridTransformView):
     '''
     classdocs
     '''
+
     @property
     def width(self):
         if self.FixedImageArray is None:
@@ -41,7 +42,6 @@ class MosaicView(imagegridtransformview.ImageGridTransformView):
     
     def AddTile(self, ID, value):
         self._tiles[ID] = value
-    
 
     def __init__(self, **kwargs):
         '''

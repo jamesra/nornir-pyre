@@ -40,11 +40,12 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         self._camera = pyre.ui.camera.Camera((0, 0), 1)
 
         super(ImageTransformPanelBase, self).__init__(parent, window_id, **kwargs)
+        
+        (self.width, self.height) = self.canvas.GetSize()
 
         self.AddStatusBar()
 
         pass
-
 
     def AddStatusBar(self):
         self.statusBar = CameraStatusBar(self, self.camera)
@@ -61,7 +62,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         return self.camera.ImageCoordsForMouse(y, x)
     
     def on_resize(self, e):
-        (self.width, self.height) = self.canvas.GetSizeTuple()
+        (self.width, self.height) = self.canvas.GetSize()
         if not self.camera is None:
             # try:
             self.camera.focus(self.height, self.width)
@@ -70,7 +71,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
     def GetCorrectedMousePosition(self, e):
         '''wxPython inverts the mouse position, flip it back'''
-        (x, y) = e.GetPositionTuple()
+        (x, y) = e.GetPosition()
         return (self.height - y, x)
 
     def OnTransformChanged(self):
@@ -89,7 +90,6 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         '''
 
         raise NotImplementedError("Abstract function center_camera not implemented")
-
 
     def draw_objects(self):
         raise NotImplementedError("draw object is not implemented")

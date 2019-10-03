@@ -11,14 +11,15 @@ import sys
 
 import nornir_shared.misc
 
-from PyreGui import StosWindow
+from .PyreGui import StosWindow, MosaicWindow
 from pyre import Windows
 from pyre.state import InitializeStateFromArguments
-import resources
+from . import resources
  
 import wx
  
 app = None
+
 
 def ProcessArgs():
 
@@ -72,6 +73,7 @@ def ProcessArgs():
 
     return parser
 
+
 __profiler = None
 
 
@@ -96,7 +98,7 @@ def Run():
  
     StartProfilerCheck()
 
-    nornir_shared.misc.SetupLogging(os.curdir, Level=logging.WARNING)
+    nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir,"PyreLogs"), Level=logging.WARNING)
 
     readmetxt = resources.README()
     print(readmetxt) 
@@ -104,13 +106,12 @@ def Run():
     args = ProcessArgs()
     arg_values = args.parse_args()
 
-
     app = wx.App(False)
 
     Windows["Fixed"] = StosWindow(None, "Fixed", 'Fixed Image', showFixed=True)
     Windows["Warped"] = StosWindow(None, "Warped", 'Warped Image')
     Windows["Composite"] = StosWindow(None, "Composite", 'Composite', showFixed=True, composite=True)
-    #Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
+    # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
  
     InitializeStateFromArguments(arg_values)
 
@@ -119,6 +120,7 @@ def Run():
     print("Exiting main loop")
 
     EndProfilerCheck()
+
 
 if __name__ == '__main__':
     pass
