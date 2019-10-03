@@ -122,8 +122,8 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         if self._tranformed_verts_cache is None:
             self.PopulateTransformedVertsCache()
             
-        if self._vertexMaxAngleDelta is None:
-            self._UpdateVertexAngleDelta(self.TransformController)
+        #if self._vertexMaxAngleDelta is None:
+        #    self._UpdateVertexAngleDelta(self.TransformController)
         
         if not self._tranformed_verts_cache is None:
             self._draw_points(self._tranformed_verts_cache, SelectedIndex, BoundingBox=BoundingBox, ScaleFactor=ScaleFactor)
