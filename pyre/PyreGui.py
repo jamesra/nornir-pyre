@@ -485,7 +485,7 @@ class StosWindow(PyreWindowBase):
 
     def OnInstructions(self, e):
 
-        readme = resources.README()
+        readme = pyre.resources.README()
         dlg = wx.MessageDialog(self, readme, "Keyboard Instructions", wx.OK)
         dlg.ShowModal()
         dlg.Destroy()
