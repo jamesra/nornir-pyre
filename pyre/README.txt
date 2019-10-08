@@ -15,6 +15,7 @@ Right Button
 Scroll wheel:
 	zoom
 	Ctrl+scroll to rotate warped image
+	Ctrl+Shift+scroll to slowly rotate warped image
 
 Keys:
 	A,W,S,D: Move the view
@@ -22,6 +23,7 @@ Keys:
 	
 	M: Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
 	L: Show transform mesh lines
+	F: Flip the warped image
 	Space: Auto-align the selected point
 	Shift+Space: Auto-align all points
 	

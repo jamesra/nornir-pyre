@@ -18,7 +18,7 @@ Left Button
    
    ``<Left Click> + drag`` to move point under the cursor
    
-   ``Ctrl + <Left Click> + drag`` to translate warped image
+   ``Ctrl + <Left Click> + drag`` to translate entire warped image
    
    ``Alt + <Left Click>`` to move currently selected point to mouse position
 
@@ -33,6 +33,8 @@ Scroll wheel
    ``<Scroll wheel>`` zoom in or out
    
    ``Ctrl + <Scroll wheel>`` to rotate warped image
+   
+   ``Ctrl + Shift + <Scroll wheel>`` to rotate warped image slowly
 
 Keys
 ____
@@ -44,6 +46,8 @@ ____
    ``M`` Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
    
    ``L`` Show transform mesh lines
+   
+   ``f`` Flip the warped image
    
    ``Space`` Auto-align the selected point
    
