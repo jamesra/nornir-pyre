@@ -367,16 +367,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         # We rotate when command is down
         if e.CmdDown():
-            angle = float(abs(scroll_y) / 4.0) ** 2.0
-
-            if angle > 15.0:
-                angle = 15.0
+            angle = float(abs(scroll_y)*2) ** 2.0 
+            if e.ShiftDown():
+                angle = float(abs(scroll_y)/2) ** 2.0
 
             rangle = (angle / 180.0) * 3.14159
             if scroll_y < 0:
                 rangle = -rangle
 
-           # print "Angle: " + str(angle)
+            # print "Angle: " + str(angle)
             self.TransformController.RotateWarped(rangle, (state.currentStosConfig.WarpedImageViewModel.RawImageSize[0] / 2.0,
                                                           state.currentStosConfig.WarpedImageViewModel.RawImageSize[1] / 2.0))
 
@@ -488,4 +487,3 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     self.SelectedPointIndex = self.TransformController.TryDrag(ImageX, ImageY, ImageDX, ImageDY, self.SelectionMaxDistance, FixedSpace=self.FixedSpace)
 
         self.statusBar.update_status_bar(self.LastMousePosition)
-
