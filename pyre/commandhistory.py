@@ -16,7 +16,7 @@ class CommandHistory (object):
         self.History = []
         self.HistoryIndex = 0
 
-    def SaveState(self, recoveryfunc, args=None, kwargs=None):
+    def SaveState(self, recoveryfunc, *args, **kwargs):
         '''Copy the transform points into the undo history.
            Data is the data to pass to the recovery function'''
 
@@ -24,9 +24,6 @@ class CommandHistory (object):
             args = []
         if kwargs is None:
             kwargs = {}
-
-        if not isinstance(args, list):
-            args = [args]
 
         assert(isinstance(kwargs, dict))
 
@@ -40,11 +37,11 @@ class CommandHistory (object):
             del self.History[-1]
 
     def Undo(self):
-        self.HistoryIndex += 1
+        self.HistoryIndex -= 1
         self.RestoreState(self.HistoryIndex)
 
     def Redo(self):
-        self.HistoryIndex -= 1
+        self.HistoryIndex += 1
         self.RestoreState(self.HistoryIndex)
 
     def RestoreState(self, index=None):
