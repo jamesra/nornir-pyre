@@ -193,6 +193,12 @@ class  TransformController(object):
 
     def RotateWarped(self, angle, center):
         self.TransformModel.RotateWarped(angle, center)
+        
+    def FlipWarped(self):
+        '''
+        Flip the target points 
+        '''
+        self.TransformModel.FlipWarped()
 
     def TryAddPoint(self, ImageX, ImageY, FixedSpace=True):
 

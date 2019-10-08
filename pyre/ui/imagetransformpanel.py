@@ -262,6 +262,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             history.Undo()
         elif symbol == 'x' and e.CmdDown():
             history.Redo()
+        elif symbol == 'f':
+            self.TransformController.FlipWarped()
+            history.SaveState(self.TransformController.FlipWarped)
 
     def lookatfixedpoint(self, point, scale):
         '''specify a point to look at in fixed space'''
@@ -487,3 +490,4 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     self.SelectedPointIndex = self.TransformController.TryDrag(ImageX, ImageY, ImageDX, ImageDY, self.SelectionMaxDistance, FixedSpace=self.FixedSpace)
 
         self.statusBar.update_status_bar(self.LastMousePosition)
+         
