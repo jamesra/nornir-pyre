@@ -114,7 +114,7 @@ class ImageViewModel(object):
             Logger.info("Loading image: " + ImageInput)
             self._ImageFilename = ImageInput
 
-            self._Image = scipy.ndimage.imread(ImageInput, flatten=True)
+            self._Image = nornir_imageregistration.LoadImage(ImageInput)
 
             Logger.info("Loading done")
         elif isinstance(ImageInput, np.ndarray):
