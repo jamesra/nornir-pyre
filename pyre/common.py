@@ -11,8 +11,7 @@ import sys
 import nornir_imageregistration 
 import nornir_shared.misc
 import numpy 
-from scipy.misc import imsave
-from scipy.ndimage import imread
+from scipy.misc import imsave 
 
 import pyre
 import nornir_imageregistration.assemble as assemble
