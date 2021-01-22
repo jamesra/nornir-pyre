@@ -11,7 +11,7 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 import numpy
 from pkg_resources import resource_filename
-from scipy.misc import imread
+import nornir_imageregistration
 
 
 def ResourcePath():
@@ -55,5 +55,5 @@ def TextureForNumpyImage(image):
 
 
 def LoadTexture(image):
-    data = imread(image, flatten=True)
+    data = nornir_imageregistration.LoadImage(image, flatten=True)
     return TextureForNumpyImage(data)
