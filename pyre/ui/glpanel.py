@@ -27,15 +27,12 @@ class GLPanel(wx.Panel):
 
         # init gl canvas data
         self.GLinitialized = False
-        dispAttrs = wx.glcanvas.GLAttributes()
-        dispAttrs.PlatformDefaults().MinRGBA(8, 8, 8, 8).DoubleBuffer().Depth(24).EndList()
-        
-        #attribList = (glcanvas.WX_GL_RGBA,  # RGBA
-        #              glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
-        #              glcanvas.WX_GL_DEPTH_SIZE, 32)  # 24 bit
+        attribList = (glcanvas.WX_GL_RGBA,  # RGBA
+                      glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
+                      glcanvas.WX_GL_DEPTH_SIZE, 32)  # 24 bit
 
         # Create context
-        self.canvas = wx.glcanvas.GLCanvas(self, dispAttrs)
+        self.canvas = wx.glcanvas.GLCanvas(self, attribList=attribList)
 
         if GLPanel.SharedGLContext is None:
             GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas)

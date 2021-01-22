@@ -10,7 +10,9 @@ import sys
 
 import nornir_imageregistration 
 import nornir_shared.misc
-import numpy
+import numpy 
+from scipy.misc import imsave
+from scipy.ndimage import imread
 
 import pyre
 import nornir_imageregistration.assemble as assemble

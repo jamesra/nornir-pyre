@@ -428,27 +428,25 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
                 array = None
                 if cacheColumn[iy] is None: 
-                    array = (gl.GLfloat * 20)(
-                         t[0], t[1],
-                         x, y, z,
-                         t[3], t[4],
-                         x + w, y, z,
-                         t[6], t[7],
-                         x + w, y + h, z, 
-                         t[9], t[10],
-                         x, y + h, z)
+                    array = (gl.GLfloat * 32)(
+                         t[0], t[1], t[2], 1.,
+                         x, y, z, 1.,
+                         t[3], t[4], t[5], 1.,
+                         x + w, y, z, 1.,
+                         t[6], t[7], t[8], 1.,
+                         x + w, y + h, z, 1.,
+                         t[9], t[10], t[11], 1.,
+                         x, y + h, z, 1.)
 
                     cacheColumn[iy] = array
                 else:
                     array = cacheColumn[iy]
 
                 gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
-                try: 
-                    gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
-                    gl.glInterleavedArrays(gl.GL_T2F_V3F, 0, array)
-                    gl.glDrawArrays(gl.GL_QUADS, 0, 4)
-                finally:
-                    gl.glPopClientAttrib()
+                gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
+                gl.glInterleavedArrays(gl.GL_T4F_V4F, 0, array)
+                gl.glDrawArrays(gl.GL_QUADS, 0, 4)
+                gl.glPopClientAttrib()
         
         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
                  
