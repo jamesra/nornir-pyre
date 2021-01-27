@@ -10,8 +10,7 @@ import sys
 
 import nornir_imageregistration 
 import nornir_shared.misc
-import numpy 
-from scipy.misc import imsave 
+import numpy  
 
 import pyre
 import nornir_imageregistration.assemble as assemble
@@ -25,7 +24,7 @@ def SaveRegisteredWarpedImage(fileFullPath, transform, warpedImage):
                                                         pyre.state.currentStosConfig.FixedImageViewModel.Image.shape,
                                                         pyre.state.currentStosConfig.WarpedImageViewModel.Image)
 
-    imsave(fileFullPath, registeredImage)
+    nornir_imageregistration.ImageSave(fileFullPath, registeredImage)
 
 
 def AssembleHugeRegisteredWarpedImage(transform, fixedImageShape, warpedImage):
