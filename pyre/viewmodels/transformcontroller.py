@@ -317,6 +317,9 @@ class  TransformController(object):
            currentStosConfig.WarpedImageViewModel is None):
             return
 
+        if isinstance(i_points, range):
+            i_points = list(i_points)
+        
         if not isinstance(i_points, list):
             i_points = [i_points]
             
