@@ -2,12 +2,18 @@
 import os
 import sys
 
+#import OpenGL as gl
+
 from pyglet import gl
 import pyglet
 
-from wx import glcanvas
-import wx
-import wx.glcanvas
+
+try: 
+    import wx
+    import wx.glcanvas
+    
+except: 
+    print ("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 pyglet.options['shadow_window'] = False
 
@@ -27,9 +33,9 @@ class GLPanel(wx.Panel):
 
         # init gl canvas data
         self.GLinitialized = False
-        attribList = (glcanvas.WX_GL_RGBA,  # RGBA
-                      glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
-                      glcanvas.WX_GL_DEPTH_SIZE, 32)  # 24 bit
+        attribList = (wx.glcanvas.WX_GL_RGBA,  # RGBA
+                      wx.glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
+                      wx.glcanvas.WX_GL_DEPTH_SIZE, 24)  # 24 bit
 
         # Create context
         self.canvas = wx.glcanvas.GLCanvas(self, attribList=attribList)
@@ -43,7 +49,7 @@ class GLPanel(wx.Panel):
 
             #GLPanel.wxcontext = self.canvas.GetContext()
         #else:
-            #self.canvas = glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
+            #self.canvas = wx.glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
 
         # Create the canvas
 
