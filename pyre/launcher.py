@@ -15,14 +15,13 @@ from .PyreGui import StosWindow, MosaicWindow
 from pyre import Windows
 from pyre.state import InitializeStateFromArguments
 from . import resources
- 
+
 import wx
- 
+
 app = None
 
 
 def ProcessArgs():
-
     # conflict_handler = 'resolve' replaces old arguments with new if both use the same option flag
     parser = argparse.ArgumentParser('pyre', conflict_handler='resolve')
 
@@ -43,7 +42,7 @@ def ProcessArgs():
                         help='Path to the image to be warped',
                         dest='WarpedImageFullPath'
                         )
-    
+
     parser.add_argument('-stos',
                         action='store',
                         required=False,
@@ -52,7 +51,7 @@ def ProcessArgs():
                         help='Path to the stos file to load',
                         dest='stosFullPath'
                         )
-    
+
     parser.add_argument('-mosaic',
                         action='store',
                         required=False,
@@ -61,7 +60,7 @@ def ProcessArgs():
                         help='Path to the mosaic file to load',
                         dest='mosaicFullPath'
                         )
-    
+
     parser.add_argument('-tiles',
                         action='store',
                         required=False,
@@ -79,10 +78,10 @@ __profiler = None
 
 def StartProfilerCheck():
     if 'PROFILE' in os.environ:
-        profile_val = os.environ['PROFILE'] 
+        profile_val = os.environ['PROFILE']
         if len(profile_val) > 0 and profile_val != '0':
             import cProfile
-            print("Starting profiler because PROFILE environment variable is defined") 
+            print("Starting profiler because PROFILE environment variable is defined")
             __profiler = cProfile.Profile()
             __profiler.enable()
 
@@ -93,15 +92,14 @@ def EndProfilerCheck():
 
 
 def Run():
-
     print("Starting Pyre")
- 
+
     StartProfilerCheck()
 
-    nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir,"PyreLogs"), Level=logging.WARNING)
+    nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir, "PyreLogs"), Level=logging.WARNING)
 
     readmetxt = resources.README()
-    print(readmetxt) 
+    print(readmetxt)
 
     args = ProcessArgs()
     arg_values = args.parse_args()
@@ -112,7 +110,7 @@ def Run():
     Windows["Warped"] = StosWindow(None, "Warped", 'Warped Image')
     Windows["Composite"] = StosWindow(None, "Composite", 'Composite', showFixed=True, composite=True)
     # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
- 
+
     InitializeStateFromArguments(arg_values)
 
     app.MainLoop()

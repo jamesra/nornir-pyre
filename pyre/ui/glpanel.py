@@ -2,29 +2,27 @@
 import os
 import sys
 
-#import OpenGL as gl
+# import OpenGL as gl
 
-from pyglet import gl
 import pyglet
+from pyglet import gl
 
-
-try: 
+try:
     import wx
     import wx.glcanvas
-    
-except: 
-    print ("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
+
+except:
+    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 pyglet.options['shadow_window'] = False
 
 
 class GLPanel(wx.Panel):
-
     '''A simple class for using OpenGL with wxPython.'''
 
-    SharedGLContext = None
+    SharedGLContext = None  # type: wx.glcanvas.GLContext
 
-    def __init__(self, parent, window_id, pos=wx.DefaultPosition,
+    def __init__(self, parent, window_id: int, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, style=0):
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
@@ -47,9 +45,9 @@ class GLPanel(wx.Panel):
 
         #    GLPanel.pygletcontext = gl.Context(gl.current_context)
 
-            #GLPanel.wxcontext = self.canvas.GetContext()
-        #else:
-            #self.canvas = wx.glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
+        # GLPanel.wxcontext = self.canvas.GetContext()
+        # else:
+        # self.canvas = wx.glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
 
         # Create the canvas
 
@@ -65,9 +63,9 @@ class GLPanel(wx.Panel):
         self.canvas.Bind(wx.EVT_SIZE, self.processSizeEvent)
         self.canvas.Bind(wx.EVT_PAINT, self.processPaintEvent)
 
-    #==========================================================================
+    # ==========================================================================
     # Canvas Proxy Methods
-    #==========================================================================
+    # ==========================================================================
     def GetGLExtents(self):
         '''Get the extents of the OpenGL canvas.'''
         return self.canvas.GetClientSize()
@@ -76,9 +74,9 @@ class GLPanel(wx.Panel):
         '''Swap the OpenGL buffers.'''
         self.canvas.SwapBuffers()
 
-    #==========================================================================
+    # ==========================================================================
     # wxPython Window Handlers
-    #==========================================================================
+    # ==========================================================================
     def processEraseBackgroundEvent(self, event):
         '''Process the erase background event.'''
         pass  # Do nothing, to avoid flashing on MSWin
@@ -113,9 +111,9 @@ class GLPanel(wx.Panel):
         # call the super method
         super(GLPanel, self).Destroy()
 
-    #==========================================================================
+    # ==========================================================================
     # GLFrame OpenGL Event Handlers
-    #==========================================================================
+    # ==========================================================================
     def OnInitGL(self):
         '''Initialize OpenGL for use in the window.'''
         # create a pyglet context for this panel
@@ -123,10 +121,10 @@ class GLPanel(wx.Panel):
         if self.GLinitialized:
             return
 
-#         GLPanel.pygletcontext = gl.Context(gl.current_context)
-#         GLPanel.pygletcontext.canvas = self
-# 
-#         GLPanel.pygletcontext.set_current()
+        #         GLPanel.pygletcontext = gl.Context(gl.current_context)
+        #         GLPanel.pygletcontext.canvas = self
+        #
+        #         GLPanel.pygletcontext.set_current()
 
         # normal gl init
         self._InitGLState()
@@ -135,12 +133,12 @@ class GLPanel(wx.Panel):
         self.create_objects()
 
         self.GLinitialized = True
-        
+
     def _InitGLState(self):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
         gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glShadeModel(gl.GL_SMOOTH)
+        #gl.glShadeModel(gl.GL_SMOOTH)
         gl.glClearColor(0, 0, 0, 1)
         # Rotated images can have a z-distance of more than one
         gl.glDepthRangef(0, 2)
@@ -180,9 +178,9 @@ class GLPanel(wx.Panel):
         # update screen
         self.SwapBuffers()
 
-    #==========================================================================
+    # ==========================================================================
     # To be implamented by a sub class
-    #==========================================================================
+    # ==========================================================================
     def create_objects(self):
         '''create opengl objects when opengl is initialized'''
         pass
@@ -226,7 +224,7 @@ class TestFrame(wx.Frame):
     '''A simple class for using OpenGL with wxPython.'''
 
     def __init__(self, parent, ID, title, pos=wx.DefaultPosition,
-            size=wx.DefaultSize, style=wx.DEFAULT_FRAME_STYLE):
+                 size=wx.DefaultSize, style=wx.DEFAULT_FRAME_STYLE):
         super(TestFrame, self).__init__(parent, ID, title, pos, size, style)
 
         self.mainsizer = wx.BoxSizer(wx.HORIZONTAL)

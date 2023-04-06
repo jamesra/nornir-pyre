@@ -6,11 +6,16 @@ import sys
 
 import matplotlib
 import scipy
-import wx
+
+try:
+    import wx
+except:
+    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 # from cx_Freeze import setup, Executable
 if not hasattr(sys, 'frozen'):
     import wxversion
+
     wxversion.select('2.8')
 
 # import py2exe
@@ -25,33 +30,33 @@ data_files = []
 
 excludes = ["Tkconstants", "Tkinter", "tcl", '_gtkagg', '_tkagg']
 includes = [
-                r'matplotlib',
-                r'numpy',
-                r'scipy',
-                r'pyglet',
-                 'wxversion',
-                r'wx',
-                 'scipy.special._cephes',
-                 'scipy.special.orthogonal_eval',
-                 'scipy.special._logit',
-                 'scipy.special.add_newdocs',
-                 'scipy.linalg.fblas',
-                 'scipy.linalg.flapack',
-                 'scipy.linalg.clapack',
-                 'scipy.linalg.cblas',
-                 'scipy.sparse.csgraph',
-                 'scipy.sparse.csgraph._validation',
-                 'nornir_imageregistration',
-                 'nornir_shared',
-                 'nornir_pools',
-                 'sys']
+    r'matplotlib',
+    r'numpy',
+    r'scipy',
+    r'pyglet',
+    'wxversion',
+    r'wx',
+    'scipy.special._cephes',
+    'scipy.special.orthogonal_eval',
+    'scipy.special._logit',
+    'scipy.special.add_newdocs',
+    'scipy.linalg.fblas',
+    'scipy.linalg.flapack',
+    'scipy.linalg.clapack',
+    'scipy.linalg.cblas',
+    'scipy.sparse.csgraph',
+    'scipy.sparse.csgraph._validation',
+    'nornir_imageregistration',
+    'nornir_shared',
+    'nornir_pools',
+    'sys']
 
 includes = []
 packages = ['pyre']
 
 build_exe_options = {"packages": packages,
                      "excludes": excludes,
-                     "includes" : includes}
+                     "includes": includes}
 
 # GUI applications require a different base on Windows (the default is for a
 # console application).
@@ -61,7 +66,7 @@ if sys.platform == "win32":
 
 # setup(data_files=data_files, console=['Pyre.py'])
 setup(name="pyre",
-      version="1.0.0",
+      version="1.5.0",
       data_files=data_files,
       description='Python Image Registration Tool',
       author='James Anderson and Drew Ferrell',
@@ -69,10 +74,10 @@ setup(name="pyre",
       console=['pyre.py'],
       requires=includes,
       packages=packages,
-      package_data={'pyre' : ['resources/*.png']},
+      package_data={'pyre': ['resources/*.png']},
       options={
-                'py2exe': {'excludes': excludes,
-                           'includes': includes},
-                "build_exe" : build_exe_options})
+          'py2exe': {'excludes': excludes,
+                     'includes': includes},
+          "build_exe": build_exe_options})
 
 #      executables = [Executable("Pyre.py", base=base)])

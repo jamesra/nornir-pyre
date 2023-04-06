@@ -6,7 +6,7 @@ Created on Oct 26, 2012
 
 import PIL
 import numpy
-from  pyglet import *
+from pyglet import *
 
 from pyre.ui import Camera
 
@@ -49,9 +49,9 @@ class TileExportWindow(window.Window):
 
         # if(not Filename is None):
         #   imageBuffer.save(Filename);
-            # Some sort of race condition causes no file to be written without a pause
-            # Turns out it was an earlier call to flip was wiping out the buffer
-            # time.sleep(0.5);
+        # Some sort of race condition causes no file to be written without a pause
+        # Turns out it was an earlier call to flip was wiping out the buffer
+        # time.sleep(0.5);
 
         data = imageBuffer.get_data(format=imageBuffer.format, pitch=imageBuffer.pitch)
         components = list(map(int, list(data)));
@@ -85,4 +85,3 @@ class TileExportWindow(window.Window):
         (right, top) = self.ImageCoordsForMouse(self.width, self.height);
 
         return [bottom, left, top, right];
-

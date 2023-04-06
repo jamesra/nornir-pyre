@@ -5,7 +5,7 @@ Created on Apr 10, 2013
 '''
 
 
-class CommandHistory (object):
+class CommandHistory(object):
     """Saves and returns objects along with indicies"""
 
     @property
@@ -25,7 +25,7 @@ class CommandHistory (object):
         if kwargs is None:
             kwargs = {}
 
-        assert(isinstance(kwargs, dict))
+        assert (isinstance(kwargs, dict))
 
         if self.HistoryIndex > 0:
             del self.History[0:self.HistoryIndex]

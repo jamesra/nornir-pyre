@@ -61,14 +61,19 @@ ____
 
 '''
 
-from pyre.commandhistory import history
-from pyre import resources, state
-
-Windows = {}
-
 
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common']
 
+
+
+Windows = {}
+
+import pyre.common as common
+from pyre.commandhistory import history
+from pyre import resources, state
+import pyre.viewmodels as viewmodels
+import pyre.views as views
+import pyre.ui as ui
 
 def Exit():
     '''Destroy all windows and exit the application'''

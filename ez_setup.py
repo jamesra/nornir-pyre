@@ -122,7 +122,7 @@ def _do_download(version, download_base, to_dir, download_delay):
 
 
 def use_setuptools(version=DEFAULT_VERSION, download_base=DEFAULT_URL,
-        to_dir=os.curdir, download_delay=15):
+                   to_dir=os.curdir, download_delay=15):
     to_dir = os.path.abspath(to_dir)
     rep_modules = 'pkg_resources', 'setuptools'
     imported = set(sys.modules).intersection(rep_modules)
@@ -281,7 +281,7 @@ def get_best_downloader():
 
 
 def download_setuptools(version=DEFAULT_VERSION, download_base=DEFAULT_URL,
-        to_dir=os.curdir, delay=15, downloader_factory=get_best_downloader):
+                        to_dir=os.curdir, delay=15, downloader_factory=get_best_downloader):
     """
     Download setuptools from a specified location and return its filename
 

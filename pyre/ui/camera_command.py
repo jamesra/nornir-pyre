@@ -1,7 +1,10 @@
-
 import nornir_imageregistration.spatial
 import numpy
-import wx 
+
+try:
+    import wx
+except:
+    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 from . import command_base
 import pyre.views
@@ -10,24 +13,24 @@ import pyre.views
 class CameraCommand(command_base.VolumeCommandBase):
     '''
     The user interface to adjust the camera
-    ''' 
-    
+    '''
+
     def __init__(self, parent, completed_func, camera):
         super(CameraCommand, self).__init__(parent, completed_func)
-        
+
         self._bind_events()
-        
+
     def _bind_events(self):
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
         self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
-        self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag) 
-        
+        self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
+
     def _unbind_events(self):
         self.canvas.Unbind(wx.EVT_MOUSEWHEEL, handler=self.on_mouse_scroll)
         self.canvas.Unbind(wx.EVT_KEY_DOWN, handler=self.on_key_press)
-        self.canvas.Unbind(wx.EVT_MOTION, handler=self.on_mouse_drag) 
-        return 
-    
+        self.canvas.Unbind(wx.EVT_MOTION, handler=self.on_mouse_drag)
+        return
+
     def on_key_press(self, e):
         keycode = e.GetKeyCode()
 
@@ -37,7 +40,7 @@ class CameraCommand(command_base.VolumeCommandBase):
             symbol = KeyChar.lower()
         except:
             pass
-        
+
         if symbol == 'a':  # "A" Character
             ImageDX = 0.1 * self.camera.ViewWidth
             self.camera.x = self.camera.x + ImageDX
@@ -59,8 +62,8 @@ class CameraCommand(command_base.VolumeCommandBase):
 
             if not self.FixedSpace and self.ShowWarped:
                 LookAt = self.TransformController.Transform([LookAt])
-                LookAt = LookAt[0] 
-            
+                LookAt = LookAt[0]
+
     def on_mouse_scroll(self, e):
 
         if self.camera is None:
@@ -71,17 +74,17 @@ class CameraCommand(command_base.VolumeCommandBase):
         # We rotate when command is down
         if not e.CmdDown():
             zdelta = (1 + (-scroll_y / 20))
-            
-            new_scale = self.camera.scale * zdelta 
-            max_image_dimension_value = max([self.TransformController.width , self.TransformController.height ])
+
+            new_scale = self.camera.scale * zdelta
+            max_image_dimension_value = max([self.TransformController.width, self.TransformController.height])
             if new_scale > max_image_dimension_value * 2.0:
                 new_scale = max_image_dimension_value * 2.0
 
-            if new_scale < 0.5: 
+            if new_scale < 0.5:
                 new_scale = 0.5
-                
+
             self.camera.scale = new_scale
-            
+
             self.statusBar.update_status_bar(self.LastMousePosition)
 
     def on_mouse_drag(self, e):
@@ -104,6 +107,6 @@ class CameraCommand(command_base.VolumeCommandBase):
         ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
         ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
 
-        if(e.RightIsDown()):
+        if (e.RightIsDown()):
             self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
             self.statusBar.update_status_bar(self.LastMousePosition)

@@ -4,43 +4,45 @@ Created on Feb 6, 2015
 @author: u0490822
 '''
 
-import wx
+try:
+    import wx
+except:
+    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 import nornir_imageregistration.spatial as spatial
-from pyre.ui import glpanel
-import pyre.ui.camera
+from pyre.ui import glpanel, Camera
 from pyre.ui.camerastatusbar import CameraStatusBar
 
 
 class ImageTransformPanelBase(glpanel.GLPanel):
     '''
     classdocs
-    ''' 
-    
+    '''
+
     @property
-    def camera(self):
+    def camera(self) -> Camera:
         return self._camera
 
     @camera.setter
-    def camera(self, value):
+    def camera(self, value: Camera | None):
 
-        if not self._camera is None:
+        if self._camera is not None:
             self._camera.RemoveOnChangeEventListener(self.OnCameraChanged)
 
         self._camera = value
 
-        if not value is None:
-            assert(isinstance(value, pyre.ui.camera.Camera))
+        if value is not None:
+            assert (isinstance(value, Camera))
             value.AddOnChangeEventListener(self.OnCameraChanged)
 
     def __init__(self, parent, window_id=-1, **kwargs):
         '''
         Constructor
         '''
-        self._camera = pyre.ui.camera.Camera((0, 0), 1)
+        self._camera = Camera((0, 0), 1)
 
         super(ImageTransformPanelBase, self).__init__(parent, window_id, **kwargs)
-        
+
         (self.width, self.height) = self.canvas.GetSize()
 
         self.AddStatusBar()
@@ -60,7 +62,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
     def ImageCoordsForMouse(self, y, x):
         return self.camera.ImageCoordsForMouse(y, x)
-    
+
     def on_resize(self, e):
         (self.width, self.height) = self.canvas.GetSize()
         if not self.camera is None:
