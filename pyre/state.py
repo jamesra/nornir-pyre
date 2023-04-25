@@ -22,9 +22,6 @@ import pyre
 from pyre.viewmodels import ImageViewModel, TransformController
 from pyre.views import ImageGridTransformView
 
-currentStosConfig = None  # type: StosState
-currentMosaicConfig = None  # type: MosaicState
-
 
 def InitializeStateFromArguments(arg_values):
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
@@ -333,8 +330,8 @@ class StosState(StateEvents):
         self.FireOnTransformControllerChanged()
 
     def __init__(self):
-        self._fixed_image_permutations = None
-        self._warped_image_permutations = None
+        self._fixed_image_permutations = None #Type : nornir_imageregistration.ImagePermutationHelper
+        self._warped_image_permutations = None #Type : nornir_imageregistration.ImagePermutationHelper
         self._TransformViewModel = None
         self._WarpedImageViewModel = None
         self._FixedImageViewModel = None
@@ -507,6 +504,9 @@ class StosState(StateEvents):
         self.WarpedWindow.lookatfixedpoint(fixed_point, scale)
         self.CompositeWindow.lookatfixedpoint(fixed_point, scale)
 
+
+currentStosConfig = None  # type: StosState
+currentMosaicConfig = None  # type: MosaicState
 
 def init():
     global currentStosConfig

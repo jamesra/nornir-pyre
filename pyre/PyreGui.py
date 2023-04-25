@@ -456,13 +456,13 @@ class StosWindow(PyreWindowBase):
 
         return {}
 
-    def GetGridTransformConfig(self) -> dict[str, any]:
+    def GetGridTransformConfig(self) -> dict[str, any] | None:
         """Show a UI to get the transform configuration"""
         with pyre.ui.GridTransformSettingsDialog(self) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 return {'grid_dims': dlg.grid_dims}
             else:
-                return None
+                return
 
     def UpdateCellSizeChecks(self, menu: wx.Menu):
         from pyre.state import currentStosConfig
@@ -653,7 +653,13 @@ class StosWindow(PyreWindowBase):
         pyre.common.RotateTranslateWarpedImage()
 
     def OnRefineGrid(self, e):
-        pyre.common.GridRefineTransform()
+        if pyre.state.currentStosConfig.FixedImageViewModel is None or \
+           pyre.state.currentStosConfig.WarpedImageViewModel is None:
+           print("Need both images loaded with a transform to run refine grid")
+           return None
+
+        with pyre.ui.RefineGridSettingsDialog.GetGridRefineSettings(self) as settings:
+            pyre.common.GridRefineTransform(settings)
 
     def OnOpenFixedImage(self, e):
         dlg = wx.FileDialog(self, "Choose a fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
