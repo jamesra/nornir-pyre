@@ -142,7 +142,7 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         convex_hull_flat = numpy.unique(convex_hull)
 
         iTri = len(Triangles) - 1
-        while (iTri >= 0):
+        while iTri >= 0:
             tri = Triangles[iTri]
             if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
                 # OK, find out if the midpoint of any lines are outside the convex hull
@@ -205,14 +205,14 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
         if self.FixedImageArray is not None:
             FixedColor = None
-            if (glFunc == gl.GL_FUNC_ADD):
+            if glFunc == gl.GL_FUNC_ADD:
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
             self.DrawFixedImage(self.FixedImageArray, FixedColor, BoundingBox=BoundingBox, z=0.25)
 
         if self.WarpedImageArray is not None:
             WarpedColor = None
-            if (glFunc == gl.GL_FUNC_ADD):
+            if glFunc == gl.GL_FUNC_ADD:
                 gl.glBlendEquation(glFunc)
                 WarpedColor = (0, 1.0, 0, 1)
 

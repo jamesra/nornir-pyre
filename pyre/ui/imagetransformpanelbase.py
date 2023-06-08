@@ -74,7 +74,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
     def GetCorrectedMousePosition(self, e):
         '''wxPython inverts the mouse position, flip it back'''
         (x, y) = e.GetPosition()
-        return (self.height - y, x)
+        return self.height - y, x
 
     def OnTransformChanged(self):
         self.canvas.Refresh()

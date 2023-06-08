@@ -55,5 +55,5 @@ def TextureForNumpyImage(image):
 
 
 def LoadTexture(image):
-    data = nornir_imageregistration.LoadImage(image, flatten=True)
+    data = nornir_imageregistration.LoadImage(image)
     return TextureForNumpyImage(data)

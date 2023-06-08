@@ -192,7 +192,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if keycode == wx.WXK_TAB:
             try:
-                if (self.composite):
+                if self.composite:
                     self.NextGLFunction()
                 else:
                     self.ShowWarped = not self.ShowWarped
@@ -207,10 +207,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
             print(str(multiplier))
-            if (e.ShiftDown()):
+            if e.ShiftDown():
                 multiplier = multiplier * 5
                 print(str(multiplier))
-            if (e.ControlDown()):
+            if e.ControlDown():
                 multiplier = multiplier * 25
                 print(str(multiplier))
 
@@ -362,7 +362,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                              FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
 
         self.SelectionMaxDistance = (float(self.camera.ViewHeight) / float(self.height)) * 16.0
-        if (self.SelectionMaxDistance < 16):
+        if self.SelectionMaxDistance < 16:
             self.SelectionMaxDistance = 16
 
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
@@ -527,19 +527,19 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
         ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
 
-        if (e.RightIsDown()):
+        if e.RightIsDown():
             self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
 
-        if (e.LeftIsDown()):
+        if e.LeftIsDown():
             if e.CmdDown():
                 # Translate all points
                 self.TransformController.TranslateFixed((ImageDY, ImageDX))
             else:
                 # Create a point or drag a point
-                if (not self.SelectedPointIndex is None):
+                if not self.SelectedPointIndex is None:
                     self.SelectedPointIndex = self.TransformController.MovePoint(self.SelectedPointIndex, ImageDX,
                                                                                  ImageDY, FixedSpace=self.FixedSpace)
-                elif (e.ShiftDown()):  # The shift key is selected and we do not have a last point dragged
+                elif e.ShiftDown():  # The shift key is selected and we do not have a last point dragged
                     return
                 else:
                     # find nearest point

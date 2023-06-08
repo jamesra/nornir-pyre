@@ -20,6 +20,7 @@ import scipy.ndimage
 
 import nornir_imageregistration.core as core
 import nornir_shared.images as images
+from nornir_shared.mathhelper import NearestPowerOfTwo 
 
 Logger = logging.getLogger("ImageArray")
 
@@ -63,12 +64,12 @@ class ImageViewModel(object):
     @property
     def size(self) -> tuple[int, int]:
         '''Size of the full image'''
-        return (self._height, self._width)
+        return self._height, self._width
 
     @property
     def shape(self) -> tuple[int, int]:
         '''Size of the full image'''
-        return (self._height, self._width)
+        return self._height, self._width
 
     @property
     def ImageArray(self):
@@ -89,8 +90,8 @@ class ImageViewModel(object):
 
     @classmethod
     def FindTextureSize(cls, shape: NDArray) -> tuple[int, int]:
-        _TextureSize = [int(nornir_imageregistration.NearestPowerOfTwo(shape[0])), int(
-            nornir_imageregistration.NearestPowerOfTwo(shape[1]))]
+        _TextureSize = [int(NearestPowerOfTwo(shape[0])), int(
+            NearestPowerOfTwo(shape[1]))]
 
         if _TextureSize[0] > cls.MaxTextureDimension:
             _TextureSize[0] = cls.MaxTextureDimension

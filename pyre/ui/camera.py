@@ -110,7 +110,7 @@ class Camera(object):
     def ImageCoordsForMouse(self, y, x):
         ImageX = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
         ImageY = ((float(y) / self.WindowHeight) * self.ViewHeight) + (self.y - (self.ViewHeight / 2.0))
-        return (ImageY, ImageX)
+        return ImageY, ImageX
     
     @property
     def VisibleImageBoundingBox(self):

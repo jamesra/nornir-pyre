@@ -208,8 +208,8 @@ class CubeCanvas(MyCanvasBase):
         h = max(h, 1.0)
         xScale = 180.0 / w
         yScale = 180.0 / h
-        glRotatef((self.y - self.lasty) * yScale, 1.0, 0.0, 0.0);
-        glRotatef((self.x - self.lastx) * xScale, 0.0, 1.0, 0.0);
+        glRotatef((self.y - self.lasty) * yScale, 1.0, 0.0, 0.0)
+        glRotatef((self.x - self.lastx) * xScale, 0.0, 1.0, 0.0)
 
         self.SwapBuffers()
 
@@ -237,7 +237,7 @@ class ConeCanvas(MyCanvasBase):
         # position viewer
         glMatrixMode(GL_MODELVIEW)
         # position viewer
-        glTranslatef(0.0, 0.0, -2.0);
+        glTranslatef(0.0, 0.0, -2.0)
         #
         glutInit(sys.argv)
 
@@ -255,8 +255,8 @@ class ConeCanvas(MyCanvasBase):
         glRotate(250, 1, 0, 0)
         glutSolidCone(0.5, 1, 30, 5)
         glPopMatrix()
-        glRotatef((self.y - self.lasty), 0.0, 0.0, 1.0);
-        glRotatef((self.x - self.lastx), 1.0, 0.0, 0.0);
+        glRotatef((self.y - self.lasty), 0.0, 0.0, 1.0)
+        glRotatef((self.x - self.lastx), 1.0, 0.0, 0.0)
         # push into visible buffer
         self.SwapBuffers()
 

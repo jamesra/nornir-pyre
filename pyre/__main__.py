@@ -7,6 +7,7 @@ Created on Sep 12, 2013
 import sys
 import os
 
+import pyre
 from pyre import state
 from pyre import launcher
 

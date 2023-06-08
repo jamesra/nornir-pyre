@@ -31,10 +31,10 @@ class GridTransformSettingsDialog(wx.Dialog):
         self.ok_btn = wx.Button(panel, wx.ID_OK, label="OK")
         self.cancel_btn = wx.Button(panel, wx.ID_OK, label="Cancel")
 
-        fgs.AddMany([(title), (blank),
-                     (width), (self.width_ctrl),
-                     (height), (self.height_ctrl),
-                     (self.ok_btn), (self.cancel_btn, 1, wx.EXPAND)])
+        fgs.AddMany([title, blank,
+                     width, self.width_ctrl,
+                     height, self.height_ctrl,
+                     self.ok_btn, (self.cancel_btn, 1, wx.EXPAND)])
         fgs.AddGrowableRow(2, 1)
         fgs.AddGrowableCol(1, 1)
         hbox.Add(fgs, proportion=2, flag=wx.ALL | wx.EXPAND, border=15)

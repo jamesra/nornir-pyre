@@ -50,7 +50,7 @@ class VolumeCommandBase(CommandBase):
     def GetCorrectedMousePosition(self, e):
         '''wxPython inverts the mouse position, flip it back'''
         (x, y) = e.GetPositionTuple()
-        return (self.camera.WindowHeight - y, x)
+        return self.camera.WindowHeight - y, x
 
     def _mouse_position_in_volume(self, e):
         (x, y) = e.GetPositionTuple()

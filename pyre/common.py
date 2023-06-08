@@ -32,7 +32,7 @@ def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistra
 def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray, warpedImage: NDArray):
     '''Cut image into tiles, assemble small chunks'''
 
-    return assemble.TransformImage(transform, fixedImageShape, warpedImage)
+    return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
 
 
 def SyncWindows(LookAt, scale: float):
@@ -57,7 +57,7 @@ def SyncWindows(LookAt, scale: float):
     #        warpedLookAt = warpedLookAt[0]
 
     warpedLookAt = LookAt
-    if (pyre.Windows['Warped'].IsShown()):
+    if pyre.Windows['Warped'].IsShown():
         warpedLookAt = pyre.state.currentStosConfig._TransformViewModel.InverseTransform([LookAt])
         warpedLookAt = warpedLookAt[0]
 
@@ -82,8 +82,8 @@ def RotateTranslateWarpedImage(LimitImageSize: bool = False):
                                                   pyre.state.currentStosConfig.WarpedImages.Mask,
                                                   LargestDimension=largestdimension,
                                                   TestFlip=False,
-                                                  Cluster=False, 
-                                                  use_cp=True)
+                                                  Cluster=False)#, 
+                                                  #use_cp=True)
         # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
         print("Alignment found: " + str(alignRecord))
         transform = alignRecord.ToTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
@@ -124,7 +124,7 @@ def LinearBlendTransform(blend_factor: float):
                            pyre.state.currentStosConfig.TransformController.TransformModel)
 
     updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(pyre.state.currentStosConfig.Transform,
-                                                                              blend_factor)
+                                                                              blend_factor, ignore_rotation=False)
 
     pyre.state.currentStosConfig.TransformController.TransformModel = updated_transform
     print(f"Linear blend completed for blend value {blend_factor}")

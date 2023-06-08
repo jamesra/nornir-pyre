@@ -5,23 +5,16 @@ Created on Oct 19, 2012
 '''
 
 import copy
-import logging
 import math
-import time
+
+import numpy
+import numpy as np
+from numpy.typing import NDArray
 
 import nornir_imageregistration
-import numpy
-from numpy.typing import NDArray
-import pyglet
-from pyglet.gl import *
-import scipy.ndimage
-import scipy.spatial
-
-import pyre
-import nornir_pools as pools
-import numpy as np
 from nornir_imageregistration.transforms.base import IControlPoints
-from numpy.distutils.fcompiler import none
+import nornir_pools as pools
+import pyre
 
 
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
@@ -195,7 +188,7 @@ class TransformController(object):
         self.TransformModel = TransformModel
 
         if TransformModel is None:
-            self.TransformModel = CreateDefaultTransform()
+            self.TransformModel = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID)
 
         self.Debug = False
         self.ShowWarped = False

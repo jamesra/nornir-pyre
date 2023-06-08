@@ -84,7 +84,7 @@ class PointTextures(object):
 
         if cls.__selectedPointImage is None:
             cls.__selectedPointImage = pyglet.image.load(
-                os.path.join(pyre.resources.ResourcePath(), "SelectedPoint.png"));
+                os.path.join(pyre.resources.ResourcePath(), "SelectedPoint.png"))
             cls.__selectedPointImage.anchor_x = cls.__selectedPointImage.width // 2
             cls.__selectedPointImage.anchor_y = cls.__selectedPointImage.height // 2
 
@@ -142,7 +142,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
     @property
     def ImageMaskViewModel(self):
-        return self._ImageMaskViewModel;
+        return self._ImageMaskViewModel
 
     @property
     def Transform(self) -> nornir_imageregistration.ITransform:
@@ -152,7 +152,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
     def TransformController(self) -> pyre.viewmodels.TransformController:
         return self._TransformController
 
-    @Transform.setter
+    @TransformController.setter
     def TransformController(self, value: pyre.viewmodels.TransformController):
         if self._TransformController is not None:
             self._TransformController.RemoveOnChangeEventListener(self.OnTransformChanged)
@@ -295,7 +295,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         scale = (PointBaseScale / float(self.PointImage.width)) * float(ScaleFactor)
 
-        if (scale < PointBaseScale / float(self.PointImage.width)):
+        if scale < PointBaseScale / float(self.PointImage.width):
             scale = PointBaseScale / float(self.PointImage.width)
 
         if hasattr(PointCache, 'LastSelectedPointIndex'):
@@ -340,7 +340,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                     continue
 
                 if SelectedIndex is not None:
-                    if (i == SelectedIndex and time_for_selected_to_flash):
+                    if i == SelectedIndex and time_for_selected_to_flash:
                         Image = self.SelectedPointImage
 
                 s = pyglet.sprite.Sprite(Image, x=point[1], y=point[0], group=self.PointGroup, batch=PointBatch)
@@ -362,7 +362,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
     def draw_points(self, SelectedIndex=None, FixedSpace=True, BoundingBox=None, ScaleFactor=1):
 
         if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
-            if (not FixedSpace):
+            if not FixedSpace:
                 verts = self.Transform.SourcePoints
             else:
                 verts = self.Transform.TargetPoints
@@ -373,7 +373,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         '''
         :param bool draw_in_fixed_space: True if lines should be drawn in fixed space.  Otherwise draw in warped space
         '''
-        if (self.Transform is None):
+        if self.Transform is None:
             return
 
         Triangles = []
@@ -558,7 +558,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         '''Map the points through the transform and return the results as a Nx4 array of matched fixed and warped points'''
 
         # Figure out where the corners of the texture belong 
-        if (ForwardTransform):
+        if ForwardTransform:
             FixedPoints = Points
             WarpedPoints = Transform.Transform(Points)
         else:
@@ -675,7 +675,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         verts = verts.flatten()
 
-        return (vertarray, texarray, verts)
+        return vertarray, texarray, verts
 
     def DrawWarpedImage(self, ImageViewModel, ForwardTransform=True, tex_color=None, BoundingBox=None, z=None,
                         glFunc=gl.GL_FUNC_ADD):

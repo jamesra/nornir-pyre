@@ -156,7 +156,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
         ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
 
-        if (e.RightIsDown()):
+        if e.RightIsDown():
             self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
 
         self.statusBar.update_status_bar(self.LastMousePosition)
