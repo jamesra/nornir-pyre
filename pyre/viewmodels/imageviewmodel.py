@@ -121,7 +121,9 @@ class ImageViewModel(object):
             self._ImageFilename = input_image
 
             self._Image = nornir_imageregistration.LoadImage(input_image, dtype=np.float16) * 255  # //
-
+            
+            #Old volumes, such as RC1, have RGB images instead of grayscale. 
+            self._Image = nornir_imageregistration.ForceGrayscale(self._Image)
             Logger.info("Loading done")
         elif isinstance(input_image, np.ndarray):
             self._Image = input_image
