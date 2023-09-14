@@ -212,7 +212,7 @@ class TransformController(object):
     def NextViewMode(self):
         self.ShowWarped = not self.ShowWarped
 
-        if self.DefaultToForwardTransform == False:
+        if not self.DefaultToForwardTransform:
             self.ShowWarped = False
 
     def GetFixedPoint(self, index):
@@ -342,13 +342,13 @@ class TransformController(object):
         if not FixedSpace:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 if not self.ShowWarped:
-                    index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
+                    index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
                 else:
                     NewWarpedPoint = self.TransformModel.InverseTransform([point])[0]
-                    index = self.TransformModel.UpdateSourcePointsByPosition(original_point, NewWarpedPoint)
+                    index = self.TransformModel.UpdateSourcePointsByIndex(index, NewWarpedPoint)
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                index = self.TransformModel.UpdateTargetPointsByPosition(original_point, point)
+                index = self.TransformModel.UpdateTargetPointsByIndex(index, point)
 
         print(f"Set point {str(index)} {str(point)}")
 
