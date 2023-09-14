@@ -17,6 +17,7 @@ class CameraCommand(command_base.VolumeCommandBase):
     def __init__(self, parent, completed_func, camera):
         super(CameraCommand, self).__init__(parent, completed_func)
 
+        self.LastMousePosition = None
         self._bind_events()
 
     def _bind_events(self):
@@ -55,7 +56,7 @@ class CameraCommand(command_base.VolumeCommandBase):
         elif keycode == wx.WXK_PAGEUP:
             self.camera.scale = self.scale * 0.9
         elif keycode == wx.WXK_PAGEDOWN:
-            self.camera.scale = self.camera.scale * 1.1
+            self.camera.scale *= 1.1
         elif symbol == 'm':
             LookAt = [self.camera.x, self.camera.y]
 

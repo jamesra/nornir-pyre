@@ -9,6 +9,8 @@ from pyre import state
 
 try:
     import wx
+    import matplotlib
+    matplotlib.use('wx')
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 

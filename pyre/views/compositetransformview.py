@@ -148,7 +148,7 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
                 # OK, find out if the midpoint of any lines are outside the convex hull
                 Triangles = numpy.delete(Triangles, iTri, 0)
 
-            iTri = iTri - 1
+            iTri -= 1
 
         return Triangles
 

@@ -24,20 +24,22 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     '''
     classdocs
     '''
-    _CurrentDragPoint = None
-    _HighlightedPointIndex = 0
+    _CurrentDragPoint = None   #type: int | None
+    _HighlightedPointIndex = 0 #type: int | None
 
     @property
-    def SelectedPointIndex(self) -> int:
+    def SelectedPointIndex(self) -> int | None:
         return ImageTransformViewPanel._CurrentDragPoint
 
     @SelectedPointIndex.setter
-    def SelectedPointIndex(self, value):
+    def SelectedPointIndex(self, value: int | None):
 
         ImageTransformViewPanel._CurrentDragPoint = value
 
-        if not value is None:
+        if value is not None:
             ImageTransformViewPanel._HighlightedPointIndex = value
+
+        print(f'Set Selected Point Index {value} cdp: {ImageTransformViewPanel._CurrentDragPoint} hpi: {ImageTransformViewPanel._HighlightedPointIndex}')
 
     @property
     def HighlightedPointIndex(self) -> int:
@@ -50,7 +52,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     @property
     def ImageGridTransformView(self):
         return self._ImageTransformView
-
+      
     @ImageGridTransformView.setter
     def ImageGridTransformView(self, value):
 
@@ -64,6 +66,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         (self.width, self.height) = self.canvas.GetSize()
 
         self.center_camera()
+        
+    @property
+    def SelectionMaxDistance(self) -> float:
+        selectionMaxDistance = (float(self.camera.ViewHeight) / float(self.height)) * 20.0
+        if selectionMaxDistance < 16:
+            selectionMaxDistance = 16
+            
+        return selectionMaxDistance
+    
 
     def __init__(self, parent, id=-1, TransformController=None, ImageGridTransformView: ImageGridTransformView = None, FixedSpace: bool = False,
                  composite: bool = False, **kwargs):
@@ -72,8 +83,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         :param composite: true if we are showing a composite image, if false we are using FixedSpace to determine the image we are showing
         :param FixedSpace: true if we are showing the fixed space image, if false we are showing the warped image
         '''
-        self._ImageTransformView = None
-        self.SelectionMaxDistance = 1
+        self._ImageTransformView = None 
 
         super(ImageTransformViewPanel, self).__init__(parent, id, **kwargs)
 
@@ -208,10 +218,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             multiplier = 1
             print(str(multiplier))
             if e.ShiftDown():
-                multiplier = multiplier * 5
+                multiplier *= 5
                 print(str(multiplier))
             if e.ControlDown():
-                multiplier = multiplier * 25
+                multiplier *= 25
                 print(str(multiplier))
 
             if keycode == wx.WXK_LEFT:
@@ -223,8 +233,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             elif keycode == wx.WXK_DOWN:
                 delta = [-1, 0]
 
-            delta[0] = delta[0] * multiplier
-            delta[1] = delta[1] * multiplier
+            delta[0] *= multiplier
+            delta[1] *= multiplier
 
             print(str(multiplier))
             self.TransformController.MovePoint(self.HighlightedPointIndex, delta[1], delta[0],
@@ -246,7 +256,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         elif keycode == wx.WXK_PAGEUP:
             self.camera.scale = self.scale * 0.9
         elif keycode == wx.WXK_PAGEDOWN:
-            self.camera.scale = self.camera.scale * 1.1
+            self.camera.scale *= 1.1
         elif keycode == wx.WXK_SPACE:
 
             # If SHIFT is held down, align everything.  Otherwise align the selected point
@@ -361,9 +371,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, BoundingBox=BoundingBox,
                                              FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
 
-        self.SelectionMaxDistance = (float(self.camera.ViewHeight) / float(self.height)) * 16.0
-        if self.SelectionMaxDistance < 16:
-            self.SelectionMaxDistance = 16
+        
 
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 100, 0)))
@@ -481,7 +489,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                         FixedSpace=self.FixedSpace)
                 if self.SelectedPointIndex is not None:
                     if self.SelectedPointIndex > self.TransformController.NumPoints:
-                        self.SelectedPointIndex = self.Tra7nsformController.NumPoints - 1
+                        self.SelectedPointIndex = self.TransformController.NumPoints - 1
 
                 history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
 
@@ -502,10 +510,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     return
 
                 print("d: " + str(distance) + " to p# " + str(index) + " max d: " + str(self.SelectionMaxDistance))
-                if distance < self.SelectionMaxDistance:
-                    self.SelectedPointIndex = index
-                else:
-                    self.SelectedPointIndex = None
+                self.SelectedPointIndex = index if distance < self.SelectionMaxDistance else None
 
     def on_mouse_drag(self, e):
 

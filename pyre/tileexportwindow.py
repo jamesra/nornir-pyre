@@ -70,7 +70,7 @@ class TileExportWindow(window.Window):
             im = PIL.Image.fromarray(numpy.uint8(rawData))
             im.save(Filename)
 
-        rawData = rawData / 255.0
+        rawData /= 255.0
 
         return rawData
 

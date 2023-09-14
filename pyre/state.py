@@ -114,6 +114,8 @@ class MosaicState(StateEvents):
         return None
 
     def __init__(self):
+        super(MosaicState, self).__init__()
+
         self._TransformControllerList = []
         self._ImageViewModelList = []
         self._ImageTransformViewList = []
@@ -218,11 +220,11 @@ class StosState(StateEvents):
 
     @property
     def FixedImageMaskFullPath(self) -> str | None:
-        return None if self.FixedImageMaskViewModel.ImageFilename is None else self.FixedImageMaskViewModel.ImageFilename
+        return None if self.FixedImageMaskViewModel is None or self.FixedImageMaskViewModel.ImageFilename is None else self.FixedImageMaskViewModel.ImageFilename
 
     @property
     def WarpedImageMaskFullPath(self) -> str | None:
-        return None if self.WarpedImageMaskViewModel.ImageFilename is None else self.WarpedImageMaskViewModel.ImageFilename
+        return None if self.WarpedImageMaskViewModel is None or self.WarpedImageMaskViewModel.ImageFilename is None else self.WarpedImageMaskViewModel.ImageFilename
 
     @property
     def FixedImageViewModel(self) -> ImageViewModel | None:
@@ -330,6 +332,8 @@ class StosState(StateEvents):
         self.FireOnTransformControllerChanged()
 
     def __init__(self):
+        super(StosState, self).__init__()
+
         self._fixed_image_permutations = None #Type : nornir_imageregistration.ImagePermutationHelper
         self._warped_image_permutations = None #Type : nornir_imageregistration.ImagePermutationHelper
         self._TransformViewModel = None

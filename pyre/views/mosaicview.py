@@ -47,5 +47,5 @@ class MosaicView(imagegridtransformview.ImageGridTransformView):
         '''
         Constructor
         '''
-
+        super(imagegridtransformview.ImageGridTransformView, self).__init__()
         self._tiles = {}

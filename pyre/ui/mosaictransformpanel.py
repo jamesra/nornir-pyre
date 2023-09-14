@@ -183,7 +183,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         else:
             zdelta = (1 + (-scroll_y / 20.0))
-            self.camera.scale = self.camera.scale * zdelta
+            self.camera.scale *= zdelta
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 
