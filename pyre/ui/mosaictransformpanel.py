@@ -94,7 +94,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         transforms = _get_transforms(self.ImageTransformViewList)
         bbox = utils.FixedBoundingBox(transforms)
         bbox_rect = nornir_imageregistration.spatial.Rectangle.CreateFromBounds(bbox)
-        self.camera.lookat(bbox_rect.Center)
+        self.camera.lookat = bbox_rect.Center
         self.camera.scale = bbox_rect.Width
 
     def draw_objects(self):
@@ -157,7 +157,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
 
         if e.RightIsDown():
-            self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
+            self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 

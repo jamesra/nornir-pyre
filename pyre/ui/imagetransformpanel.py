@@ -24,8 +24,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     '''
     classdocs
     '''
-    _CurrentDragPoint = None   #type: int | None
-    _HighlightedPointIndex = 0 #type: int | None
+    _CurrentDragPoint = None  # type: int | None
+    _HighlightedPointIndex = 0  # type: int | None
 
     @property
     def SelectedPointIndex(self) -> int | None:
@@ -39,7 +39,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if value is not None:
             ImageTransformViewPanel._HighlightedPointIndex = value
 
-        print(f'Set Selected Point Index {value} cdp: {ImageTransformViewPanel._CurrentDragPoint} hpi: {ImageTransformViewPanel._HighlightedPointIndex}')
+        print(
+            f'Set Selected Point Index {value} cdp: {ImageTransformViewPanel._CurrentDragPoint} hpi: {ImageTransformViewPanel._HighlightedPointIndex}')
 
     @property
     def HighlightedPointIndex(self) -> int:
@@ -52,7 +53,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     @property
     def ImageGridTransformView(self):
         return self._ImageTransformView
-      
+
     @ImageGridTransformView.setter
     def ImageGridTransformView(self, value):
 
@@ -66,24 +67,24 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         (self.width, self.height) = self.canvas.GetSize()
 
         self.center_camera()
-        
+
     @property
     def SelectionMaxDistance(self) -> float:
         selectionMaxDistance = (float(self.camera.ViewHeight) / float(self.height)) * 20.0
         if selectionMaxDistance < 16:
             selectionMaxDistance = 16
-            
-        return selectionMaxDistance
-    
 
-    def __init__(self, parent, id=-1, TransformController=None, ImageGridTransformView: ImageGridTransformView = None, FixedSpace: bool = False,
+        return selectionMaxDistance
+
+    def __init__(self, parent, id=-1, TransformController=None, ImageGridTransformView: ImageGridTransformView = None,
+                 FixedSpace: bool = False,
                  composite: bool = False, **kwargs):
         '''
         Constructor
         :param composite: true if we are showing a composite image, if false we are using FixedSpace to determine the image we are showing
         :param FixedSpace: true if we are showing the fixed space image, if false we are showing the warped image
         '''
-        self._ImageTransformView = None 
+        self._ImageTransformView = None
 
         super(ImageTransformViewPanel, self).__init__(parent, id, **kwargs)
 
@@ -316,15 +317,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             #             self.camera = None
             #             pass
         elif self.ImageGridTransformView is not None and self.ImageGridTransformView.width is not None:
-            fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.ImageGridTransformView.height, self.ImageGridTransformView.width))
+            fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (
+            self.ImageGridTransformView.height, self.ImageGridTransformView.width))
         else:
             return
-            #raise NotImplementedError("Not done")
-            
-        self.camera.lookat(fixed_bounding_box.Center)
+            # raise NotImplementedError("Not done")
+
+        self.camera.lookat = fixed_bounding_box.Center
         self.camera.scale = fixed_bounding_box.Width
-            
-            
 
         return
 
@@ -371,8 +371,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, BoundingBox=BoundingBox,
                                              FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
 
-        
-
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 100, 0)))
 
@@ -400,11 +398,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         scroll_y = e.GetWheelRotation() / 120.0
 
-
-        if e.CmdDown() and e.AltDown() and isinstance(self.TransformController.TransformModel, nornir_imageregistration.ITransformRelativeScaling):
+        if e.CmdDown() and e.AltDown() and isinstance(self.TransformController.TransformModel,
+                                                      nornir_imageregistration.ITransformRelativeScaling):
             scale_delta = (1.0 + (-scroll_y / 50.0))
             self.TransformController.TransformModel.ScaleWarped(scale_delta)
-        elif e.CmdDown(): # We rotate when command is down
+        elif e.CmdDown():  # We rotate when command is down
             angle = float(abs(scroll_y) * 2) ** 2.0
             if e.ShiftDown():
                 angle = float(abs(scroll_y) / 2) ** 2.0
@@ -415,7 +413,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             # print "Angle: " + str(angle)
             try:
-                self.TransformController.Rotate(rangle, np.array(pyre.state.currentStosConfig.WarpedImageViewModel.Image.shape) / 2.0)
+                self.TransformController.Rotate(rangle, np.array(
+                    pyre.state.currentStosConfig.WarpedImageViewModel.Image.shape) / 2.0)
             except NotImplementedError:
                 print("Current transform does not support rotation")
                 pass
@@ -533,7 +532,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
 
         if e.RightIsDown():
-            self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
+            self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
 
         if e.LeftIsDown():
             if e.CmdDown():

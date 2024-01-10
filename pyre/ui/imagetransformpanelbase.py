@@ -60,7 +60,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
     def update(self, dt):
         pass
 
-    def ImageCoordsForMouse(self, y, x):
+    def ImageCoordsForMouse(self, y: float, xc):
         return self.camera.ImageCoordsForMouse(y, x)
 
     def on_resize(self, e):
@@ -82,9 +82,9 @@ class ImageTransformPanelBase(glpanel.GLPanel):
     def OnCameraChanged(self):
         self.canvas.Refresh()
 
-    def lookatfixedpoint(self, point, scale):
+    def lookatfixedpoint(self, point: nornir_imageregistration.PointLike, scale: float):
         '''specify a point to look at in fixed space'''
-        self.camera.lookat(point)
+        self.camera.lookat = point
         self.camera.scale = scale
 
     def center_camera(self):
