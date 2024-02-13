@@ -671,7 +671,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         vertarray = (gl.GLfloat * len(vertarray))(*vertarray)
         texarray = (gl.GLfloat * len(texarray))(*texarray)
 
-        verts = tri.vertices
+        verts = tri.simplices
 
         verts = verts.flatten()
 
