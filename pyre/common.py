@@ -130,9 +130,36 @@ def LinearBlendTransform(blend_factor: float):
     print(f"Linear blend completed for blend value {blend_factor}")
 
 
+def either_roi_is_masked(transform: nornir_imageregistration.ITransform,
+                         target_mask: NDArray | None,
+                         source_mask: NDArray | None,
+                         target_controlpoint: nornir_imageregistration.PointLike,
+                         alignmentArea: nornir_imageregistration.AreaLike,
+                         ):
+    """Returns True if either mask is all False"""
+
+    if target_mask is not None and source_mask is not None:
+        target_mask_roi, source_mask_roi = nornir_imageregistration.local_distortion_correction.BuildAlignmentROIs(
+            transform=transform,
+            targetImage_param=target_mask,
+            sourceImage_param=source_mask,
+            target_image_stats=None,
+            source_image_stats=None,
+            target_controlpoint=target_controlpoint,
+            alignmentArea=alignmentArea)
+
+        if not numpy.any(target_mask_roi):
+            return True
+
+        if not numpy.any(source_mask_roi):
+            return True
+
+    return False
+
+
 def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            task_description: str,
-                           transform, 
+                           transform: nornir_imageregistration.ITransform,
                            target_image: NDArray,
                            source_image: NDArray,
                            target_mask: NDArray | None,
@@ -143,23 +170,11 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            alignmentArea,
                            anglesToSearch: Iterable[float]):
 
+    if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
+        return None
+
     if pool is None:
         pool = nornir_pools.GetGlobalLocalMachinePool()
-
-    if target_mask is not None and source_mask is not None:
-        target_mask_roi, source_mask_roi = nornir_imageregistration.local_distortion_correction.BuildAlignmentROIs(transform=transform,
-                                                           targetImage_param=target_mask,
-                                                           sourceImage_param=source_mask,
-                                                           target_image_stats=None,
-                                                           source_image_stats=None,
-                                                           target_controlpoint=target_controlpoint,
-                                                           alignmentArea=alignmentArea)
-
-        if not numpy.any(target_mask_roi):
-            return None
-
-        if not numpy.any(source_mask_roi): 
-            return None
 
     '''Try to use the Composite view to render the two tiles we need for alignment'''
     task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,
