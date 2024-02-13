@@ -54,7 +54,7 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
                                                                                 scale=1.0)
 
     # alignRecord = nornir_imageregistration.AlignmentRecord(peak=(0, 0), weight=0, angle=0)
-    # return alignRecord.ToTransform(FixedShape,
+    # return alignRecord.ToImageTransform(FixedShape,
     # WarpedShape)
 
 

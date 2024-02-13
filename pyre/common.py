@@ -82,12 +82,11 @@ def RotateTranslateWarpedImage(LimitImageSize: bool = False):
                                                   pyre.state.currentStosConfig.WarpedImages.Mask,
                                                   LargestDimension=largestdimension,
                                                   TestFlip=False,
-                                                  Cluster=False)#, 
-                                                  #use_cp=True)
+                                                  Cluster=False)
         # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
         print("Alignment found: " + str(alignRecord))
-        transform = alignRecord.ToTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
-                                            pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
+        transform = alignRecord.ToImageTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
+                                                 pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
         pyre.state.currentStosConfig.TransformController.TransformModel = transform
         #pyre.state.currentStosConfig.TransformController.SetPoints(transform.points)
 

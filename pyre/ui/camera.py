@@ -8,6 +8,7 @@ import math
 
 import nornir_imageregistration
 import numpy
+from numpy.typing import NDArray
 from pyglet.gl import *
 
 
@@ -21,18 +22,18 @@ class Camera(object):
     '''
 
     @property
-    def x(self):
+    def x(self) -> float:
         '''Position in volume space'''
-        return self._x
+        return self._lookat[nornir_imageregistration.iPoint.X]
  
 #     @x.setter
 #     def x(self, value):
 #         self._x = value)
 
     @property
-    def y(self):
+    def y(self) -> float:
         '''Position in volume space'''
-        return self._y
+        return self._lookat[nornir_imageregistration.iPoint.Y]
 
 #     @y.setter
 #     def y(self, value):
@@ -51,7 +52,7 @@ class Camera(object):
         self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
         
     @property
-    def Aspect(self):
+    def Aspect(self) -> float:
         return self._aspect
         
     @property 
@@ -89,43 +90,42 @@ class Camera(object):
         return self._view_size[nornir_imageregistration.iPoint.Y]
      
     @property
-    def angle(self):
-        return float(self._angle)
+    def angle(self) -> float:
+        return self._angle
 
     @angle.setter
-    def angle(self, value):
+    def angle(self, value: float):
         self._angle = float(value)
         self._FireChangeEvent()
 
     @property
-    def scale(self):
-        return float(self._scale) 
+    def scale(self) -> float:
+        return self._scale
     
     @scale.setter
-    def scale(self, value):
+    def scale(self, value: float):
         self._scale = float(value)
         self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
         self._FireChangeEvent()
 
-    def ImageCoordsForMouse(self, y, x):
+    def ImageCoordsForMouse(self, y: float, x: float) -> tuple[float, float]:
         ImageX = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
         ImageY = ((float(y) / self.WindowHeight) * self.ViewHeight) + (self.y - (self.ViewHeight / 2.0))
         return ImageY, ImageX
     
     @property
-    def VisibleImageBoundingBox(self):
-
+    def VisibleImageBoundingBox(self) -> nornir_imageregistration.Rectangle:
         (bottom, left) = self.ImageCoordsForMouse(0, 0)
         (top, right) = self.ImageCoordsForMouse(self.WindowHeight, self.WindowWidth)
 
-        return nornir_imageregistration.Rectangle.CreateFromBounds((bottom, left, top, right))
+        return nornir_imageregistration.Rectangle.CreateFromBounds(numpy.array((bottom, left, top, right)))
 
-    def __init__(self, position, scale=1, angle=0, size=None):
+    def __init__(self, position: nornir_imageregistration.PointLike, scale=1, angle=0, size=None):
         '''
         :param tuple size: Size of the window the camera is within
         
         '''
-        self._x, self._y = position  # centered on
+        self._lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)  # centered on
         self._angle = 0  # tilt
         self._scale = scale  # zoom
         self.__OnChangeEventListeners = []
@@ -147,12 +147,16 @@ class Camera(object):
         for func in self.__OnChangeEventListeners:
             func()
 
-    def lookat(self, point):
+    @property
+    def lookat(self) -> NDArray[float]:
+        return numpy.copy(self._lookat)
+
+    @lookat.setter
+    def lookat(self, point: nornir_imageregistration.PointLike):
         ''':param tuple point: (y,x)
            :param float scale: scale
         '''
-        self._x = point[nornir_imageregistration.iPoint.X]
-        self._y = point[nornir_imageregistration.iPoint.Y]
+        self._lookat = numpy.array(point, dtype=float)
         # self._scale = scale
         
         # print("X: %g Y: %g S: %g" % (self.x, self.y, self.scale))
