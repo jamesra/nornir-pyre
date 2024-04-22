@@ -6,9 +6,12 @@ Created on Oct 16, 2012
 
 import math
 
+import os
 import numpy as np
 import nornir_imageregistration
-from pyglet import *
+import OpenGL.GL as gl
+# import pyglet
+# from pyglet import *
 
 import pyre.state
 from pyre import history, state
@@ -318,7 +321,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             #             pass
         elif self.ImageGridTransformView is not None and self.ImageGridTransformView.width is not None:
             fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (
-            self.ImageGridTransformView.height, self.ImageGridTransformView.width))
+                self.ImageGridTransformView.height, self.ImageGridTransformView.width))
         else:
             return
             # raise NotImplementedError("Not done")
@@ -342,10 +345,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         # Draw an image if we can
         if not self.composite:
-            self._ImageTransformView.draw_textures(BoundingBox=BoundingBox, ShowWarped=self.ShowWarped,
+            self._ImageTransformView.draw_textures(self.camera.view_proj, BoundingBox=BoundingBox,
+                                                   ShowWarped=self.ShowWarped,
                                                    glFunc=gl.GL_FUNC_ADD)
         else:
-            self._ImageTransformView.draw_textures(BoundingBox=BoundingBox, glFunc=self.glFunc)
+            self._ImageTransformView.draw_textures(self.camera.view_proj, BoundingBox=BoundingBox, glFunc=self.glFunc)
 
         ClearDrawTextureState()
 
@@ -368,8 +372,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         # pointScale = (BoundingBox[3] * BoundingBox[2]) / (self.height * self.width)
         pointScale = self.camera.scale / self.height
-        self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, BoundingBox=BoundingBox,
-                                             FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
+        # self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, BoundingBox=BoundingBox,
+        #                                     FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
 
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 100, 0)))

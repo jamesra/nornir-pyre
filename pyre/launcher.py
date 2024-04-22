@@ -109,6 +109,7 @@ def Run():
     Windows["Fixed"] = StosWindow(None, "Fixed", 'Fixed Image', showFixed=True)
     Windows["Warped"] = StosWindow(None, "Warped", 'Warped Image')
     Windows["Composite"] = StosWindow(None, "Composite", 'Composite', showFixed=True, composite=True)
+
     # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
 
     InitializeStateFromArguments(arg_values)

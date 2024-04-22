@@ -6,10 +6,12 @@ Created on Sep 12, 2013
 
 import logging
 import os
+import numpy
+from numpy.typing import NDArray
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
-import numpy
+
 from pkg_resources import resource_filename
 import nornir_imageregistration
 
@@ -37,7 +39,7 @@ def README():
         return Readme
 
 
-def TextureForNumpyImage(image):
+def TextureForNumpyImage(image: NDArray[numpy.floating]):
     '''Create a GL texture for the scipy.ndimage array'''
 
     image = numpy.array(image, dtype=numpy.float32) / 255.0
@@ -54,6 +56,6 @@ def TextureForNumpyImage(image):
     return textureid
 
 
-def LoadTexture(image):
+def LoadTexture(image: str):
     data = nornir_imageregistration.LoadImage(image)
     return TextureForNumpyImage(data)

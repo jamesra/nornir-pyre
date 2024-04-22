@@ -10,6 +10,7 @@ from pyre import state
 try:
     import wx
     import matplotlib
+
     matplotlib.use('wx')
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
@@ -18,7 +19,7 @@ import nornir_pools as pools
 
 
 class PyreWindowBase(wx.Frame):
-    '''The window which we use for mosaic views'''
+    """The window we use for views"""
 
     @property
     def ID(self):
@@ -298,8 +299,6 @@ class StosWindow(PyreWindowBase):
         self.windmenu = self.__CreateWindowsMenu()
         menuBar.Append(self.windmenu, "&Windows")
 
-        self.SetMenuBar(menuBar)
-
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         # Allows Drag and Drop
@@ -320,6 +319,8 @@ class StosWindow(PyreWindowBase):
 
         # Make sure we have a GL context before initializing view window
         wx.CallAfter(self.UpdateRawImageWindow)
+
+        self.SetMenuBar(menuBar)
 
     def __CreateWindowsMenu(self):
         menu = wx.Menu()
@@ -427,7 +428,7 @@ class StosWindow(PyreWindowBase):
             return
 
         pyre.history.SaveState(setattr, pyre.state.currentStosConfig.TransformController, 'TransformModel',
-                                       pyre.state.currentStosConfig.TransformController.TransformModel)
+                               pyre.state.currentStosConfig.TransformController.TransformModel)
         pyre.state.currentStosConfig.TransformController.TransformModel = \
             nornir_imageregistration.transforms.ConvertTransform(
                 pyre.state.currentStosConfig.Transform, transform_type,
@@ -472,7 +473,7 @@ class StosWindow(PyreWindowBase):
         for m in menu.MenuItems:
             option_cell_size = self.__get_cell_size_from_menuitem(m)
             m.Check(option_cell_size == currentStosConfig.AlignmentTileSize)
-            #print(m.IsChecked())
+            # print(m.IsChecked())
 
         # menu.UpdateUI()
 
@@ -484,7 +485,7 @@ class StosWindow(PyreWindowBase):
         for m in menu.MenuItems:
             menu_item_transform_type = self.__get_transform_type_from_menuitem(m)
             m.Check(menu_item_transform_type == current_type)
-            #print(f'Checked: Evaluated: {menu_item_transform_type == current_type} Control State: {m.IsChecked()}')
+            # print(f'Checked: Evaluated: {menu_item_transform_type == current_type} Control State: {m.IsChecked()}')
 
         # menu.UpdateUI()
 
@@ -656,9 +657,9 @@ class StosWindow(PyreWindowBase):
 
     def OnRefineGrid(self, e):
         if pyre.state.currentStosConfig.FixedImageViewModel is None or \
-           pyre.state.currentStosConfig.WarpedImageViewModel is None:
-           print("Need both images loaded with a transform to run refine grid")
-           return None
+                pyre.state.currentStosConfig.WarpedImageViewModel is None:
+            print("Need both images loaded with a transform to run refine grid")
+            return None
 
         with pyre.ui.RefineGridSettingsDialog.GetGridRefineSettings(self) as settings:
             pyre.common.GridRefineTransform(settings)

@@ -9,6 +9,7 @@ try:
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
+import nornir_imageregistration
 import nornir_imageregistration.spatial as spatial
 from pyre.ui import glpanel, Camera
 from pyre.ui.camerastatusbar import CameraStatusBar
@@ -43,7 +44,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
         super(ImageTransformPanelBase, self).__init__(parent, window_id, **kwargs)
 
-        (self.width, self.height) = self.canvas.GetSize()
+        self.width, self.height = self.GetSize()
 
         self.AddStatusBar()
 

@@ -2,30 +2,32 @@ __all__ = ['CompositeTransformView', 'ImageGridTransformView', 'MosaicView']
 
 import ctypes
 
+import OpenGL.GL.shaders
 import numpy
-import pyglet
+from numpy.typing import NDArray
 import scipy.spatial
-from pyglet.gl import *
+import OpenGL.GL as gl
+from OpenGL.arrays import vbo
 
 from .compositetransformview import CompositeTransformView
 from . import compositetransformview
 from .imagegridtransformview import ImageGridTransformView
 from .mosaicview import MosaicView
-import pyglet.gl as gl
 from pyre.views import imagegridtransformview
+from pyre.shaders import TextureShader
 
 
 def LineIndiciesFromTri(T: scipy.spatial.Delaunay) -> list[int]:
-    '''
+    """
     :param ndarray T: numpy array of triangle indicies
     :rtype: list
-    :returns: 1D list of triangle indicies 
-    '''
+    :returns: 1D list of triangle indicies
+    """
 
     LineIndicies = []
 
-    #Triangles = numpy.array(T)
-    #if Triangles.ndim == 1:
+    # Triangles = numpy.array(T)
+    # if Triangles.ndim == 1:
     #    Triangles = Triangles.reshape(len(Triangles) // 3, 3)
 
     for tri in T.simplices:
@@ -51,7 +53,7 @@ def DrawTriangles(verts, Triangles: scipy.spatial.Delaunay):
     vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
 
     gl.glDisable(gl.GL_TEXTURE_2D)
-    pyglet.gl.glColor4f(1.0, 0, 0, 1.0)
+    gl.glColor4f(1.0, 0, 0, 1.0)
     pyglet.graphics.draw_indexed(len(vertarray) // 3,
                                  gl.GL_LINES,
                                  LineIndicies,
@@ -78,7 +80,7 @@ def VertsForRectangle(rect):
 
 
 def DrawRectangle(rect, color):
-    '''Draw a rectangle'''
+    """Draw a rectangle"""
 
     vertarray = VertsForRectangle(rect)
 
@@ -97,7 +99,7 @@ def DrawRectangle(rect, color):
 def SetDrawTextureState():
     gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glDisable(gl.GL_CULL_FACE)
-    gl.glEnable(GL_DEPTH_TEST)
+    gl.glEnable(gl.GL_DEPTH_TEST)
 
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
@@ -111,7 +113,7 @@ def SetDrawTextureState():
 def SetDrawMosaicState():
     gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glDisable(gl.GL_CULL_FACE)
-    gl.glEnable(GL_DEPTH_TEST)
+    gl.glEnable(gl.GL_DEPTH_TEST)
 
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
@@ -123,10 +125,10 @@ def SetDrawMosaicState():
 
 
 def ClearDrawTextureState():
-    '''Reset the GL device from drawing textures'''
+    """Reset the GL device from drawing textures"""
 
     gl.glBlendEquation(gl.GL_FUNC_ADD)
-    pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+    gl.glClearColor(1.0, 1.0, 1.0, 1.0)
     gl.glDisable(gl.GL_BLEND)
 
 
@@ -136,7 +138,7 @@ def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FU
 
     gl.glBlendEquation(glFunc)
     gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
-    pyglet.gl.glColor4f(color[0], color[1], color[2], color[3])
+    gl.glColor4f(color[0], color[1], color[2], color[3])
 
     #     pyglet.graphics.draw_indexed(len(vertarray) / 3,
     #                                   gl.GL_TRIANGLES,
@@ -151,24 +153,39 @@ def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FU
                         ('t2f', texarray))
 
 
-def DrawTextureWithBuffers(texture, vertarray, buffers, verts, color=None, glFunc=gl.GL_FUNC_ADD):
+def DrawTextureWithBuffers(texture, vertex_buffer: vbo.VBO, texture_buffer: vbo.VBO, index_buffer: vbo.VBO, color=None,
+                           glFunc=gl.GL_FUNC_ADD):
     if color is None:
         color = (1.0, 1.0, 1.0, 1.0)
 
-    gl.glBlendEquation(glFunc)
-    gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
-    pyglet.gl.glColor4f(color[0], color[1], color[2], color[3])
+    try:
 
-    #     pyglet.graphics.draw_indexed(len(vertarray) / 3,
-    #                                   gl.GL_TRIANGLES,
-    #                                   verts.tolist(),
-    #                                   ('v3f', vertarray),
-    #                                   ('t2f', texarray))
+        gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+        vertex_buffer.bind()
+        gl.EnableClientState(gl.GL_INDEX_ARRAY)
+        index_buffer.bind()
 
-    draw_indexed_from_buffer(len(vertarray) / 3,
-                             gl.GL_TRIANGLES,
-                             verts.tolist(),
-                             buffers)
+        gl.glVertexPointer(vertex_buffer)
+        gl.glIndexPointer(index_buffer)
+
+    finally:
+        vertex_buffer.unbind()
+        index_buffer.unbind()
+        #
+        # gl.glBlendEquation(glFunc)
+        # gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
+        # gl.glColor4f(color[0], color[1], color[2], color[3])
+        #
+        # #     pyglet.graphics.draw_indexed(len(vertarray) / 3,
+        # #                                   gl.GL_TRIANGLES,
+        # #                                   verts.tolist(),
+        # #                                   ('v3f', vertarray),
+        # #                                   ('t2f', texarray))
+        #
+        # draw_indexed_from_buffer(len(vertarray) / 3,
+        #                          gl.GL_TRIANGLES,
+        #                          verts.tolist(),
+        #                          buffers)
 
 
 AttributeLookup = {}
@@ -184,9 +201,12 @@ def GetOrCreateAttribute(fmt):
     return AttributeLookup[fmt]
 
 
-def GetOrCreateBuffer(size, fmt, array):
-    '''Generate the attributes used in the GL draw_indexed call
-    '''
+def GetOrCreateBuffer(size: int, fmt: str, array: NDArray[numpy.floating]):
+    """
+    Generate the attributes used in the GL draw_indexed call
+    """
+
+    result = vbo.VBO(array, fmt)
     attribute = pyglet.graphics.vertexattribute.create_attribute(fmt)
     assert size == len(array) // attribute.count, f'Data for {fmt} is incorrect length'
 
@@ -198,9 +218,9 @@ def GetOrCreateBuffer(size, fmt, array):
     return attribute, buffer
 
 
-def GetOrCreateBuffers(size, *data):
-    '''Generate the attributes used in the GL draw_indexed call
-    '''
+def GetOrCreateBuffers(size: int, *data: list[tuple[str, numpy.ndarray]]):
+    """Generate the attributes used in the GL draw_indexed call
+    """
 
     buffers = []
     for fmt, array in data:
@@ -211,7 +231,7 @@ def GetOrCreateBuffers(size, *data):
 
 
 def draw_indexed_custom(size, mode, indices, *data):
-    '''Draw a primitive with indexed vertices immediately.
+    """Draw a primitive with indexed vertices immediately.
 
     :Parameters:
         `size` : int
@@ -223,7 +243,7 @@ def draw_indexed_custom(size, mode, indices, *data):
         `data` : data items
             Attribute formats and data.  See the module summary for details.
 
-    '''
+    """
     glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT)
 
     size = int(size)
@@ -257,8 +277,8 @@ def draw_indexed_custom(size, mode, indices, *data):
     glPopClientAttrib()
 
 
-def draw_indexed_from_buffer(size, mode, indices, buffers):
-    '''Draw a primitive with indexed vertices immediately.
+def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vbo.VBO, mode: int = gl.GL_TRIANGLES):
+    """Draw a primitive with indexed vertices immediately.
 
     :Parameters:
         `size` : int
@@ -270,25 +290,25 @@ def draw_indexed_from_buffer(size, mode, indices, buffers):
         `data` : data items
             Attribute formats and data.  See the module summary for details.
 
-    '''
-    glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT)
+    """
+    gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
 
-    for attribute, buffer in buffers:
+    for attribute, buffer in vertex_buffer:
         # attribute.enable()
         attribute.set_pointer(buffer.ptr)
 
     if size <= 0xff:
-        index_type = GL_UNSIGNED_BYTE
+        index_type = gl.GL_UNSIGNED_BYTE
         index_c_type = ctypes.c_ubyte
     elif size <= 0xffff:
-        index_type = GL_UNSIGNED_SHORT
+        index_type = gl.GL_UNSIGNED_SHORT
         index_c_type = ctypes.c_ushort
     else:
-        index_type = GL_UNSIGNED_INT
+        index_type = gl.GL_UNSIGNED_INT
         index_c_type = ctypes.c_uint
 
-    index_array = (index_c_type * len(indices))(*indices)
-    glDrawElements(mode, len(indices), index_type, index_array)
-    glFlush()
+    index_array = (index_c_type * len(index_buffer))(*index_buffer)
+    gl.glDrawElements(mode, len(index_buffer), index_type, index_array)
+    gl.glFlush()
 
-    glPopClientAttrib()
+    gl.glPopClientAttrib()

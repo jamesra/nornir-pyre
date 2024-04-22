@@ -1,13 +1,13 @@
-'''
+"""
 Created on Oct 17, 2012
 
 @author: u0490822
-'''
+"""
 
 import logging
 import math
 import os
-import sys 
+import sys
 
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -20,21 +20,21 @@ import scipy.ndimage
 
 import nornir_imageregistration.core as core
 import nornir_shared.images as images
-from nornir_shared.mathhelper import NearestPowerOfTwo 
+from nornir_shared.mathhelper import NearestPowerOfTwo
 
 Logger = logging.getLogger("ImageArray")
 
 
 class ImageViewModel(object):
-    '''
+    """
     Represents a numpy image as an array of textures.  Read-only.
-    '''
+    """
 
     # The largest dimension we allow a texture to have
     MaxTextureDimension = int(4096)
 
     @property
-    def Image(self) -> NDArray:
+    def Image(self) -> NDArray[numpy.floating]:
         return self._Image
 
     @property
@@ -43,49 +43,49 @@ class ImageViewModel(object):
 
     @property
     def width(self) -> int:
-        '''Size of the full image'''
+        """Size of the full image"""
         return self._Image.shape[1]
 
     @property
     def height(self) -> int:
-        '''Size of the full image'''
+        """Size of the full image"""
         return self._Image.shape[0]
 
     @property
     def NumRows(self) -> int:
-        '''Number of texture rows for the whole image'''
+        """Number of texture rows for the whole image"""
         return self._NumRows
 
     @property
     def NumCols(self) -> int:
-        '''Number of texture columns for the whole image'''
+        """Number of texture columns for the whole image"""
         return self._NumCols
 
     @property
     def size(self) -> tuple[int, int]:
-        '''Size of the full image'''
+        """Size of the full image"""
         return self._height, self._width
 
     @property
     def shape(self) -> tuple[int, int]:
-        '''Size of the full image'''
+        """Size of the full image"""
         return self._height, self._width
 
     @property
-    def ImageArray(self):
-        '''Array of textures for the full image'''
+    def ImageArray(self) -> list[list[int]]:
+        """Array of textures for the full image"""
         if self._ImageArray is None:
             self._ImageArray = self.CreateImageArray()
         return self._ImageArray
 
     @property
-    def TextureSize(self):
-        '''Size of a texture'''
+    def TextureSize(self) -> tuple[int, int]:
+        """Size of a texture"""
         return self._TextureSize
 
     @property
-    def ImageFilename(self):
-        '''Filename we loaded'''
+    def ImageFilename(self) -> str:
+        """Filename we loaded"""
         return self._ImageFilename
 
     @classmethod
@@ -102,9 +102,9 @@ class ImageViewModel(object):
         return _TextureSize
 
     def __init__(self, input_image: str | NDArray):
-        '''
+        """
         Constructor, _Image is either path to file or a numpy array
-        '''
+        """
         # self._TileSize = (int(1024), int(1024))
         # self.TextureHeight = int(math.pow(2, math.ceil(math.log(self.height, 2))))
         # self.TextureWidth = int(math.pow(2, math.ceil(math.log(self.width, 2))))
@@ -121,8 +121,8 @@ class ImageViewModel(object):
             self._ImageFilename = input_image
 
             self._Image = nornir_imageregistration.LoadImage(input_image, dtype=np.float16) * 255  # //
-            
-            #Old volumes, such as RC1, have RGB images instead of grayscale. 
+
+            # Old volumes, such as RC1, have RGB images instead of grayscale.
             self._Image = nornir_imageregistration.ForceGrayscale(self._Image)
             Logger.info("Loading done")
         elif isinstance(input_image, np.ndarray):
@@ -146,21 +146,21 @@ class ImageViewModel(object):
 
         self._ImageArray = None
 
-    def ResizeToPowerOfTwo(self, InputImage: str, Tilesize=None):
-
-        if Tilesize is None:
-            Tilesize = self._TileSize
+    def ResizeToPowerOfTwo(self, InputImage: str, tilesize: nornir_imageregistration.ShapeLike | None = None) -> \
+            NDArray[numpy.floating]:
+        if tilesize is None:
+            tilesize = self._TileSize
 
         Resize = scipy.ndimage.imread(InputImage, flatten=True)
 
         height = Resize.shape[0]
         width = Resize.shape[1]
 
-        NumCols = math.ceil(width / float(Tilesize[0]))
-        NumRows = math.ceil(height / float(Tilesize[1]))
+        NumCols = math.ceil(width / float(tilesize[0]))
+        NumRows = math.ceil(height / float(tilesize[1]))
 
-        newwidth = NumCols * Tilesize[0]
-        newheight = NumRows * Tilesize[1]
+        newwidth = NumCols * tilesize[0]
+        newheight = NumRows * tilesize[1]
 
         newImage = numpy.zeros((newheight, newwidth), dtype=Resize.dtype)
 
@@ -168,20 +168,17 @@ class ImageViewModel(object):
 
         return newImage
 
-    def CreateArrayTile(self, ix, iy):
-        '''Create a texture for the tile at given coordinates'''
-        return
-
-    def CreateImageArray(self):
-        '''
+    def CreateImageArray(self) -> list[list[int]]:
+        """
         Generate an array of textures when images are larger than the max texture size
-        '''
+        Texture ID's in OpenGL are integers
+        """
         # from Pools import Threadpool
 
         Logger.info("CreateImageArray")
         # Round up size to nearest power of 2
 
-        TextureGrid = list()
+        texture_grid = list()
 
         print_output = self.NumCols > 1 and self.NumRows > 1
 
@@ -228,10 +225,10 @@ class ImageViewModel(object):
                 del temp
                 columnTextures.append(texture)
 
-            TextureGrid.append(columnTextures)
+            texture_grid.append(columnTextures)
 
         if print_output:
             print('\nTexture creation complete\n')
 
         Logger.info("Completed CreateImageArray")
-        return TextureGrid
+        return texture_grid

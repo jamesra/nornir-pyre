@@ -10,10 +10,10 @@ import os
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
 import numpy
-import pyglet
+from numpy.typing import NDArray
 import scipy.spatial
 
-import pyglet.gl as gl
+import OpenGL.GL as gl
 from pyre.views import imagegridtransformview
 import pyre.views
 
@@ -102,7 +102,6 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         self.ImageMode = 'Add'
 
         self._tranformed_verts_cache = None
-
 
     def OnTransformChanged(self):
 
@@ -198,7 +197,7 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
         return
 
-    def draw_textures(self, BoundingBox=None, glFunc=None):
+    def draw_textures(self, view_proj: NDArray[numpy.floating], BoundingBox=None, glFunc=None):
         self.setup_composite_rendering()
 
         glFunc = gl.GL_FUNC_ADD
@@ -208,7 +207,10 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
             if glFunc == gl.GL_FUNC_ADD:
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
-            self.DrawFixedImage(self.FixedImageArray, FixedColor, BoundingBox=BoundingBox, z=0.25)
+            # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
+            self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=FixedColor, BoundingBox=BoundingBox,
+                                 z=0.25,
+                                 glFunc=glFunc)
 
         if self.WarpedImageArray is not None:
             WarpedColor = None
@@ -216,7 +218,8 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
                 gl.glBlendEquation(glFunc)
                 WarpedColor = (0, 1.0, 0, 1)
 
-            self.DrawWarpedImage(self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox, z=0.75,
+            self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox,
+                                 z=0.75,
                                  glFunc=glFunc)
 
         self.clear_composite_rendering()

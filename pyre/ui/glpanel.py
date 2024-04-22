@@ -5,7 +5,8 @@ import sys
 # import OpenGL as gl
 
 import pyglet
-from pyglet import gl
+import OpenGL.GL as gl
+from pyre.shaders import TextureShader, ColorShader
 
 try:
     import wx
@@ -15,6 +16,11 @@ except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 pyglet.options['shadow_window'] = False
+
+
+def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
+    msg = raw[0:length]
+    print(f'debug: {source}, {msg_type}, {msg_id}, {severity}, {msg}')
 
 
 class GLPanel(wx.Panel):
@@ -31,16 +37,19 @@ class GLPanel(wx.Panel):
 
         # init gl canvas data
         self.GLinitialized = False
-        attribList = (wx.glcanvas.WX_GL_RGBA,  # RGBA
+        attribList = (wx.glcanvas.WX_GL_DEBUG,
+                      wx.glcanvas.WX_GL_RGBA,  # RGBA
                       wx.glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
-                      wx.glcanvas.WX_GL_DEPTH_SIZE, 24)  # 24 bit
+                      wx.glcanvas.WX_GL_DEPTH_SIZE, 24,)  # 24 bit
 
         # Create context
         self.canvas = wx.glcanvas.GLCanvas(self, attribList=attribList)
 
         if GLPanel.SharedGLContext is None:
+            # Install our debug message callback
             GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas)
 
+        self.canvas.context = GLPanel.SharedGLContext
         self.canvas.SetCurrent(GLPanel.SharedGLContext)
 
         #    GLPanel.pygletcontext = gl.Context(gl.current_context)
@@ -62,6 +71,8 @@ class GLPanel(wx.Panel):
         self.canvas.Bind(wx.EVT_ERASE_BACKGROUND, self.processEraseBackgroundEvent)
         self.canvas.Bind(wx.EVT_SIZE, self.processSizeEvent)
         self.canvas.Bind(wx.EVT_PAINT, self.processPaintEvent)
+
+        self.Bind(wx.EVT_SIZE, self.processSizeEvent)
 
     # ==========================================================================
     # Canvas Proxy Methods
@@ -86,7 +97,7 @@ class GLPanel(wx.Panel):
         if self.canvas is not None:
             # Make sure the frame is shown before calling SetCurrent.
             self.Show()
-            self.canvas.SetCurrent(GLPanel.SharedGLContext)
+            # self.canvas.SetCurrent(GLPanel.SharedGLContext)
             size = self.GetGLExtents()
             self.winsize = (size.width, size.height)
             self.width, self.height = size.width, size.height
@@ -96,7 +107,7 @@ class GLPanel(wx.Panel):
 
     def processPaintEvent(self, event):
         '''Process the drawing event.'''
-        self.canvas.SetCurrent(GLPanel.SharedGLContext)
+        # self.canvas.SetCurrent(GLPanel.SharedGLContext)
 
         # This is a 'perfect' time to initialize OpenGL ... only if we need to
         if not self.GLinitialized:
@@ -115,7 +126,7 @@ class GLPanel(wx.Panel):
     # GLFrame OpenGL Event Handlers
     # ==========================================================================
     def OnInitGL(self):
-        '''Initialize OpenGL for use in the window.'''
+        '''initialize OpenGL for use in the window.'''
         # create a pyglet context for this panel
 
         if self.GLinitialized:
@@ -125,6 +136,9 @@ class GLPanel(wx.Panel):
         #         GLPanel.pygletcontext.canvas = self
         #
         #         GLPanel.pygletcontext.set_current()
+
+        ColorShader.initialize()
+        TextureShader.initialize()
 
         # normal gl init
         self._InitGLState()
@@ -138,10 +152,10 @@ class GLPanel(wx.Panel):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
         gl.glEnable(gl.GL_TEXTURE_2D)
-        #gl.glShadeModel(gl.GL_SMOOTH)
         gl.glClearColor(0, 0, 0, 1)
-        # Rotated images can have a z-distance of more than one
         gl.glDepthRangef(0, 2)
+
+        # gl.glDebugMessageCallback(gl.GLDEBUGPROC(cb_dbg_msg), None)
 
     def OnReshape(self, width, height):
         '''Reshape the OpenGL viewport based on the dimensions of the window.'''
@@ -162,7 +176,7 @@ class GLPanel(wx.Panel):
 
         # Wrap text to the width of the window
         if self.GLinitialized:
-            GLPanel.pygletcontext.set_current()
+            # GLPanel.pygletcontext.set_current()
             self.update_object_resize()
 
     def OnDraw(self, *args, **kwargs):
@@ -171,7 +185,8 @@ class GLPanel(wx.Panel):
         if not self.IsShown():
             return
 
-        self.canvas.SetCurrent(GLPanel.SharedGLContext)
+        # self.canvas.SetCurrent(GLPanel.SharedGLContext)
+        gl.glClearColor(0, 0.1, 0, 1)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         # draw objects
         self.draw_objects()

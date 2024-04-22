@@ -61,10 +61,7 @@ ____
 
 '''
 
-
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common']
-
-
 
 Windows = {}
 
@@ -75,6 +72,13 @@ import pyre.ui as ui
 import pyre.viewmodels as viewmodels
 import pyre.views as views
 from pyre import resources, state
+from pyre.shaders import TextureShader
+
+import numpy as np
+from numpy.typing import NDArray
+
+vector3 = NDArray[np.floating]  # A 3 element vector
+vector2 = NDArray[np.floating]  # A 2 element vector
 
 
 def Exit():
