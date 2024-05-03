@@ -20,6 +20,8 @@ class ImageTransformPanelBase(glpanel.GLPanel):
     classdocs
     '''
 
+    _camera: Camera
+
     @property
     def camera(self) -> Camera:
         return self._camera
@@ -47,6 +49,8 @@ class ImageTransformPanelBase(glpanel.GLPanel):
         self.width, self.height = self.GetSize()
 
         self.AddStatusBar()
+
+        self._camera.AddOnChangeEventListener(self.OnCameraChanged)
 
         pass
 
