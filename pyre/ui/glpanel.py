@@ -1,12 +1,9 @@
 #!/usr/bin/python
-import os
-import sys
 
 # import OpenGL as gl
 
-import pyglet
 import OpenGL.GL as gl
-from pyre.shaders import TextureShader, ColorShader
+import pyre.gl_engine.shaders as shaders
 
 try:
     import wx
@@ -15,12 +12,16 @@ try:
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
-pyglet.options['shadow_window'] = False
-
 
 def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
     msg = raw[0:length]
     print(f'debug: {source}, {msg_type}, {msg_id}, {severity}, {msg}')
+
+
+# DEBUG_CALLBACK_TYPE = gl.GLDEBUGPROC(None, c_uint, c_uint, c_uint, c_uint, c_size_t, POINTER(c_char), c_void_p)
+
+# Create a ctypes callback instance
+debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 
 
 class GLPanel(wx.Panel):
@@ -37,20 +38,27 @@ class GLPanel(wx.Panel):
 
         # init gl canvas data
         self.GLinitialized = False
-        attribList = (wx.glcanvas.WX_GL_DEBUG,
-                      wx.glcanvas.WX_GL_RGBA,  # RGBA
-                      wx.glcanvas.WX_GL_DOUBLEBUFFER,  # Double Buffered
-                      wx.glcanvas.WX_GL_DEPTH_SIZE, 24,)  # 24 bit
-
+        disp_attrs = wx.glcanvas.GLAttributes()
+        disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()
         # Create context
-        self.canvas = wx.glcanvas.GLCanvas(self, attribList=attribList)
+        self.canvas = wx.glcanvas.GLCanvas(self, disp_attrs, -1)
 
+        context_attrs = wx.glcanvas.GLContextAttrs()
+        context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
+        context = wx.glcanvas.GLContext(self.canvas, GLPanel.SharedGLContext, context_attrs)
+        add_listener = True
         if GLPanel.SharedGLContext is None:
             # Install our debug message callback
-            GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas)
+            # GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas, None, context_attrs)
+            GLPanel.SharedGLContext = context
+            add_listener = True
 
-        self.canvas.context = GLPanel.SharedGLContext
-        self.canvas.SetCurrent(GLPanel.SharedGLContext)
+        self.canvas.context = context
+        self.canvas.SetCurrent(self.canvas.context)
+
+        if add_listener:
+            gl.glDebugMessageCallback(debug_callback_func, None)
+            gl.glEnable(gl.GL_DEBUG_OUTPUT)
 
         #    GLPanel.pygletcontext = gl.Context(gl.current_context)
 
@@ -137,8 +145,9 @@ class GLPanel(wx.Panel):
         #
         #         GLPanel.pygletcontext.set_current()
 
-        ColorShader.initialize()
-        TextureShader.initialize()
+        self.canvas.SetCurrent(self.canvas.context)
+
+        shaders.InitializeShaders()
 
         # normal gl init
         self._InitGLState()
@@ -151,7 +160,7 @@ class GLPanel(wx.Panel):
     def _InitGLState(self):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
-        gl.glEnable(gl.GL_TEXTURE_2D)
+        #        gl.glEnable(gl.GL_TEXTURE_2D)
         gl.glClearColor(0, 0, 0, 1)
         gl.glDepthRangef(0, 2)
 
@@ -164,14 +173,16 @@ class GLPanel(wx.Panel):
         if width == 0 or height == 0:
             return
 
+        self.canvas.SetCurrent(self.canvas.context)
+
         if not self.GLinitialized:
             self.OnInitGL()
 
         gl.glViewport(0, 0, width, height)
-        gl.glMatrixMode(gl.GL_PROJECTION)
-        gl.glLoadIdentity()
-        gl.glOrtho(0, width, 0, height, 1, -1)
-        gl.glMatrixMode(gl.GL_MODELVIEW)
+        # gl.glMatrixMode(gl.GL_PROJECTION)
+        # gl.glLoadIdentity()
+        # gl.glOrtho(0, width, 0, height, 1, -1)
+        # gl.glMatrixMode(gl.GL_MODELVIEW)
         # pyglet stuff
 
         # Wrap text to the width of the window
@@ -185,9 +196,18 @@ class GLPanel(wx.Panel):
         if not self.IsShown():
             return
 
+        self.canvas.SetCurrent(self.canvas.context)
+
         # self.canvas.SetCurrent(GLPanel.SharedGLContext)
+        gl.glClearDepth(10000.0)
         gl.glClearColor(0, 0.1, 0, 1)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        gl.glEnable(gl.GL_BLEND)
+        gl.glEnable(gl.GL_POLYGON_OFFSET_FILL)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glDepthFunc(gl.GL_LESS)
+        # gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glDisable(gl.GL_CULL_FACE)
         # draw objects
         self.draw_objects()
         # update screen

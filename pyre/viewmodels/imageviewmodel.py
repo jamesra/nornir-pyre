@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 from pylab import *
 from pyre import resources
 import scipy.ndimage
+import pyre.gl_engine as gl_engine
 
 import nornir_imageregistration.core as core
 import nornir_shared.images as images
@@ -178,7 +179,7 @@ class ImageViewModel(object):
         Logger.info("CreateImageArray")
         # Round up size to nearest power of 2
 
-        texture_grid = list()
+        texture_grid = list()  # type: list[list[int]]
 
         print_output = self.NumCols > 1 and self.NumRows > 1
 
@@ -186,7 +187,7 @@ class ImageViewModel(object):
             print('\nConverting image to ' + str(self.NumCols) + "x" + str(self.NumRows) + ' grid of OpenGL textures')
 
         for iX in range(0, self.width, self.TextureSize[nornir_imageregistration.iPoint.X]):
-            columnTextures = list()  # type: list[NDArray]
+            columnTextures = list()  # type: list[int]
             lastCol = iX + self.TextureSize[nornir_imageregistration.iPoint.X] > self.width
 
             end_iX = iX + self.TextureSize[nornir_imageregistration.iPoint.X]
@@ -221,7 +222,7 @@ class ImageViewModel(object):
                 else:
                     temp = self.Image[iY:end_iY, iX:end_iX]
 
-                texture = resources.TextureForNumpyImage(temp)
+                texture = gl_engine.textures.create_grayscale_texture(temp)
                 del temp
                 columnTextures.append(texture)
 

@@ -6,7 +6,6 @@ Created on Oct 26, 2012
 
 import PIL
 import numpy
-from pyglet import *
 
 from pyre.ui import Camera
 

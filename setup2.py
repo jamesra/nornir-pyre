@@ -33,7 +33,6 @@ includes = [
     r'matplotlib',
     r'numpy',
     r'scipy',
-    r'pyglet',
     'wxversion',
     r'wx',
     'scipy.special._cephes',

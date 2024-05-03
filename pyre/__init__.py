@@ -72,7 +72,7 @@ import pyre.ui as ui
 import pyre.viewmodels as viewmodels
 import pyre.views as views
 from pyre import resources, state
-from pyre.shaders import TextureShader
+from pyre.gl_engine.shaders import TextureShader, ColorShader, InitializeShaders
 
 import numpy as np
 from numpy.typing import NDArray

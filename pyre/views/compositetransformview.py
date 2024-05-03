@@ -208,9 +208,10 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
             # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
-            self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=FixedColor, BoundingBox=BoundingBox,
+            self.DrawWarpedImage(view_proj, self.FixedImageArray, tex_color=FixedColor, BoundingBox=BoundingBox,
                                  z=0.25,
-                                 glFunc=glFunc)
+                                 glFunc=glFunc,
+                                 tween=1.0)
 
         if self.WarpedImageArray is not None:
             WarpedColor = None
@@ -220,7 +221,8 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
             self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox,
                                  z=0.75,
-                                 glFunc=glFunc)
+                                 glFunc=glFunc,
+                                 tween=0)
 
         self.clear_composite_rendering()
         # self.DrawFixedImage(self.__WarpedImageArray)

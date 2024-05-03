@@ -341,12 +341,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         BoundingBox = self.camera.VisibleImageBoundingBox
 
-        SetDrawTextureState()
+        # SetDrawTextureState()
 
         # Draw an image if we can
         if not self.composite:
             self._ImageTransformView.draw_textures(self.camera.view_proj, BoundingBox=BoundingBox,
-                                                   ShowWarped=self.ShowWarped,
+                                                   ShowWarped=not self.FixedSpace or self.ShowWarped,
                                                    glFunc=gl.GL_FUNC_ADD)
         else:
             self._ImageTransformView.draw_textures(self.camera.view_proj, BoundingBox=BoundingBox, glFunc=self.glFunc)

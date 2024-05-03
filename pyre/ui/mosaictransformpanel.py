@@ -17,7 +17,7 @@ except:
 
 from . import imagetransformpanelbase
 import nornir_imageregistration.transforms.utils as utils
-import pyglet.gl as gl
+import OpenGL.GL as gl
 import pyre.ui
 import pyre.views
 

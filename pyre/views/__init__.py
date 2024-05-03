@@ -2,7 +2,6 @@ __all__ = ['CompositeTransformView', 'ImageGridTransformView', 'MosaicView']
 
 import ctypes
 
-import OpenGL.GL.shaders
 import numpy
 from numpy.typing import NDArray
 import scipy.spatial
@@ -14,7 +13,6 @@ from . import compositetransformview
 from .imagegridtransformview import ImageGridTransformView
 from .mosaicview import MosaicView
 from pyre.views import imagegridtransformview
-from pyre.shaders import TextureShader
 
 
 def LineIndiciesFromTri(T: scipy.spatial.Delaunay) -> list[int]:
@@ -52,13 +50,14 @@ def DrawTriangles(verts, Triangles: scipy.spatial.Delaunay):
     FlatPoints = Points.ravel().tolist()
     vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
 
-    gl.glDisable(gl.GL_TEXTURE_2D)
-    gl.glColor4f(1.0, 0, 0, 1.0)
-    pyglet.graphics.draw_indexed(len(vertarray) // 3,
-                                 gl.GL_LINES,
-                                 LineIndicies,
-                                 ('v3f', vertarray))
-    pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+
+#    gl.glDisable(gl.GL_TEXTURE_2D)
+# gl.glColor4f(1.0, 0, 0, 1.0)
+# pyglet.graphics.draw_indexed(len(vertarray) // 3,
+#                              gl.GL_LINES,
+#                              LineIndicies,
+#                              ('v3f', vertarray))
+# pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
 
 def VertsForRectangle(rect):
@@ -97,16 +96,16 @@ def DrawRectangle(rect, color):
 
 
 def SetDrawTextureState():
-    gl.glEnable(gl.GL_TEXTURE_2D)
+    # gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glDisable(gl.GL_CULL_FACE)
     gl.glEnable(gl.GL_DEPTH_TEST)
 
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
-    gl.glEnable(gl.GL_BLEND)
-    gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
+    # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
+    # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
+    # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+    # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+    # gl.glEnable(gl.GL_BLEND)
+    # gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
     gl.glDepthFunc(gl.GL_LESS)
 
 

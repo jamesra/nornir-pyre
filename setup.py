@@ -24,7 +24,6 @@ if __name__ == '__main__':
     required_packages = ["numpy>=1.15.0",
                          "scipy>=1.1.0",
                          "matplotlib",
-                         "pyglet>=1.3.2",
                          "nornir_pools>=1.4.1",
                          "nornir_shared>=1.4.1",
                          "nornir_imageregistration>=1.4.1",

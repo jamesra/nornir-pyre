@@ -187,13 +187,14 @@ class Camera:
         #     -scale * aspect, scale * aspect, -scale, scale, -255, 255
         # )
 
-        self._projection = self.orthogonal_projection(-scale * aspect, scale * aspect, -scale, scale, -1, 1)
+        self._projection = self.orthogonal_projection(-scale * aspect, scale * aspect, -scale, scale, -255, 255)
 
         self._view = self.look_at(position=np.array((self.x, self.y, +1.0)),
                                   target=np.array((self.x, self.y, -1.0)),
                                   up=np.array((0, 1, 0)))  # camera  x,y,z
 
-        self._view_proj = self._projection @ self._view
+        # self._view_proj = self._projection @ self._view
+        self._view_proj = self._view @ self._projection
 
     @classmethod
     def orthogonal_projection(cls: NDArray[np.floating], left: float, right: float, bottom: float, top: float,
@@ -201,8 +202,7 @@ class Camera:
         """Create a Mat4 orthographic projection matrix for use with OpenGL.
 
         Given left, right, bottom, top values, and near/far z planes,
-        create a 4x4 Projection Matrix. This is useful for setting
-        :py:attr:`~pyglet.window.Window.projection`.
+        create a 4x4 Projection Matrix.
         """
         width = right - left
         height = top - bottom

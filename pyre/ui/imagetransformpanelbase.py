@@ -66,7 +66,7 @@ class ImageTransformPanelBase(glpanel.GLPanel):
 
     def on_resize(self, e):
         (self.width, self.height) = self.canvas.GetSize()
-        if not self.camera is None:
+        if self.camera is not None:
             # try:
             self.camera.focus(self.height, self.width)
             # except:
