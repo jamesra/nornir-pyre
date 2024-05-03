@@ -906,16 +906,15 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         GridPointPairs = ImageGridTransformView._find_corresponding_points(transform, GridPoints,
                                                                            ForwardTransform=ForwardTransform)
 
-        # if isinstance(transform, nornir_imageregistration.IControlPoints):
-        #     TransformPoints = transform.GetPointPairsInSourceRect(
-        #         bounding_box) if ForwardTransform else transform.GetPointPairsInTargetRect(bounding_box)
-        #
-        #     AllPointPairs = GridPointPairs if TransformPoints is None else ImageGridTransformView._merge_point_pairs_with_transform(
-        #         GridPointPairs,
-        #         TransformPoints)
-        # else:
-        #     AllPointPairs = GridPointPairs
-        AllPointPairs = GridPointPairs
+        if isinstance(transform, nornir_imageregistration.IControlPoints):
+            TransformPoints = transform.GetPointPairsInSourceRect(
+                bounding_box) if ForwardTransform else transform.GetPointPairsInTargetRect(bounding_box)
+
+            AllPointPairs = GridPointPairs if TransformPoints is None else ImageGridTransformView._merge_point_pairs_with_transform(
+                GridPointPairs,
+                TransformPoints)
+        else:
+            return GridPointPairs
 
         return AllPointPairs
 
