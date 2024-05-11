@@ -13,6 +13,7 @@ from . import compositetransformview
 from .imagegridtransformview import ImageGridTransformView
 from .mosaicview import MosaicView
 from pyre.views import imagegridtransformview
+from .pointset_view import PointSetView
 
 
 def LineIndiciesFromTri(T: scipy.spatial.Delaunay) -> list[int]:

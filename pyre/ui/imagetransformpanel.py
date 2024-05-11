@@ -127,7 +127,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.canvas.Bind(wx.EVT_SIZE, self.on_resize)
 
         self.DebugTickCounter = 0
-        self.timer.Start(500)
+        self.timer.Start(100)
 
     def _bind_mouse_events(self):
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)

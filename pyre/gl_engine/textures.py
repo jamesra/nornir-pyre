@@ -58,7 +58,7 @@ def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
 
 
 def create_rgba_texture(image: NDArray[np.uint8]) -> int:
-    if image.dtype == np.uint8:
+    if np.issubdtype(image.dtype, np.uint8):
         image = image / 255.0
     elif isinstance(image.dtype, np.floating):
         pass

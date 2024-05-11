@@ -78,6 +78,7 @@ class GLPanel(wx.Panel):
         # bind events
         self.canvas.Bind(wx.EVT_ERASE_BACKGROUND, self.processEraseBackgroundEvent)
         self.canvas.Bind(wx.EVT_SIZE, self.processSizeEvent)
+        self.canvas.Bind(wx.EVT_SIZING, self.processSizeEvent)
         self.canvas.Bind(wx.EVT_PAINT, self.processPaintEvent)
 
         self.Bind(wx.EVT_SIZE, self.processSizeEvent)
@@ -105,7 +106,7 @@ class GLPanel(wx.Panel):
         if self.canvas is not None:
             # Make sure the frame is shown before calling SetCurrent.
             self.Show()
-            # self.canvas.SetCurrent(GLPanel.SharedGLContext)
+            self.canvas.SetCurrent(self.canvas.context)
             size = self.GetGLExtents()
             self.winsize = (size.width, size.height)
             self.width, self.height = size.width, size.height

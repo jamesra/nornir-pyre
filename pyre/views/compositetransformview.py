@@ -202,6 +202,10 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
         glFunc = gl.GL_FUNC_ADD
 
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
+        gl.glEnable(gl.GL_BLEND)
+
         if self.FixedImageArray is not None:
             FixedColor = None
             if glFunc == gl.GL_FUNC_ADD:
@@ -209,9 +213,11 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
             # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
             self.DrawWarpedImage(view_proj, self.FixedImageArray, tex_color=FixedColor, BoundingBox=BoundingBox,
-                                 z=0.25,
+                                 z=None,
                                  glFunc=glFunc,
                                  tween=1.0)
+
+        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
 
         if self.WarpedImageArray is not None:
             WarpedColor = None
@@ -220,10 +226,11 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
                 WarpedColor = (0, 1.0, 0, 1)
 
             self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox,
-                                 z=0.75,
+                                 z=None,
                                  glFunc=glFunc,
                                  tween=0)
 
+        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         self.clear_composite_rendering()
         # self.DrawFixedImage(self.__WarpedImageArray)
         # self._draw_warped_image(self.__FixedImageArray)

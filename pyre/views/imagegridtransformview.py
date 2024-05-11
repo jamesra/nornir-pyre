@@ -22,15 +22,17 @@ import nornir_imageregistration.transforms.triangulation
 import OpenGL.GL as gl
 from OpenGL.arrays import vbo
 import pyre
+import pyre.space
+from pyre.space import Space
 import pyre.gl_engine.shaders as shaders
-from pyre.gl_engine.texture_vertex_buffer import ShaderVAO
+from pyre.gl_engine import ShaderVAO
 
 
 class RenderCache(object):
     """This object stores variables that must be calculated every time the transform changes"""
     PointCache: Any = None
-    FixedImageDataGrid: None | list[list[int]]
-    WarpedImageDataGrid: None | list[list[int]]
+    FixedImageDataGrid: None | list[list[ShaderVAO | None]]
+    WarpedImageDataGrid: None | list[list[ShaderVAO | None]]
     LastSelectedPointIndex: int | None = None
 
     def __del__(self):
@@ -522,7 +524,7 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         # gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
-    def GetOrCreateWarpedImageDataGrid(self, grid_size: tuple[int, int]) -> list[list[None]]:
+    def GetOrCreateWarpedImageDataGrid(self, grid_size: tuple[int, int]) -> list[list[ShaderVAO | None]]:
         """
         Grab the cached image data for a warped image
         """
@@ -531,9 +533,9 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         if hasattr(self.rendercache, 'WarpedImageDataGrid'):
             WarpedImageDataGrid = self.rendercache.WarpedImageDataGrid
         else:
-            WarpedImageDataGrid = []
+            WarpedImageDataGrid = [None] * grid_size[1]
             for i in range(0, grid_size[1]):
-                WarpedImageDataGrid.append([None] * grid_size[0])
+                WarpedImageDataGrid[i] = [None] * grid_size[0]
 
             self.rendercache.WarpedImageDataGrid = WarpedImageDataGrid
 
@@ -735,16 +737,18 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
     @classmethod
     def _render_data_for_transform_point_pairs(cls,
-                                               PointPairs: NDArray[np.floating],
+                                               point_pairs: NDArray[np.floating],
                                                tile_bounding_rect: nornir_imageregistration.Rectangle,
-                                               z: float | None = None) -> tuple[vbo.VBO, vbo.VBO, vbo.VBO]:
+                                               space: pyre.space.Space,
+                                               z: float | None = None,
+                                               ) -> tuple[vbo.VBO, vbo.VBO, vbo.VBO]:
         """
         Generate verticies (source, target and texture coordinates) for a set of transform points and the
         indicies to render them as triangles
         :return: Verts3D, indicies, Verts3d is Source (X,Y,Z), Target (X,Y,Z), Texture (U,V)
         """
 
-        FixedPointsYX, WarpedPointsYX = np.hsplit(PointPairs, 2)
+        FixedPointsYX, WarpedPointsYX = np.hsplit(point_pairs, 2)
 
         # tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(SourcePoints)
         # Need to convert from Y,x to X,Y coordinates
@@ -754,7 +758,8 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
 
         # texturePoints = (FixedPointsXY - np.array((x,y))) / np.array((w,h))
 
-        texturePoints = cls._texture_coordinates(FixedPointsYX, fixed_bounding_rect=tile_bounding_rect)
+        texturePoints = cls._texture_coordinates(FixedPointsYX if space == Space.Source else WarpedPointsXY,
+                                                 fixed_bounding_rect=tile_bounding_rect)
         # print(str(texturePoints[0, :]))
         tri = scipy.spatial.Delaunay(texturePoints)
         # np.array([[(u - x) / float(w), (v - y) / float(h)] for u, v in FixedPointsXY], dtype=np.float32)
@@ -790,32 +795,32 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                         glFunc: int = gl.GL_FUNC_ADD,
                         tween: float = 1.0):
 
-        if image_view_model.NumCols > 1 or image_view_model.NumRows > 1:
-            return self._draw_warped_imagegridviewmodel(view_proj, image_view_model, ForwardTransform=True,
-                                                        tex_color=tex_color,
-                                                        BoundingBox=BoundingBox, z=z, tween=tween, glFunc=glFunc)
+        # if image_view_model.NumCols > 1 or image_view_model.NumRows > 1:
+        return self._draw_warped_imagegridviewmodel(view_proj, image_view_model, ForwardTransform=True,
+                                                    tex_color=tex_color,
+                                                    BoundingBox=BoundingBox, z=z, tween=tween, glFunc=glFunc)
 
         # The rest of this is the case for a texture so small it did not need to be subdivided
-
-        warped_image_data_grid = self.GetOrCreateWarpedImageDataGrid(
-            (image_view_model.NumRows, image_view_model.NumCols))
-
-        if warped_image_data_grid[0][0] is None:
-            tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((0, 0),
-                                                                                                         image_view_model.TextureSize)
-
-            AllPointPairs = ImageGridTransformView._build_tile_point_pairs(self.Transform, tile_fixed_bounding_rect,
-                                                                           ForwardTransform=ForwardTransform)
-            (vertarray, indicies) = ImageGridTransformView._render_data_for_transform_point_pairs(
-                AllPointPairs,
-                tile_fixed_bounding_rect,
-                None)
-            vertex_array_object = ShaderVAO(pyre.shaders.TextureShader, vertarray, indicies)
-            warped_image_data_grid[0][0] = vertex_array_object
-        else:
-            vertex_array_object = warped_image_data_grid[0][0]
-
-        texture = image_view_model.ImageArray[0][0]
+        #
+        # warped_image_data_grid = self.GetOrCreateWarpedImageDataGrid(
+        #     (image_view_model.NumRows, image_view_model.NumCols))
+        #
+        # if warped_image_data_grid[0][0] is None:
+        #     tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((0, 0),
+        #                                                                                                  image_view_model.TextureSize)
+        #
+        #     AllPointPairs = ImageGridTransformView._build_tile_point_pairs(self.Transform, tile_fixed_bounding_rect,
+        #                                                                    ForwardTransform=ForwardTransform)
+        #     (vertarray, indicies) = ImageGridTransformView._render_data_for_transform_point_pairs(
+        #         AllPointPairs,
+        #         tile_fixed_bounding_rect,
+        #         None)
+        #     vertex_array_object = ShaderVAO(pyre.gl_engine.shaders.texture_shader, vertarray, indicies)
+        #     warped_image_data_grid[0][0] = vertex_array_object
+        # else:
+        #     vertex_array_object = warped_image_data_grid[0][0]
+        #
+        # texture = image_view_model.ImageArray[0][0]
 
         # if self._vertex_buffer is None:
         #     self._vertex_buffer = pyre.views.GetOrCreateVertexBuffer(vertarray)
@@ -824,11 +829,41 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         #                                                   ('v3f', vertarray),
         #                                                   ('t2f', texarray))
 
-        pyre.shaders.TextureShader.draw(view_proj, texture, vertex_buffer, index_buffer, tween=1)
+        # pyre.gl_engine.TextureShader.draw(view_proj, texture, vertex_buffer, index_buffer, tween=1)
         # pyre.gl_engine.shaders.ColorShader.draw(view_proj, vertex_array_object)
         # pyre.views.DrawTextureWithBuffers(texture, vertex_buffer, index_buffer, tex_color,
         #                                   glFunc=glFunc)
-        return
+
+    def _generate_tile(self,
+                       grid_coords: tuple[int, int],
+                       image_view_model: pyre.viewmodels.ImageViewModel,
+                       space: Space,
+                       ):
+        """Create VAO for a tile in source space"""
+        ix, iy = grid_coords
+        x = image_view_model.TextureSize[1] * ix
+        y = image_view_model.TextureSize[0] * iy
+
+        tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x),
+                                                                                               image_view_model.TextureSize)
+
+        AllPointPairs = ImageGridTransformView.collect_verticies_within_bounding_box(
+            bounding_box=tile_bounding_rect,
+            transform=self.Transform,
+            space=space)
+
+        vertarray, indicies = ImageGridTransformView._render_data_for_transform_point_pairs(
+            AllPointPairs, tile_bounding_rect, space=space, z=None)
+
+        # vertarray = vbo.VBO(vertarray, target=gl.GL_ARRAY_BUFFER)
+        # indicies = vbo.VBO(indicies, target=gl.GL_ELEMENT_ARRAY_BUFFER)
+
+        # warped_image_data_grid[ix][iy] = (vertarray, indicies)
+        vertex_array_object = ShaderVAO(shaders.texture_shader, vertarray, indicies)
+        if vertex_array_object.num_elements == 0:
+            raise ValueError("No elements in vertex array object")
+
+        return vertex_array_object
 
     def _draw_warped_imagegridviewmodel(self,
                                         view_proj: NDArray[np.floating],
@@ -853,34 +888,9 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
             column = image_view_model.ImageArray[ix]
             for iy in range(0, image_view_model.NumRows):
                 texture = column[iy]
-                x = image_view_model.TextureSize[1] * ix
-                y = image_view_model.TextureSize[0] * iy
-
-                vertarray = None
-                texarray = None
-                verts = None
-                tilecolor = None
 
                 if warped_image_data_grid[ix][iy] is None:
-
-                    tile_fixed_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x),
-                                                                                                                 image_view_model.TextureSize)
-
-                    AllPointPairs = ImageGridTransformView.collect_vertex_locations_within_bounding_box_after_transformation(
-                        bounding_box=tile_fixed_bounding_rect,
-                        transform=self.Transform,
-                        ForwardTransform=ForwardTransform)
-
-                    vertarray, indicies = ImageGridTransformView._render_data_for_transform_point_pairs(
-                        AllPointPairs, tile_fixed_bounding_rect, z=None)
-
-                    # vertarray = vbo.VBO(vertarray, target=gl.GL_ARRAY_BUFFER)
-                    # indicies = vbo.VBO(indicies, target=gl.GL_ELEMENT_ARRAY_BUFFER)
-
-                    # warped_image_data_grid[ix][iy] = (vertarray, indicies)
-                    vertex_array_object = ShaderVAO(shaders.texture_shader, vertarray, indicies)
-                    if vertex_array_object.num_elements == 0:
-                        raise ValueError("No elements in vertex array object")
+                    vertex_array_object = self._generate_tile((ix, iy), image_view_model, Space.Source)
                     warped_image_data_grid[ix][iy] = vertex_array_object
                 else:
                     vertex_array_object = warped_image_data_grid[ix][iy]
@@ -888,6 +898,37 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
                 shaders.texture_shader.draw(view_proj, texture, vertex_array_object, tween=tween)
                 # shaders.color_shader.draw(view_proj, vertex_array_object, tween=tween)
                 # pyre.views.DrawTexture(texture, vertarray, indicies, tex_color, glFunc=glFunc)
+
+    @staticmethod
+    def collect_verticies_within_bounding_box(
+            bounding_box: nornir_imageregistration.Rectangle,
+            transform: nornir_imageregistration.ITransform,
+            space: Space) -> NDArray[np.floating]:
+        """
+        Given a bounding rectangle defined in the "space" parameter, return all verticies that we want to use for rendering.
+        This should be the boundaries of the box, control points falling within the box, and
+        a regular grid of points across the box to ensure any distortion from a non-linear transform
+        is properly represented.
+        :return: A Nx4 array of source and target points, this is the position of each point in both source and target space
+        """
+        GridPoints = ImageGridTransformView._tile_grid_points(bounding_box, grid_size=(8, 8))
+        GridPointPairs = ImageGridTransformView._find_corresponding_points(transform,
+                                                                           GridPoints,
+                                                                           ForwardTransform=False if Space == Space.Target else True)
+
+        if isinstance(transform, nornir_imageregistration.IControlPoints):
+            if space == Space.Source:
+                contained_control_points = transform.GetPointPairsInSourceRect(bounding_box)
+            else:
+                contained_control_points = transform.GetPointPairsInTargetRect(bounding_box)
+
+            AllPointPairs = GridPointPairs if contained_control_points is None else ImageGridTransformView._merge_point_pairs_with_transform(
+                GridPointPairs,
+                contained_control_points)
+        else:
+            return GridPointPairs
+
+        return AllPointPairs
 
     @staticmethod
     def collect_vertex_locations_within_bounding_box_after_transformation(
@@ -935,7 +976,10 @@ class ImageGridTransformView(ImageTransformViewBase, PointTextures):
         if self.ImageViewModel is None:
             return
 
+        tween = (time.time() % 5) / 5
         if ShowWarped:
-            self.DrawWarpedImage(view_proj, self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z, tween=0)
+            self.DrawWarpedImage(view_proj, self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z,
+                                 tween=1 - tween)
         else:
-            self.DrawWarpedImage(view_proj, self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z, tween=1)
+            self.DrawWarpedImage(view_proj, self.ImageViewModel, tex_color=None, BoundingBox=BoundingBox, z=z,
+                                 tween=tween)

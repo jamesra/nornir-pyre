@@ -68,6 +68,7 @@ Windows = {}
 import pyre.common as common
 import pyre.commandhistory
 from pyre.commandhistory import history
+import pyre.gl_engine as gl_engine
 import pyre.ui as ui
 import pyre.viewmodels as viewmodels
 import pyre.views as views
@@ -76,6 +77,8 @@ from pyre.gl_engine.shaders import TextureShader, ColorShader, InitializeShaders
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .space import Space
 
 vector3 = NDArray[np.floating]  # A 3 element vector
 vector2 = NDArray[np.floating]  # A 2 element vector

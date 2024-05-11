@@ -31,6 +31,10 @@ class ImageViewModel(object):
     Represents a numpy image as an array of textures.  Read-only.
     """
 
+    _TextureSize: NDArray[np.integer]
+    _Image: NDArray[numpy.floating]
+    _ImageArray: list[list[int]]
+
     # The largest dimension we allow a texture to have
     MaxTextureDimension = int(4096)
 
@@ -80,7 +84,7 @@ class ImageViewModel(object):
         return self._ImageArray
 
     @property
-    def TextureSize(self) -> tuple[int, int]:
+    def TextureSize(self) -> NDArray[np.integer]:
         """Size of a texture"""
         return self._TextureSize
 
@@ -90,9 +94,8 @@ class ImageViewModel(object):
         return self._ImageFilename
 
     @classmethod
-    def FindTextureSize(cls, shape: NDArray) -> tuple[int, int]:
-        _TextureSize = [int(NearestPowerOfTwo(shape[0])), int(
-            NearestPowerOfTwo(shape[1]))]
+    def FindTextureSize(cls, shape: NDArray) -> NDArray[np.integer]:
+        _TextureSize = NearestPowerOfTwo(shape)
 
         if _TextureSize[0] > cls.MaxTextureDimension:
             _TextureSize[0] = cls.MaxTextureDimension
