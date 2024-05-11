@@ -56,7 +56,7 @@ class PointSetView:
         self._texture = texture
 
     @staticmethod
-    def __swap_columns(self, input: NDArray[np.floating]) -> NDArray[np.floating]:
+    def __swap_columns(input: NDArray[np.floating]) -> NDArray[np.floating]:
         """
         OpenGL uses X,Y coordinates.  Everything else in Nornir uses Y,X coordinates in numpy arrays.
         This function swaps the columns in pairs to correctly position points on the screen

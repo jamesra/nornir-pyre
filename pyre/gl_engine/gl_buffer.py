@@ -26,13 +26,9 @@ class GLBuffer(IBuffer):
     def data(self, value: NDArray[np.floating]):
         self._data = value
 
-        # Expand capacity if needed
-        if self._capacity < self._data.nbytes:
-            self._capacity = self._data.nbytes
-
         # TODO: Update the buffer data because we cannot replace the buffer
         # without breaking the VAO
-        self._create_open_gl_objects(value)
+        self._update_buffer_data(value)
 
     @property
     def buffer(self) -> ctypes.c_uint:
@@ -79,10 +75,24 @@ class GLBuffer(IBuffer):
 
     def _update_buffer_data(self, data: NDArray[np.floating]):
         """Update the buffer data, should allow existing VAO's to continue to work."""
+        data = data.flatten()
+        data = np.ascontiguousarray(data)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.buffer)
         check_for_error()
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data.flatten(), self._usage)
-        check_for_error()
+
+        # buffer data will be zero if the buffer is not initialized
+        buffer_size = gl.glGetBufferParameteriv(gl.GL_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
+
+        # Expand capacity if needed
+        if buffer_size == 0 or self._capacity < data.nbytes:
+            self._capacity = data.nbytes
+            gl.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data, self._usage)
+            check_for_error()
+        else:  # Expansion not needed, replace the existing data
+            assert (buffer_size >= self._capacity)
+            gl.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, data.nbytes, data)
+            check_for_error()
+
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         check_for_error()
 
