@@ -3,7 +3,7 @@ from OpenGL.GL import shaders as glshaders
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine.shaders import BaseShader, FragmentShader, VertexShader
+from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader
 from pyre.gl_engine import check_for_error
 from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.vertex_attribute import VertexAttribute
@@ -51,15 +51,8 @@ class ColorShader(BaseShader):
             [VertexAttribute(lambda: self.source_pos_location, "vertex_source_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT)])
 
-        if self._vertex_shader is None:
-            self._vertex_shader = VertexShader(_color_vertex_shader_program)
-
-        if self._fragment_shader is None:
-            self._fragment_shader = FragmentShader(_color_fragment_shader_program)
-
-        if self._program is None:
-            self._program = glshaders.compileProgram(
-                self._vertex_shader.shader, self._fragment_shader.shader)
+        self._vertex_shader = VertexShader(_color_vertex_shader_program)
+        self._fragment_shader = FragmentShader(_color_fragment_shader_program)
 
     @property
     def source_pos_location(self) -> int:

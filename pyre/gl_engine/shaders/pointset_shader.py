@@ -6,7 +6,7 @@ import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import FragmentShader, VertexShader, BaseShader
+from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader
 from pyre.gl_engine.instanced_vao import InstancedVAO
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
@@ -29,6 +29,7 @@ _pointset_vertex_shader_program = """
             frag_texture_coordinate = vertex_texture_coordinate;
         }
 """
+
 _pointset_fragment_shader_program = """
     #version 330
     uniform sampler2D texture_sampler;
@@ -89,15 +90,11 @@ class PointSetShader(BaseShader):
              VertexAttribute(lambda: self.point_target_offset_location, "point_target_offset", 2, gl.GL_FLOAT,
                              instanced=True)])
 
-        if self._vertex_shader is None:
-            self._vertex_shader = VertexShader(_pointset_vertex_shader_program)
+        self._vertex_shader = VertexShader(_pointset_vertex_shader_program)
+        self._fragment_shader = FragmentShader(_pointset_fragment_shader_program)
 
-        if self._fragment_shader is None:
-            self._fragment_shader = FragmentShader(_pointset_fragment_shader_program)
-
-        if self._program is None:
-            self._program = glshaders.compileProgram(
-                self._vertex_shader.shader, self._fragment_shader.shader)
+    def initialize_gl_objects(self):
+        super().initialize_gl_objects()
 
     @property
     def vertex_location(self) -> int:

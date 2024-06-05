@@ -42,7 +42,7 @@ class TileExportWindow(window.Window):
         self.clear()
         self.camera.focus(self.width, self.height)
 
-        View.draw_textures(BoundingBox=boundingBox, ShowWarped=ShowWarped)
+        View.draw(bounding_box=boundingBox, ShowWarped=ShowWarped)
 
         imageBuffer = image.get_buffer_manager().get_color_buffer().get_image_data()
 

@@ -54,6 +54,10 @@ class InstancedVAO:
         self._intializing = False
         self._initialized = True
 
+        valid = gl.glIsVertexArray(self._vao)
+        if not valid:
+            raise ValueError("VAO is not valid")
+
         gl.glBindVertexArray(0)
 
     def add_index_buffer(self, indicies: NDArray[np.uint16]):
@@ -91,6 +95,8 @@ class InstancedVAO:
 
     def bind(self):
         """Bind the VAO to the context for rendering"""
+        valid = gl.glIsVertexArray(self._vao)
+        assert (valid)
         gl.glBindVertexArray(self._vao)
         pyre.gl_engine.helpers.check_for_error()
 

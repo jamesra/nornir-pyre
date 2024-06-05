@@ -2,8 +2,12 @@
 
 # import OpenGL as gl
 
+import abc
+import pyre
+import pyre.ui
 import OpenGL.GL as gl
 import pyre.gl_engine.shaders as shaders
+from pyre.ui.wxevents import wx_EVT_GL_CONTEXT_CREATED, wxGLContextCreatedEvent
 
 try:
     import wx
@@ -25,19 +29,29 @@ debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 
 
 class GLPanel(wx.Panel):
-    '''A simple class for using OpenGL with wxPython.'''
+    """A simple class for using OpenGL with wxPython."""
+
+    _glinitialized: bool = False
+    canvas: wx.glcanvas.GLCanvas
+    sizer = wx.BoxSizer
 
     SharedGLContext = None  # type: wx.glcanvas.GLContext
+    _glcontextmanager: pyre.state.IGLContextManager
 
-    def __init__(self, parent, window_id: int, pos=wx.DefaultPosition,
-                 size=wx.DefaultSize, style=0):
+    def __init__(self,
+                 parent: wx.Window,
+                 glcontextmanager: pyre.state.IGLContextManager,
+                 window_id: int,
+                 pos=wx.DefaultPosition,
+                 size=wx.DefaultSize,
+                 style=0):
+        self._glcontextmanager = glcontextmanager
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
         # call super function
         super(GLPanel, self).__init__(parent=parent, id=window_id, pos=pos, size=size, style=style)
 
         # init gl canvas data
-        self.GLinitialized = False
         disp_attrs = wx.glcanvas.GLAttributes()
         disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()
         # Create context
@@ -83,26 +97,32 @@ class GLPanel(wx.Panel):
 
         self.Bind(wx.EVT_SIZE, self.processSizeEvent)
 
+        # Send an event that a context was created.
+        self.Bind(wx_EVT_GL_CONTEXT_CREATED, self.OnInitGL)
+
+        context_created_event = wxGLContextCreatedEvent(context=context)
+        wx.PostEvent(self, context_created_event)
+
     # ==========================================================================
     # Canvas Proxy Methods
     # ==========================================================================
     def GetGLExtents(self):
-        '''Get the extents of the OpenGL canvas.'''
+        """Get the extents of the OpenGL canvas."""
         return self.canvas.GetClientSize()
 
     def SwapBuffers(self):
-        '''Swap the OpenGL buffers.'''
+        """Swap the OpenGL buffers."""
         self.canvas.SwapBuffers()
 
     # ==========================================================================
     # wxPython Window Handlers
     # ==========================================================================
     def processEraseBackgroundEvent(self, event):
-        '''Process the erase background event.'''
+        """Process the erase background event."""
         pass  # Do nothing, to avoid flashing on MSWin
 
     def processSizeEvent(self, event):
-        '''Process the resize event.'''
+        """Process the resize event."""
         if self.canvas is not None:
             # Make sure the frame is shown before calling SetCurrent.
             self.Show()
@@ -115,12 +135,8 @@ class GLPanel(wx.Panel):
         event.Skip()
 
     def processPaintEvent(self, event):
-        '''Process the drawing event.'''
+        """Process the drawing event."""
         # self.canvas.SetCurrent(GLPanel.SharedGLContext)
-
-        # This is a 'perfect' time to initialize OpenGL ... only if we need to
-        if not self.GLinitialized:
-            self.OnInitGL()
 
         self.OnDraw()
         event.Skip()
@@ -131,14 +147,23 @@ class GLPanel(wx.Panel):
         # call the super method
         super(GLPanel, self).Destroy()
 
+    def OnContextCreated(self, event):
+        """Called when our custom wx_EVT_GL_CONTEXT_CREATED event is received"""
+        self.OnInitGL()
+        event.Skip()
+
     # ==========================================================================
     # GLFrame OpenGL Event Handlers
     # ==========================================================================
-    def OnInitGL(self):
-        '''initialize OpenGL for use in the window.'''
+    def OnInitGL(self, event: wxGLContextCreatedEvent):
+        """
+        Initialize OpenGL for use in the window.  This is invoked by the
+        wx.EVT_GL_CONTEXT_CREATED event.  This call notifies the GLContextManager
+        after it has completed its own initialization.
+        """
         # create a pyglet context for this panel
 
-        if self.GLinitialized:
+        if self._glinitialized:
             return
 
         #         GLPanel.pygletcontext = gl.Context(gl.current_context)
@@ -146,17 +171,16 @@ class GLPanel(wx.Panel):
         #
         #         GLPanel.pygletcontext.set_current()
 
+        # Set the current context as our context.  This is expected by create_objects
         self.canvas.SetCurrent(self.canvas.context)
 
-        shaders.InitializeShaders()
+        # Notify the context manager that a new context has been created
+        self._glcontextmanager.add_context(self.canvas.context)
 
-        # normal gl init
-        self._InitGLState()
-
-        # create objects to draw
+        # allow inheritors the chance to create their objects
         self.create_objects()
 
-        self.GLinitialized = True
+        self._glinitialized = True
 
     def _InitGLState(self):
         gl.glEnable(gl.GL_BLEND)
@@ -168,16 +192,13 @@ class GLPanel(wx.Panel):
         # gl.glDebugMessageCallback(gl.GLDEBUGPROC(cb_dbg_msg), None)
 
     def OnReshape(self, width, height):
-        '''Reshape the OpenGL viewport based on the dimensions of the window.'''
+        """Reshape the OpenGL viewport based on the dimensions of the window."""
 
         # Zero values occasionally appear during window setup.  Ignore these until real values appear
         if width == 0 or height == 0:
             return
 
         self.canvas.SetCurrent(self.canvas.context)
-
-        if not self.GLinitialized:
-            self.OnInitGL()
 
         gl.glViewport(0, 0, width, height)
         # gl.glMatrixMode(gl.GL_PROJECTION)
@@ -187,9 +208,12 @@ class GLPanel(wx.Panel):
         # pyglet stuff
 
         # Wrap text to the width of the window
-        if self.GLinitialized:
-            # GLPanel.pygletcontext.set_current()
-            self.update_object_resize()
+        # GLPanel.pygletcontext.set_current()
+        self.update_object_resize()
+
+    def activate_context(self):
+        """Set this widgets GL context as the current context"""
+        self.canvas.SetCurrent(self.canvas.context)
 
     def OnDraw(self, *args, **kwargs):
         """Draw the window."""
@@ -197,7 +221,10 @@ class GLPanel(wx.Panel):
         if not self.IsShown():
             return
 
-        self.canvas.SetCurrent(self.canvas.context)
+        if not self._glinitialized:
+            return
+
+        self.activate_context()
 
         # self.canvas.SetCurrent(GLPanel.SharedGLContext)
         gl.glClearDepth(10000.0)
@@ -217,71 +244,17 @@ class GLPanel(wx.Panel):
     # ==========================================================================
     # To be implamented by a sub class
     # ==========================================================================
+    @abc.abstractmethod
     def create_objects(self):
-        '''create opengl objects when opengl is initialized'''
+        """create opengl objects when opengl is initialized"""
         pass
 
+    @abc.abstractmethod
     def update_object_resize(self):
-        '''called when the window recieves only if opengl is initialized'''
+        """called when the window resizes"""
         pass
 
+    @abc.abstractmethod
     def draw_objects(self):
-        '''called in the middle of ondraw after the buffer has been cleared'''
+        """called in the middle of ondraw after the buffer has been cleared"""
         pass
-
-
-class TestGlPanel(GLPanel):
-
-    def __init__(self, parent, window_id=wx.ID_ANY, pos=(10, 10)):
-        super(TestGlPanel, self).__init__(parent, window_id, wx.DefaultPosition, wx.DefaultSize, 0)
-        self.spritepos = pos
-
-    def create_objects(self):
-        '''create opengl objects when opengl is initialized'''
-        FOO_IMAGE = pyglet.image.load('foo.png')
-        self.batch = pyglet.graphics.Batch()
-        self.sprite = pyglet.sprite.Sprite(FOO_IMAGE, batch=self.batch)
-        self.sprite.x = self.spritepos[0]
-        self.sprite.y = self.spritepos[1]
-        self.sprite2 = pyglet.sprite.Sprite(FOO_IMAGE, batch=self.batch)
-        self.sprite2.x = self.spritepos[0] + 100
-        self.sprite2.y = self.spritepos[1] + 200
-
-    def update_object_resize(self):
-        '''called when the window recieves only if opengl is initialized'''
-        pass
-
-    def draw_objects(self):
-        '''called in the middle of ondraw after the buffer has been cleared'''
-        self.batch.draw()
-
-
-class TestFrame(wx.Frame):
-    '''A simple class for using OpenGL with wxPython.'''
-
-    def __init__(self, parent, ID, title, pos=wx.DefaultPosition,
-                 size=wx.DefaultSize, style=wx.DEFAULT_FRAME_STYLE):
-        super(TestFrame, self).__init__(parent, ID, title, pos, size, style)
-
-        self.mainsizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.GLPanel1 = TestGlPanel(self)
-        self.mainsizer.Add(self.GLPanel1, 1, wx.EXPAND)
-        self.GLPanel2 = TestGlPanel(self, wx.ID_ANY, (20, 20))
-        self.mainsizer.Add(self.GLPanel2, 1, wx.EXPAND)
-
-        print("init process")
-        self.SetSizer(self.mainsizer)
-        # self.mainsizer.Fit(self)
-        self.Layout()
-
-
-if __name__ == '__main__':
-    app = wx.App(redirect=False)
-    # frame = TestFrame(None, wx.ID_ANY, 'GL Window', size=(400,400))
-    frame = wx.Frame(None, -1, "GL Window", size=(400, 400))
-    panel = TestGlPanel(frame)
-    print("show")
-    frame.Show(True)
-    print("main loop")
-    app.MainLoop()
-    app.Destroy()

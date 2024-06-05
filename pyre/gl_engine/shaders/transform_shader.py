@@ -6,7 +6,7 @@ import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import FragmentShader, VertexShader, BaseShader
+from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader
 from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
@@ -71,15 +71,11 @@ class TransformShader(BaseShader):
              VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.texture_coord_location, "vertex_texture_coordinate", 2, gl.GL_FLOAT)])
 
-        if self._vertex_shader is None:
-            self._vertex_shader = VertexShader(_transform_vertex_shader_program)
+        self._vertex_shader = VertexShader(_transform_vertex_shader_program)
+        self._fragment_shader = FragmentShader(_transform_fragment_shader_program)
 
-        if self._fragment_shader is None:
-            self._fragment_shader = FragmentShader(_transform_fragment_shader_program)
-
-        if self._program is None:
-            self._program = glshaders.compileProgram(
-                self._vertex_shader.shader, self._fragment_shader.shader)
+    def initialize_gl_objects(self):
+        super().initialize_gl_objects()
 
     @property
     def source_pos_location(self) -> int:

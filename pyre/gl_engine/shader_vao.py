@@ -9,7 +9,8 @@ from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
 class ShaderVAO:
-    """Creates a Vertex Array Object for a set of control points and indicies that can be rendered with a specific Shader"""
+    """Creates a Vertex Array Object for a set of control points and indicies
+    that are static and will not change during the lifetime of the object"""
     _vertex_buffer: ctypes.c_uint | None
     _index_buffer: ctypes.c_uint | None
     _vao: ctypes.c_uint | None = None

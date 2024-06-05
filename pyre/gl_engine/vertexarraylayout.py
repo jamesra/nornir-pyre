@@ -2,8 +2,9 @@ import ctypes
 from typing import Sequence
 
 from OpenGL import GL as gl
+import numpy as np
 
-from pyre.gl_engine.helpers import get_gl_type_size, check_for_error
+from pyre.gl_engine.helpers import get_gl_type_size, check_for_error, get_dtype_for_gl_type
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 
 
@@ -15,6 +16,29 @@ class VertexArrayLayout:
     @property
     def attributes(self) -> Sequence[VertexAttribute]:
         return self._attributes
+
+    @property
+    def total_elements(self) -> int:
+        """Total number of elements in the vertex array"""
+        return sum(attr.num_elements for attr in self.attributes)
+
+    @property
+    def common_attribute_type(self):
+        """Check if all attribute types are the same and return the common type if they are."""
+        types = {attr.type for attr in self.attributes}
+        if len(types) == 1:
+            return next(iter(types))
+        else:
+            return None
+
+    @property
+    def dtype(self) -> np.dtype:
+        """The numpy data type of the vertex array, if all attributes have the same type"""
+        common_type = self.common_attribute_type
+        if common_type is None:
+            raise ValueError("Attributes have different types")
+
+        return get_dtype_for_gl_type(common_type)
 
     @property
     def stride(self) -> int:
@@ -32,8 +56,6 @@ class VertexArrayLayout:
         stride = self.stride
         offset = 0
         for attrib in self.attributes:
-            # gl.glVertexAttribPointer(attrib.location, attrib.num_elements, attrib.type, False, shader.attribute_stride,
-            #                          None if attrib.offset == 0 else attrib.offset)
             location = attrib.location()
             gl.glVertexAttribPointer(index=location,
                                      size=attrib.num_elements,

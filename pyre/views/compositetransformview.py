@@ -1,8 +1,8 @@
-'''
+"""
 Created on Oct 19, 2012
 
 @author: u0490822
-'''
+"""
 
 import logging
 import os
@@ -14,14 +14,18 @@ from numpy.typing import NDArray
 import scipy.spatial
 
 import OpenGL.GL as gl
-from pyre.views import imagegridtransformview
+from pyre.views import imagetransformview
 import pyre.views
+from pyre.state.gl_context_manager import IGLContextManager
 
 
-class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
-    '''
+class CompositeTransformView(imagetransformview.ImageTransformView):
+    """
     Combines and image and a transform to render an image
-    '''
+    """
+    _fixed_image_array: pyre.viewmodels.ImageViewModel
+    _warped_image_array: pyre.viewmodels.ImageViewModel
+    _transform_controller: pyre.viewmodels.TransformController
 
     def _ClearVertexAngleDelta(self):
         self._transformVertexAngleDeltas = None
@@ -40,57 +44,54 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
     @property
     def TransformVertexAngleDelta(self):
         if self._transformVertexAngleDeltas is None:
-            self._UpdateVertexAngleDelta(self.TransformController)
+            self._UpdateVertexAngleDelta(self._transform_controller)
 
         return self._transformVertexAngleDeltas
 
     @property
-    def VertexMaxAngleDelta(self):
+    def VertexMaxAngleDelta(self) -> float:
         return self._vertexMaxAngleDelta
 
     @property
-    def NormalizedVertexMaxAngleDelta(self):
+    def NormalizedVertexMaxAngleDelta(self) -> float:
         return self._vertexMaxAngleDelta
 
     @property
-    def MaxAngleDelta(self):
+    def MaxAngleDelta(self) -> float:
         return self._MaxAngleDelta
 
     @property
-    def width(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.width
+    def width(self) -> int:
+        return None if self._fixed_image_array is None else self._fixed_image_array.width
 
     @property
-    def height(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.height
+    def height(self) -> int:
+        return None if self._fixed_image_array is None else self._fixed_image_array.height
 
     @property
-    def fixedwidth(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.width
+    def fixedwidth(self) -> int | None:
+        return None if self._fixed_image_array is None else self._fixed_image_array.width
 
     @property
-    def fixedheight(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.height
+    def fixedheight(self) -> int | None:
+        return None if self._fixed_image_array is None else self._fixed_image_array.height
 
-    def __init__(self, FixedImageArray: pyre.viewmodels.ImageViewModel,
+    def __init__(self,
+                 glcontexmanager: IGLContextManager,
+                 FixedImageArray: pyre.viewmodels.ImageViewModel,
                  WarpedImageArray: pyre.viewmodels.ImageViewModel,
-                 Transform: pyre.viewmodels.TransformController):
-        '''
+                 transform_controller: pyre.viewmodels.TransformController):
+        """
         Constructor
-        '''
-        super(CompositeTransformView, self).__init__(ImageViewModel=FixedImageArray, Transform=Transform)
+        """
+        super().__init__(space=pyre.Space.Composite,
+                         glcontexmanager=glcontexmanager,
+                         ImageViewModel=FixedImageArray,
+                         transform_controller=transform_controller)
 
-        self.FixedImageArray = FixedImageArray
-        self.WarpedImageArray = WarpedImageArray
-        self.TransformController = Transform
+        self._fixed_image_array = FixedImageArray
+        self._warped_image_array = WarpedImageArray
+        self._transform_controller = transform_controller
 
         self._transformVertexAngleDeltas = None
 
@@ -103,35 +104,19 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
         self._tranformed_verts_cache = None
 
-    def OnTransformChanged(self):
+    def OnTransformChanged(self, transform_controller: pyre.viewmodels.TransformController):
 
-        super(CompositeTransformView, self).OnTransformChanged()
+        super(CompositeTransformView, self).OnTransformChanged(transform_controller)
 
         self._tranformed_verts_cache = None
         self._ClearVertexAngleDelta()
 
     def PopulateTransformedVertsCache(self):
-        # verts = self.Transform.WarpedPoints
-        # self._tranformed_verts_cache = self.Transform.Transform(verts)
+        # verts = self.transform.WarpedPoints
+        # self._tranformed_verts_cache = self.transform.transform(verts)
         if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
             self._tranformed_verts_cache = self.Transform.TargetPoints
         return
-
-    def draw_points(self, ForwardTransform=True, SelectedIndex=None, FixedSpace=True, BoundingBox=None, ScaleFactor=1):
-        # if(ForwardTransform):
-
-        if self.TransformController is None:
-            return
-
-        if self._tranformed_verts_cache is None:
-            self.PopulateTransformedVertsCache()
-
-        # if self._vertexMaxAngleDelta is None:
-        #    self._UpdateVertexAngleDelta(self.TransformController)
-
-        if not self._tranformed_verts_cache is None:
-            self._draw_points(self._tranformed_verts_cache, SelectedIndex, BoundingBox=BoundingBox,
-                              ScaleFactor=ScaleFactor)
 
     def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
         Triangles = numpy.array(T)
@@ -151,41 +136,6 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
         return Triangles
 
-    #
-    #     def draw_lines(self, ForwardTransform=True):
-    #         if(self.TransformController is None):
-    #             return
-    #
-    #         pyglet.gl.glColor4f(1.0, 0, 0, 1.0)
-    #         ImageArray = self.WarpedImageArray
-    #         for ix in range(0, ImageArray.NumCols):
-    #             for iy in range(0, ImageArray.NumRows):
-    #                 x = ImageArray.TextureSize[1] * ix
-    #                 y = ImageArray.TextureSize[0] * iy
-    #                 h, w = ImageArray.TextureSize
-    #
-    #                 WarpedCorners = [[y, x],
-    #                                 [y, x + w],
-    #                                 [y + h, x],
-    #                                 [y + h, x + w]]
-    #
-    #                 FixedCorners = self.TransformController.Transform(WarpedCorners)
-    #
-    #                 tri = scipy.spatial.Delaunay(FixedCorners)
-    #                 LineIndicies = pyre.views.LineIndiciesFromTri(tri.vertices)
-    #
-    #                 FlatPoints = numpy.fliplr(FixedCorners).ravel().tolist()
-    #
-    #                 vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
-    #
-    #                 gl.glDisable(gl.GL_TEXTURE_2D)
-    #
-    #                 pyglet.graphics.draw_indexed(len(vertarray) / 2,
-    #                                                          gl.GL_LINES,
-    #                                                          LineIndicies,
-    #                                                          ('v2f', vertarray))
-    #         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-
     def setup_composite_rendering(self):
 
         # gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -197,40 +147,45 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
         return
 
-    def draw_textures(self, view_proj: NDArray[numpy.floating], BoundingBox=None, glFunc=None):
+    def draw_textures(self, view_proj: NDArray[numpy.floating],
+                      space: pyre.Space,
+                      BoundingBox=None,
+                      glFunc=None):
         self.setup_composite_rendering()
 
         glFunc = gl.GL_FUNC_ADD
 
-        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
         gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
-        if self.FixedImageArray is not None:
+        if self._fixed_image_array is not None:
             FixedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
             # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
-            self.DrawWarpedImage(view_proj, self.FixedImageArray, tex_color=FixedColor, BoundingBox=BoundingBox,
+            self.draw(view_proj=view_proj,
+                      space=pyre.Space.Source,
+                      BoundingBox=BoundingBox,
+                      glFunc=glFunc)
+            self.DrawWarpedImage(view_proj, self._fixed_image_array, tex_color=FixedColor, BoundingBox=BoundingBox,
                                  z=None,
                                  glFunc=glFunc,
                                  tween=1.0)
 
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
 
-        if self.WarpedImageArray is not None:
+        if self._warped_image_array is not None:
             WarpedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 gl.glBlendEquation(glFunc)
                 WarpedColor = (0, 1.0, 0, 1)
 
-            self.DrawWarpedImage(view_proj, self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox,
+            self.DrawWarpedImage(view_proj, self._warped_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,
                                  z=None,
                                  glFunc=glFunc,
-                                 tween=0)
+                                 tween=1)
 
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         self.clear_composite_rendering()
-        # self.DrawFixedImage(self.__WarpedImageArray)
-        # self._draw_warped_image(self.__FixedImageArray)

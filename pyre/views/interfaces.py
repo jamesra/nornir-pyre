@@ -1,0 +1,42 @@
+from abc import ABC, abstractmethod
+
+import numpy as np
+from numpy._typing import NDArray
+
+import nornir_imageregistration
+
+from pyre import Space
+
+
+class IImageTransformView(ABC):
+    """
+    Base class for ImageTransformView objects
+    """
+
+    @property
+    @abstractmethod
+    def width(self) -> int:
+        """Width of the image in pixels"""
+        raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def height(self) -> int:
+        """Height of the image in pixels"""
+        raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def transform(self) -> nornir_imageregistration.ITransform:
+        """transform applied to the image to move it from source to target space"""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def draw(self,
+             view_proj: NDArray[np.floating],
+             space: Space,
+             BoundingBox: nornir_imageregistration.Rectangle | None = None,
+             glFunc=None):
+        """Draw the image in either source (fixed) or target (warped) space
+        :param view_proj: View projection matrix"""
+        raise NotImplementedError()

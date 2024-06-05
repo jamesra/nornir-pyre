@@ -13,9 +13,9 @@ from pyre import launcher
 
 
 def main():
-    #print(f"CWD: {os.getcwd()}")
-    #print(f"Path: {sys.path}")
-    state.init()
+    # print(f"CWD: {os.getcwd()}")
+    # print(f"Path: {sys.path}")
+ 
     launcher.Run()
 
 

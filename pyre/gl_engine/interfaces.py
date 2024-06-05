@@ -6,6 +6,27 @@ import ctypes
 from .vertexarraylayout import VertexArrayLayout
 
 
+class IVAO(ABC):
+    """Generic interface for a VAO"""
+
+    @abstractmethod
+    def bind(self):
+        """Bind the VAO"""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def unbind(self):
+        raise NotImplementedError()
+
+
+class IIndexBuffer(ABC):
+    @property
+    @abstractmethod
+    def buffer(self) -> ctypes.c_uint:
+        """The OpenGL buffer object"""
+        raise NotImplementedError()
+
+
 class IBuffer(ABC):
     """An object with an OpenGL buffer object."""
 

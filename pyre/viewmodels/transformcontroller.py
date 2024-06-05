@@ -1,11 +1,13 @@
-'''
+"""
 Created on Oct 19, 2012
 
 @author: u0490822
-'''
+"""
 
+from __future__ import annotations
 import copy
 import math
+from typing import Sequence, Callable
 
 import numpy
 import numpy as np
@@ -58,19 +60,28 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
     # WarpedShape)
 
 
-class TransformController(object):
-    '''
-    Combines an image and a transform to render an image
-    '''
+class TransformController:
+    """
+    Provides methods to edit a transform.  Once passed to a view the controller can replace the transform entirely, but
+    the view is not expected to update the transform controller.
+    """
     debug_id = 0
+    _id: int
+    _TransformModel: nornir_imageregistration.ITransform = None
+    __OnChangeEventListeners: list[Callable[[TransformController], None]] = []
+    Debug: bool
+    ShowWarped: bool
+    DefaultToForwardTransform: bool
 
     @staticmethod
     def CreateDefault(FixedShape=None, WarpedShape=None):
-        T = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID, FixedShape, WarpedShape)
-        return TransformController(T)
+        """Creates a default transform controller with a rigid transform and no control points"""
+        raise DeprecationWarning("Use the TransformManager instead")
+        # T = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID, FixedShape, WarpedShape)
+        # return TransformController(T)
 
     @property
-    def width(self):
+    def width(self) -> float | None:
         if isinstance(self.TransformModel, nornir_imageregistration.IDiscreteTransform):
             return self.TransformModel.FixedBoundingBox.Width
 
@@ -91,41 +102,41 @@ class TransformController(object):
         return 0
 
     @property
-    def points(self):
+    def points(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
             return copy.deepcopy(self.TransformModel.points)
 
-        return ()
+        return np.empty((0, 4))
 
     @property
-    def SourcePoints(self):
+    def SourcePoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
             return copy.deepcopy(self.TransformModel.SourcePoints)
 
-        return ()
+        return np.empty((0, 2))
 
     @property
-    def TargetPoints(self):
+    def TargetPoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
             return copy.deepcopy(self.TransformModel.TargetPoints)
 
-        return ()
+        return np.empty((0, 2))
 
     @property
-    def WarpedTriangles(self):
+    def WarpedTriangles(self) -> NDArray[np.integer]:
         return self.TransformModel.WarpedTriangles
 
     @property
-    def FixedTriangles(self):
+    def FixedTriangles(self) -> NDArray[np.integer]:
         return self.TransformModel.FixedTriangles
 
     @property
     def TransformModel(self) -> nornir_imageregistration.ITransform:
+        """The transform this controller is editting"""
         return self._TransformModel
 
     @TransformModel.setter
     def TransformModel(self, value: nornir_imageregistration.ITransform):
-
         if self._TransformModel is not None:
             self._TransformModel.RemoveOnChangeEventListener(self.OnTransformChanged)
 
@@ -158,30 +169,34 @@ class TransformController(object):
         self.FireOnChangeEvent()
 
     def FireOnChangeEvent(self):
-        '''Calls every function registered to be notified when the transform changes.'''
+        """Calls every function registered to be notified when the transform changes."""
 
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
         #        Pool = pools.GetGlobalThreadPool()
         # tlist = list()
         for func in self.__OnChangeEventListeners:
-            func()
+            func(self)
         #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
 
         # for task in tlist:
         # task.wait()
 
+    @property
+    def Id(self) -> int:
+        """Unique ID of this transform controller"""
+        return self._id
+
     def __init__(self, TransformModel: nornir_imageregistration.ITransform | None = None,
                  DefaultToForwardTransform: bool = True):
-        '''
+        """
         Constructor
-        '''
+        """
 
-        self.debug_id
+        self.debug_id = TransformController.debug_id
         self._id = self.debug_id
-        self.debug_id += 1
+        TransformController.debug_id += 1
 
         self.__OnChangeEventListeners = []
-        self._TransformModel = None
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 
@@ -196,7 +211,7 @@ class TransformController(object):
         # print("Create transform controller %d" % self._id)
 
     def SetPoints(self, points: NDArray | nornir_imageregistration.IControlPoints):
-        '''Set transform points to the passed array'''
+        """Set transform points to the passed array"""
         if isinstance(points, nornir_imageregistration.IControlPoints):
             points = points.points
         elif isinstance(points, np.ndarray):
@@ -215,31 +230,32 @@ class TransformController(object):
         if not self.DefaultToForwardTransform:
             self.ShowWarped = False
 
-    def GetFixedPoint(self, index):
+    def GetFixedPoint(self, index: int):
         return self.TransformModel.TargetPoints[index, :]
 
-    def GetWarpedPoint(self, index):
+    def GetWarpedPoint(self, index: int):
         return self.TransformModel.SourcePoints[index, :]
 
-    def GetWarpedPointsInRect(self, bounds):
+    def GetWarpedPointsInRect(self, bounds: nornir_imageregistration.Rectangle):
         return self.TransformModel.GetWarpedPointsInRect(bounds)
 
-    def GetFixedPointsInRect(self, bounds):
+    def GetFixedPointsInRect(self, bounds: nornir_imageregistration.Rectangle):
         return self.TransformModel.GetFixedPointsInRect(bounds)
 
-    def NearestPoint(self, ImagePoint, FixedSpace=True) -> tuple[float, int]:
+    def NearestPoint(self, ImagePoint: NDArray[np.floating], space: pyre.Space) -> tuple[
+        float | None, int | None]:
         if isinstance(self.TransformModel, IControlPoints):
-            if FixedSpace is False:
+            if space == pyre.Space.Target:
                 return self.TransformModel.NearestWarpedPoint(ImagePoint)
             else:
                 return self.TransformModel.NearestFixedPoint(ImagePoint)
         else:
             return None, None
 
-    def TranslateFixed(self, offset):
+    def TranslateFixed(self, offset: nornir_imageregistration.VectorLike):
         self.TransformModel.TranslateFixed(offset)
 
-    def TranslateWarped(self, offset):
+    def TranslateWarped(self, offset: nornir_imageregistration.VectorLike):
         self.TransformModel.TranslateWarped(offset)
 
     def Rotate(self, rangle: float, center: NDArray[float] | None = None):
@@ -253,20 +269,20 @@ class TransformController(object):
             raise NotImplementedError("Current transform does not support rotation")
 
     def FlipWarped(self):
-        '''
-        Flip the target points 
-        '''
+        """
+        Flip the target points
+        """
         self.TransformModel.FlipWarped()
 
-    def TryAddPoint(self, ImageX, ImageY, FixedSpace=True):
+    def TryAddPoint(self, ImageX: float, ImageY: float, space: pyre.Space = pyre.Space.Source):
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPointAddRemove):
-            print("Transform does not support add/remove control points")
+            print("transform does not support add/remove control points")
             return
 
         OppositePoint = None
         NewPointPair = []
-        if not FixedSpace and not self.ShowWarped:
+        if space == pyre.Space.Target and not self.ShowWarped:
             OppositePoint = self.TransformModel.Transform([[ImageY, ImageX]])
             NewPointPair = [OppositePoint[0][0], OppositePoint[0][1], ImageY, ImageX]
         else:
@@ -275,10 +291,10 @@ class TransformController(object):
 
         return self.TransformModel.AddPoint(NewPointPair)
 
-    def TryDeletePoint(self, ImageX, ImageY, maxDistance, FixedSpace=True):
+    def TryDeletePoint(self, ImageX: float, ImageY: float, maxDistance: float, space: pyre.Space = pyre.Space.Source):
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPointAddRemove):
-            print("Transform does not support add/remove control points")
+            print("transform does not support add/remove control points")
             return
 
         NearestPoint = None
@@ -286,7 +302,7 @@ class TransformController(object):
         distance = 0
 
         try:
-            if not FixedSpace and not self.ShowWarped:
+            if space == pyre.Space.Target and not self.ShowWarped:
                 distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])
             else:
                 distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])
@@ -299,11 +315,12 @@ class TransformController(object):
         self.TransformModel.RemovePoint(index)
         return True
 
-    def RemovePoints(self, indicies):
+    def RemovePoints(self, indicies: np.ndarray[np.integer]):
         if isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPointAddRemove):
             self.TransformModel.RemovePoint(indicies)
 
-    def TryDrag(self, ImageX, ImageY, ImageDX, ImageDY, maxDistance, FixedSpace=True):
+    def TryDrag(self, ImageX: float, ImageY: float, ImageDX: float, ImageDY: float, maxDistance: float,
+                space: pyre.Space = pyre.Space.Source):
 
         NearestPoint = None
         index = None
@@ -312,7 +329,7 @@ class TransformController(object):
         if not isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
             return None
 
-        if not FixedSpace and not self.ShowWarped:
+        if space == pyre.Space.Target and not self.ShowWarped:
             Distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])
         else:
             Distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])
@@ -323,23 +340,23 @@ class TransformController(object):
         index = self.MovePoint(index, ImageDY, ImageDX)
         return index
 
-    def GetNearestPoint(self, index: int, FixedSpace: bool = False):
+    def GetNearestPoint(self, index: int, space: pyre.Space = pyre.Space.Source):
         NearestPoint = None
         if index > len(self.TransformModel.SourcePoints):
             return None
 
-        if not FixedSpace and not self.ShowWarped:
+        if space == pyre.Space.Target and not self.ShowWarped:
             NearestPoint = copy.copy(self.TransformModel.SourcePoints[index])
         else:
             NearestPoint = copy.copy(self.TransformModel.TargetPoints[index])
 
         return NearestPoint
 
-    def SetPoint(self, index: int, X, Y, FixedSpace: bool = True) -> int:
+    def SetPoint(self, index: int, X: float, Y: float, space: pyre.Space = pyre.Space.Source) -> int:
         original_point = np.array((Y, X))
         point = original_point
 
-        if not FixedSpace:
+        if space == pyre.Space.Target:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 if not self.ShowWarped:
                     index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
@@ -354,19 +371,19 @@ class TransformController(object):
 
         return index
 
-    def MovePoint(self, index: int, ImageDX, ImageDY, FixedSpace: bool = True) -> int:
+    def MovePoint(self, index: int, ImageDX: float, ImageDY: float, space: pyre.Space = pyre.Space.Source) -> int:
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPoints):
             return
 
-        original_point = self.GetNearestPoint(index, FixedSpace)
+        original_point = self.GetNearestPoint(index, space)
         if original_point is None:
             print(f"No point found for index {index}")
             return
 
         point = original_point + numpy.array((ImageDY, ImageDX))
 
-        if not FixedSpace:
+        if space == pyre.Space.Target:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 if not self.ShowWarped:
                     index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
@@ -387,8 +404,8 @@ class TransformController(object):
 
         return index
 
-    def AutoAlignPoints(self, i_points):
-        '''Attemps to align the specified point indicies'''
+    def AutoAlignPoints(self, i_points: Sequence[int]) -> None:
+        """Attemps to align the specified point indicies"""
         from pyre.state import currentStosConfig
 
         if (currentStosConfig.FixedImageViewModel is None or
@@ -469,7 +486,7 @@ class TransformController(object):
                                                       source_mask=currentStosConfig.WarpedImages.BlendedMask,
                                                       target_image_stats=currentStosConfig.FixedImageViewModel.Stats,
                                                       source_image_stats=currentStosConfig.WarpedImageViewModel.Stats,
-                                                       target_controlpoint=fixed,
+                                                      target_controlpoint=fixed,
                                                       alignmentArea=currentStosConfig.AlignmentTileSize,
                                                       anglesToSearch=currentStosConfig.AnglesToSearch)
 
@@ -506,4 +523,4 @@ class TransformController(object):
         # If we aligned all points, remove the ones we couldn't register
         self.RemovePoints(invalid_points)
 
-        # return self.TransformController.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)
+        # return self._transform_controller.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)

@@ -29,7 +29,8 @@ def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistra
     nornir_imageregistration.ImageSave(fileFullPath, registeredImage)
 
 
-def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray, warpedImage: NDArray):
+def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray,
+                                      warpedImage: NDArray):
     '''Cut image into tiles, assemble small chunks'''
 
     return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
@@ -88,10 +89,10 @@ def RotateTranslateWarpedImage(LimitImageSize: bool = False):
         transform = alignRecord.ToImageTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
                                                  pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
         pyre.state.currentStosConfig.TransformController.TransformModel = transform
-        #pyre.state.currentStosConfig.TransformController.SetPoints(transform.points)
+        # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 
-        #pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.Transform,
-                               #pyre.state.currentStosConfig.TransformController.Transform)
+        # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.transform,
+        # pyre.state.currentStosConfig._transform_controller.transform)
 
 
 def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefinement | None):
@@ -107,11 +108,12 @@ def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefineme
             outputDir=None)
 
         pyre.state.currentStosConfig.TransformController.TransformModel = updatedTransform
-        #pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.SetPoints,
-#                               pyre.state.currentStosConfig.TransformController.points)
+        # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,
+    #                               pyre.state.currentStosConfig._transform_controller.points)
     except Exception as e:
         print(f"Exception running grid refinement:\n{e}")
         pass
+
 
 def LinearBlendTransform(blend_factor: float):
     if not isinstance(pyre.state.currentStosConfig.Transform, nornir_imageregistration.transforms.IControlPoints):
@@ -122,8 +124,9 @@ def LinearBlendTransform(blend_factor: float):
                            'TransformModel',
                            pyre.state.currentStosConfig.TransformController.TransformModel)
 
-    updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(pyre.state.currentStosConfig.Transform,
-                                                                              blend_factor, ignore_rotation=False)
+    updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(
+        pyre.state.currentStosConfig.Transform,
+        blend_factor, ignore_rotation=False)
 
     pyre.state.currentStosConfig.TransformController.TransformModel = updated_transform
     print(f"Linear blend completed for blend value {blend_factor}")
@@ -168,7 +171,6 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            target_controlpoint,
                            alignmentArea,
                            anglesToSearch: Iterable[float]):
-
     if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
         return None
 
@@ -186,9 +188,8 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                                                                                        target_controlpoint=target_controlpoint,
                                                                                        alignmentArea=alignmentArea,
                                                                                        anglesToSearch=anglesToSearch)
-    
+
     return task
-    
 
 
 #
@@ -239,7 +240,8 @@ def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
     return numpy.maximum(too_large, too_small)
 
 
-def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskImage: NDArray, WarpedMaskImage: NDArray):
+def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskImage: NDArray,
+                      WarpedMaskImage: NDArray):
     '''Remove all transform points that are positioned in the mask image'''
 
     if FixedMaskImage is not None:

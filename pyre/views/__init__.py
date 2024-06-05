@@ -1,4 +1,4 @@
-__all__ = ['CompositeTransformView', 'ImageGridTransformView', 'MosaicView']
+__all__ = ['CompositeTransformView', 'ImageTransformView', 'MosaicView']
 
 import ctypes
 
@@ -10,10 +10,11 @@ from OpenGL.arrays import vbo
 
 from .compositetransformview import CompositeTransformView
 from . import compositetransformview
-from .imagegridtransformview import ImageGridTransformView
 from .mosaicview import MosaicView
-from pyre.views import imagegridtransformview
 from .pointset_view import PointSetView
+from .controlpoint_view import ControlPointView
+from .transformcontrollerview import TransformControllerView
+from .imagetransformview import ImageTransformView
 
 
 def LineIndiciesFromTri(T: scipy.spatial.Delaunay) -> list[int]:

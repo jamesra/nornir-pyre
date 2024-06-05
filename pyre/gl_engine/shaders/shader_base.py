@@ -5,40 +5,64 @@ from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
 class VertexShader:
-    _shader: int
+    _shader: int | None = None  # The compiled shader
+    _program: str
+    _initialized: bool = False  # Whether the shader has been compiled
 
     @property
-    def shader(self):
+    def shader(self) -> int:
         return self._shader
 
     def __init__(self, vertex_shader_program: str):
-        self._shader = glshaders.compileShader(vertex_shader_program, gl.GL_VERTEX_SHADER)
+        self._program = vertex_shader_program
+
+    def initialize_gl_objects(self):
+        if not self._initialized:
+            self._shader = glshaders.compileShader(self._program, gl.GL_VERTEX_SHADER)
+            self._initialized = True
 
     def __del__(self):
-        gl.glDeleteShader(self._shader)
+        if self._shader is not None:
+            gl.glDeleteShader(self._shader)
 
 
 class FragmentShader:
-    _shader: int
+    _shader: int | None = None  # The compiled shader
+    _program: str
+    _initialized: bool = False  # Whether the shader has been compiled
 
     @property
-    def shader(self):
+    def shader(self) -> int:
         return self._shader
 
-    def __init__(self, fragment_shader_program: str):
-        self._shader = glshaders.compileShader(fragment_shader_program, gl.GL_FRAGMENT_SHADER)
+    def __init__(self, vertex_shader_program: str):
+        self._program = vertex_shader_program
+
+    def initialize_gl_objects(self):
+        if not self._initialized:
+            self._shader = glshaders.compileShader(self._program, gl.GL_FRAGMENT_SHADER)
+            self._initialized = True
 
     def __del__(self):
-        gl.glDeleteShader(self._shader)
+        if self._shader is not None:
+            gl.glDeleteShader(self._shader)
 
 
 class BaseShader(ABC):
     """Shared code for shaders."""
-    _vertex_shader: VertexShader = None
-    _fragment_shader: FragmentShader = None
+    _vertex_shader: VertexShader
+    _fragment_shader: FragmentShader
     _program: int | None = None
 
     _vertex_layout: VertexArrayLayout
+
+    def initialize_gl_objects(self):
+        """Compile the shaders and programs.  Override for different behavior"""
+        self._vertex_shader.initialize_gl_objects()
+        self._fragment_shader.initialize_gl_objects()
+
+        if self._program is None:
+            self._program = glshaders.compileProgram(self._vertex_shader.shader, self._fragment_shader.shader)
 
     @property
     def vertex_layout(self) -> VertexArrayLayout:
@@ -68,4 +92,5 @@ class BaseShader(ABC):
         return self._fragment_shader
 
     def __del__(self):
-        gl.glDeleteProgram(self.program)
+        if self._program is not None:
+            gl.glDeleteProgram(self._program)

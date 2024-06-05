@@ -61,7 +61,7 @@ class CameraCommand(command_base.VolumeCommandBase):
             LookAt = [self.camera.x, self.camera.y]
 
             if not self.FixedSpace and self.ShowWarped:
-                LookAt = self.TransformController.Transform([LookAt])
+                LookAt = self.TransformController.transform([LookAt])
                 LookAt = LookAt[0]
 
     def on_mouse_scroll(self, e):

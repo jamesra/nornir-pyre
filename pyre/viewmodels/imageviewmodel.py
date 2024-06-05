@@ -6,16 +6,14 @@ Created on Oct 17, 2012
 
 import logging
 import math
-import os
+import OpenGL.GL as gl
+from typing import Generator
 import sys
 
-from OpenGL.GL import *
-from OpenGL.GLU import *
 import nornir_imageregistration
-import numpy
+import numpy as np
 from numpy.typing import NDArray
-from pylab import *
-from pyre import resources
+# from pylab import *
 import scipy.ndimage
 import pyre.gl_engine as gl_engine
 
@@ -28,18 +26,23 @@ Logger = logging.getLogger("ImageArray")
 
 class ImageViewModel(object):
     """
-    Represents a numpy image as an array of textures.  Read-only.
+    Represents a numpy image as an array of GL textures.  Read-only.
     """
 
     _TextureSize: NDArray[np.integer]
-    _Image: NDArray[numpy.floating]
-    _ImageArray: list[list[int]]
+    _Image: NDArray[np.floating]
+    _ImageArray: list[list[int]] | None = None
+    _NumCols: int
+    _NumRows: int
+    _height: int
+    _width: int
+    _ImageFilename: str | None = None
 
     # The largest dimension we allow a texture to have
-    MaxTextureDimension = int(4096)
+    MaxTextureDimension: int = int(4096)
 
     @property
-    def Image(self) -> NDArray[numpy.floating]:
+    def Image(self) -> NDArray[np.floating]:
         return self._Image
 
     @property
@@ -109,14 +112,6 @@ class ImageViewModel(object):
         """
         Constructor, _Image is either path to file or a numpy array
         """
-        # self._TileSize = (int(1024), int(1024))
-        # self.TextureHeight = int(math.pow(2, math.ceil(math.log(self.height, 2))))
-        # self.TextureWidth = int(math.pow(2, math.ceil(math.log(self.width, 2))))
-        self._ImageFilename = None
-
-        # self.ViewTransform = transform
-
-        # self.RawImageSize = Utils.Images.GetImageSize(ImageInput)
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
         if isinstance(input_image, str):
@@ -148,10 +143,8 @@ class ImageViewModel(object):
         self._height, self._width = self.NumRows * self.TextureSize[nornir_imageregistration.iPoint.Y], self.NumCols * \
                                     self.TextureSize[nornir_imageregistration.iPoint.X]
 
-        self._ImageArray = None
-
     def ResizeToPowerOfTwo(self, InputImage: str, tilesize: nornir_imageregistration.ShapeLike | None = None) -> \
-            NDArray[numpy.floating]:
+            NDArray[np.floating]:
         if tilesize is None:
             tilesize = self._TileSize
 
@@ -166,7 +159,7 @@ class ImageViewModel(object):
         newwidth = NumCols * tilesize[0]
         newheight = NumRows * tilesize[1]
 
-        newImage = numpy.zeros((newheight, newwidth), dtype=Resize.dtype)
+        newImage = np.zeros((newheight, newwidth), dtype=Resize.dtype)
 
         newImage[0:Resize.shape[0], 0:Resize.shape[1]] = Resize
 
@@ -219,7 +212,7 @@ class ImageViewModel(object):
 
                 temp = None
                 if pad_image:
-                    paddedImage = numpy.zeros(self.TextureSize)
+                    paddedImage = np.zeros(self.TextureSize)
                     paddedImage[0:end_iY - iY, 0:end_iX - iX] = self.Image[iY:end_iY, iX:end_iX]
                     temp = paddedImage
                 else:
@@ -236,3 +229,21 @@ class ImageViewModel(object):
 
         Logger.info("Completed CreateImageArray")
         return texture_grid
+
+    def generate_grid_indicies(self) -> Generator[tuple[int, int], None, None]:
+        """Yields all of the grid indicies that cover the image"""
+        for ix in range(0, self.NumCols):
+            for iy in range(0, self.NumRows):
+                yield ix, iy
+
+    def is_valid_index(self, ix: int, iy: int) -> bool:
+        """Returns True if the grid index is within the image grid bounds"""
+        return 0 <= ix < self.NumCols and 0 <= iy < self.NumRows
+
+    def __del__(self):
+        """Free the GL Texture array"""
+        if self._ImageArray is None:
+            return
+
+        textures = [texture for row in self._ImageArray for texture in row]
+        gl.glDeleteTextures(textures)

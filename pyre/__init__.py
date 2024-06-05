@@ -61,10 +61,12 @@ ____
 
 '''
 
-__all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common']
+__all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common', 'Space']
 
 Windows = {}
 
+import pyre.space
+from pyre.space import Space
 import pyre.common as common
 import pyre.commandhistory
 from pyre.commandhistory import history
@@ -82,29 +84,3 @@ from .space import Space
 
 vector3 = NDArray[np.floating]  # A 3 element vector
 vector2 = NDArray[np.floating]  # A 2 element vector
-
-
-def Exit():
-    '''Destroy all windows and exit the application'''
-    for w in list(Windows.values()):
-        w.Destroy()
-
-
-def AnyVisibleWindows():
-    AnyVisibleWindows = False
-    for w in list(Windows.values()):
-        AnyVisibleWindows = AnyVisibleWindows or w.IsShown()
-
-    return AnyVisibleWindows
-
-
-def ToggleWindow(key):
-    if key in Windows:
-        w = Windows[key]
-        if w.IsShown():
-            w.Hide()
-        else:
-            w.Show()
-
-    if not AnyVisibleWindows():
-        Exit()

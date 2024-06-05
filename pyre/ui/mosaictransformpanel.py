@@ -24,7 +24,7 @@ import pyre.views
 
 def _get_ITV_transform(ITV):
     '''Return the transform for an ImageTransformView'''
-    return ITV.Transform
+    return ITV.transform
 
 
 def _get_transforms(ImageTransformViewList):
@@ -108,7 +108,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         bounding_box = self.camera.VisibleImageBoundingBox
 
         for itv in self.ImageTransformViewList:
-            itv.draw_textures(ShowWarped=True, BoundingBox=bounding_box, glFunc=gl.GL_FUNC_ADD)
+            itv.draw(ShowWarped=True, bounding_box=bounding_box, glFunc=gl.GL_FUNC_ADD)
 
         pyre.views.ClearDrawTextureState()
 

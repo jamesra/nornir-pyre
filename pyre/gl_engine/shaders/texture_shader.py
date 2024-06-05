@@ -1,12 +1,13 @@
 from typing import Sequence
+import warnings
 
 from OpenGL import GL as gl
 from OpenGL.GL import shaders as glshaders
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import FragmentShader, VertexShader, BaseShader
+from pyre.gl_engine import check_for_error, IVAO
+from pyre.gl_engine.shaders.shader_base import BaseShader, VertexShader, FragmentShader
 from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
@@ -61,19 +62,15 @@ class TextureShader(BaseShader):
         global _texture_fragment_shader_program
 
         self._vertex_layout = VertexArrayLayout(
-            [VertexAttribute(lambda: self.source_pos_location, "vertex_source_position", 3, gl.GL_FLOAT),
-             VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT),
+            [VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT),
+             VertexAttribute(lambda: self.source_pos_location, "vertex_source_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.texture_coord_location, "vertex_texture_coordinate", 2, gl.GL_FLOAT)])
 
-        if self._vertex_shader is None:
-            self._vertex_shader = VertexShader(_texture_vertex_shader_program)
+        self._vertex_shader = VertexShader(_texture_vertex_shader_program)
+        self._fragment_shader = FragmentShader(_texture_fragment_shader_program)
 
-        if self._fragment_shader is None:
-            self._fragment_shader = FragmentShader(_texture_fragment_shader_program)
-
-        if self._program is None:
-            self._program = glshaders.compileProgram(
-                self._vertex_shader.shader, self._fragment_shader.shader)
+    def initialize_gl_objects(self):
+        super().initialize_gl_objects()
 
     @property
     def source_pos_location(self) -> int:
@@ -124,7 +121,7 @@ class TextureShader(BaseShader):
                 raise ValueError("Could not find attribute")
         return self._model_view_projection_matrix_location
 
-    def draw(self, model_view_proj_matrix: NDArray[np.floating], texture: int, vertex_array_object: ShaderVAO,
+    def draw(self, model_view_proj_matrix: NDArray[np.floating], texture: int, vertex_array_object: IVAO,
              tween: float):
         """Draws the texture using the vertex and index buffers."""
         try:
@@ -151,6 +148,8 @@ class TextureShader(BaseShader):
             # if status != gl.GL_FRAMEBUFFER_COMPLETE:
             #    print("Framebuffer is not complete")
 
+            if vertex_array_object.num_elements == 0:
+                warnings.warn("No elements to draw")
             gl.glDrawElements(gl.GL_TRIANGLES, vertex_array_object.num_elements, gl.GL_UNSIGNED_SHORT, None)
             check_for_error()
         finally:

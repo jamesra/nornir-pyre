@@ -21,7 +21,7 @@ class GridTransformSettingsDialog(wx.Dialog):
         fgs = wx.FlexGridSizer(4, 2, 10, 10)
         blank = wx.Panel(panel)
 
-        title = wx.StaticText(panel, label = "Grid Transform Settings")
+        title = wx.StaticText(panel, label = "Grid transform Settings")
         width = wx.StaticText(panel, label="Columns")
         height = wx.StaticText(panel, label="Rows")
 
