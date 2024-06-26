@@ -24,7 +24,7 @@ from nornir_shared.mathhelper import NearestPowerOfTwo
 Logger = logging.getLogger("ImageArray")
 
 
-class ImageViewModel(object):
+class ImageViewModel:
     """
     Represents a numpy image as an array of GL textures.  Read-only.
     """
@@ -37,6 +37,8 @@ class ImageViewModel(object):
     _height: int
     _width: int
     _ImageFilename: str | None = None
+    _image_stats: nornir_imageregistration.ImageStats
+    RawImageSize: NDArray[np.integer]
 
     # The largest dimension we allow a texture to have
     MaxTextureDimension: int = int(4096)
@@ -134,7 +136,7 @@ class ImageViewModel(object):
         # Images are read only, create a memory mapped file for the image for use with multithreading
         # self._Image = core.npArrayToReadOnlySharedArray(self._Image)
 
-        self.RawImageSize = self._Image.shape
+        self.RawImageSize = np.array(self._Image.shape)
 
         self._TextureSize = ImageViewModel.FindTextureSize(self.RawImageSize)
         self._NumCols = int(math.ceil(self._Image.shape[1] / float(self.TextureSize[1])))

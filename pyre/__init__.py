@@ -71,6 +71,7 @@ import pyre.common as common
 import pyre.commandhistory
 from pyre.commandhistory import history
 import pyre.gl_engine as gl_engine
+import pyre.wxevents as wxevents
 import pyre.ui as ui
 import pyre.viewmodels as viewmodels
 import pyre.views as views

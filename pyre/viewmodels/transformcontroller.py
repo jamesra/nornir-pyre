@@ -17,6 +17,8 @@ import nornir_imageregistration
 from nornir_imageregistration.transforms.base import IControlPoints
 import nornir_pools as pools
 import pyre
+from pyre.interfaces import IEventManager
+from pyre.state.eventmanager import wxEventManager
 
 
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
@@ -60,6 +62,9 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
     # WarpedShape)
 
 
+TransformChangedCallback = Callable[['TransformController'], None]
+
+
 class TransformController:
     """
     Provides methods to edit a transform.  Once passed to a view the controller can replace the transform entirely, but
@@ -68,7 +73,7 @@ class TransformController:
     debug_id = 0
     _id: int
     _TransformModel: nornir_imageregistration.ITransform = None
-    __OnChangeEventListeners: list[Callable[[TransformController], None]] = []
+    __OnChangeEventListeners: IEventManager[TransformChangedCallback]
     Debug: bool
     ShowWarped: bool
     DefaultToForwardTransform: bool
@@ -154,10 +159,10 @@ class TransformController:
     def InverseTransform(self, points: NDArray[float], **kwargs):
         return self.TransformModel.InverseTransform(points, **kwargs)
 
-    def AddOnChangeEventListener(self, func):
-        self.__OnChangeEventListeners.append(func)
+    def AddOnChangeEventListener(self, func: Callable):
+        self.__OnChangeEventListeners.add(func)
 
-    def RemoveOnChangeEventListener(self, func):
+    def RemoveOnChangeEventListener(self, func: Callable):
         if func in self.__OnChangeEventListeners:
             self.__OnChangeEventListeners.remove(func)
 
@@ -174,8 +179,7 @@ class TransformController:
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
         #        Pool = pools.GetGlobalThreadPool()
         # tlist = list()
-        for func in self.__OnChangeEventListeners:
-            func(self)
+        self.__OnChangeEventListeners.invoke(self)
         #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
 
         # for task in tlist:
@@ -196,7 +200,7 @@ class TransformController:
         self._id = self.debug_id
         TransformController.debug_id += 1
 
-        self.__OnChangeEventListeners = []
+        self.__OnChangeEventListeners = wxEventManager[TransformChangedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 

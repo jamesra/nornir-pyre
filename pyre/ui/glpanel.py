@@ -3,11 +3,9 @@
 # import OpenGL as gl
 
 import abc
-import pyre
 import pyre.ui
 import OpenGL.GL as gl
-import pyre.gl_engine.shaders as shaders
-from pyre.ui.wxevents import wx_EVT_GL_CONTEXT_CREATED, wxGLContextCreatedEvent
+from pyre.wxevents import wx_EVT_GL_CONTEXT_CREATED, wxGLContextCreatedEvent
 
 try:
     import wx
@@ -60,7 +58,7 @@ class GLPanel(wx.Panel):
         context_attrs = wx.glcanvas.GLContextAttrs()
         context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
         context = wx.glcanvas.GLContext(self.canvas, GLPanel.SharedGLContext, context_attrs)
-        add_listener = True
+        add_listener = False
         if GLPanel.SharedGLContext is None:
             # Install our debug message callback
             # GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas, None, context_attrs)
@@ -128,10 +126,10 @@ class GLPanel(wx.Panel):
             self.Show()
             self.canvas.SetCurrent(self.canvas.context)
             size = self.GetGLExtents()
-            self.winsize = (size.width, size.height)
             self.width, self.height = size.width, size.height
             self.OnReshape(size.width, size.height)
             self.canvas.Refresh(False)
+
         event.Skip()
 
     def processPaintEvent(self, event):
@@ -191,7 +189,7 @@ class GLPanel(wx.Panel):
 
         # gl.glDebugMessageCallback(gl.GLDEBUGPROC(cb_dbg_msg), None)
 
-    def OnReshape(self, width, height):
+    def OnReshape(self, width: int, height: int):
         """Reshape the OpenGL viewport based on the dimensions of the window."""
 
         # Zero values occasionally appear during window setup.  Ignore these until real values appear

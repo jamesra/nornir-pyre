@@ -13,6 +13,7 @@ from pyre.ui.windows.filedrop import FileDrop
 from pyre.ui.windows.textdrop import TextDrop
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.ui import ImageTransformViewPanel
+from pyre.state import ViewType
 
 
 class StosWindow(PyreWindowBase):
@@ -23,6 +24,7 @@ class StosWindow(PyreWindowBase):
     _space: Space
     dirname: str = ''
     _config: pyre.state.StosWindowConfig
+    _view_type: ViewType
 
     @property
     def space(self) -> Space:
@@ -45,16 +47,17 @@ class StosWindow(PyreWindowBase):
         return self._config
 
     def __init__(self, parent,
-                 windowID: int,
+                 window_id: ViewType,
                  title: str,
-                 show_space: Space,
+                 view_type: ViewType,
                  config: pyre.state.StosWindowConfig):
 
-        super(StosWindow, self).__init__(parent=parent, windowID=windowID, title=title,
+        super(StosWindow, self).__init__(parent=parent, windowID=window_id, title=title,
                                          window_manager=config.window_manager)
         self._config = config
         # self.imagepanel = wx.Panel(self, -1)
-        self._space = show_space
+        self._space = Space.Source if view_type == ViewType.Source else Space.Target if view_type == ViewType.Target else Space.Composite
+        self._view_type = view_type
 
         self.FixedImageFullPath = None
         self.WarpedImageFullPath = None
@@ -66,13 +69,16 @@ class StosWindow(PyreWindowBase):
         # pyre.IrTweakInit(FixedImageFullPath, WarpedImageFullPath)
         ####################
 
+        display_image_names = set([ViewType.Source.value, ViewType.Target.value]) if view_type == ViewType.Composite \
+            else set([view_type.value])
+
         # This is the GL Panel, so GL initialization happens after this
         image_panel_config = pyre.ui.ImageTransformPanelConfig(
             transform_controller=config.transform_controller,
             imageviewmodel_manager=config.imageviewmodel_manager,
             glcontext_manager=config.glcontext_manager,
             transformglbuffer_manager=config.transformglbuffer_manager,
-            imagenames=set([str(self.space)]))
+            imagenames=display_image_names)
 
         self.imagepanel = pyre.ui.ImageTransformViewPanel(parent=self,
                                                           space=self._space,
@@ -92,7 +98,7 @@ class StosWindow(PyreWindowBase):
         self.SetDropTarget(dt)
 
         # Make sure we have a GL context before initializing view window
-        wx.CallAfter(self.UpdateRawImageWindow)
+        # wx.CallAfter(self.UpdateRawImageWindow)
 
     def CreateMenu(self):
 
@@ -390,42 +396,48 @@ class StosWindow(PyreWindowBase):
 
         return filemenu
 
-    def UpdateRawImageWindow(self):
+    #
+    # def OnImageViewModelManagerChange(self, manager: pyre.state.IImageViewModelManager,
+    #                                   key: str, action: pyre.state.Action, image_name: str):
+    #
+    #
 
-        # if hasattr(self, 'imagepanel'):
-        #    del self.imagepanel
-
-        imageTransformView = None
-        if self.Composite:
-            imageTransformView = pyre.views.CompositeTransformView(glcontexmanager=self.config.glcontext_manager,
-                                                                   FixedImageArray=state.currentStosConfig.FixedImageViewModel,
-                                                                   WarpedImageArray=state.currentStosConfig.WarpedImageViewModel,
-                                                                   transform_controller=state.currentStosConfig.TransformController)
-        else:
-            imageViewModel = state.currentStosConfig.FixedImageViewModel
-            if not self.showFixed:
-                imageViewModel = state.currentStosConfig.WarpedImageViewModel
-
-            imageTransformView = pyre.views.ImageTransformView(space=self.space,
-                                                               glcontexmanager=self.config.glcontext_manager,
-                                                               ImageViewModel=imageViewModel,
-                                                               transform_controller=state.currentStosConfig.TransformController)
-
-        self.imagepanel.ImageGridTransformView = imageTransformView
+    # def UpdateRawImageWindow(self):
+    #
+    #     # if hasattr(self, 'imagepanel'):
+    #     #    del self.imagepanel
+    #
+    #     imageTransformView = None
+    #     if self.Composite:
+    #         imageTransformView = pyre.views.CompositeTransformView(glcontexmanager=self.config.glcontext_manager,
+    #                                                                FixedImageArray=state.currentStosConfig.FixedImageViewModel,
+    #                                                                WarpedImageArray=state.currentStosConfig.WarpedImageViewModel,
+    #                                                                transform_controller=state.currentStosConfig.TransformController)
+    #     else:
+    #         imageViewModel = state.currentStosConfig.FixedImageViewModel
+    #         if not self.showFixed:
+    #             imageViewModel = state.currentStosConfig.WarpedImageViewModel
+    #
+    #         imageTransformView = pyre.views.ImageTransformView(space=self.space,
+    #                                                            glcontexmanager=self.config.glcontext_manager,
+    #                                                            ImageViewModel=imageViewModel,
+    #                                                            transform_controller=state.currentStosConfig.TransformController)
+    #
+    #     self.imagepanel.image_transform_view = imageTransformView
 
     def OnShowFixedWindow(self, e):
-        pyre.ToggleWindow('Fixed')
+        pyre.ToggleWindow(ViewType.Source)
 
     def OnShowWarpedWindow(self, e):
-        pyre.ToggleWindow('Warped')
+        pyre.ToggleWindow(ViewType.Target)
 
     def OnShowCompositeWindow(self, e):
-        pyre.ToggleWindow('Composite')
+        pyre.ToggleWindow(ViewType.Composite)
 
     def OnRestoreOrientation(self, e):
-        pyre.Windows['Composite'].setPosition()
-        pyre.Windows['Warped'].setPosition()
-        pyre.Windows['Fixed'].setPosition()
+        pyre.Windows[ViewType.Composite].setPosition()
+        pyre.Windows[ViewType.Target].setPosition()
+        pyre.Windows[ViewType.Source].setPosition()
 
     def OnInstructions(self, e):
 
@@ -435,10 +447,12 @@ class StosWindow(PyreWindowBase):
         dlg.Destroy()
 
     def OnClearAllPoints(self, e):
-        state.currentStosConfig.TransformController.TransformModel = pyre.viewmodels.transformcontroller.CreateDefaultTransform(
+        sourceImageView = self.config.imageviewmodel_manager[ViewType.Source]
+        targetImageView = self.config.imageviewmodel_manager[ViewType.Target]
+        self.config.transform_controller.TransformModel = pyre.viewmodels.transformcontroller.CreateDefaultTransform(
             state.currentStosConfig.TransformType,
-            state.currentStosConfig.FixedImageViewModel.RawImageSize,
-            state.currentStosConfig.WarpedImageViewModel.RawImageSize)
+            sourceImageView.Image.shape,
+            targetImageView.Image.shape)
 
     def OnClearMaskedPoints(self, e):
         if not (

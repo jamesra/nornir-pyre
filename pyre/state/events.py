@@ -1,16 +1,8 @@
 import abc
-import enum
-import numpy as np
-from numpy.typing import NDArray
 from typing import Callable
 from pyre.space import Space
+from pyre.state.action import Action
 from pyre.viewmodels.transformcontroller import TransformController
-
-
-class Action(enum.IntEnum):
-    ADD = 1
-    REMOVE = 2
-
 
 TransformControllerAddRemoveCallback = Callable[[Action, TransformController], None]
 TransformControllerChangedCallback = Callable[[TransformController], None]

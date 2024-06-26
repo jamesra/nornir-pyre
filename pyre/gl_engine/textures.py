@@ -1,6 +1,7 @@
 import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
+import nornir_imageregistration
 
 
 #
@@ -55,7 +56,7 @@ def _configure_mipmaps(image_shape: NDArray[np.integer] | tuple[int, int], targe
 
 
 def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
-    image = np.array(image, dtype=np.uint8)
+    image = nornir_imageregistration.image_to_uint8(image)
     gl.glActiveTexture(gl.GL_TEXTURE0)
     textureid = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D, textureid)

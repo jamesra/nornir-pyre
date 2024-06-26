@@ -11,7 +11,10 @@ from nornir_imageregistration import ITransform
 import pyre.viewmodels
 from pyre.viewmodels.transformcontroller import TransformController
 from pyre.state.gl_context_manager import IGLContextManager
-from .events import TransformControllerAddRemoveCallback, Action
+from .events import TransformControllerAddRemoveCallback
+from . import Action
+from pyre.interfaces import IEventManager
+from pyre.state.eventmanager import wxEventManager
 
 
 class BufferType(enum.IntEnum):
@@ -67,13 +70,14 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
     # the GLBufferCollection and initialize it when the context is created
     _transform_controllers: dict[TransformController, GLBufferCollection | None]
 
-    _OnTransformControllerAddRemoveEventListeners: set[TransformControllerAddRemoveCallback] = set()
+    _OnTransformControllerAddRemoveEventListeners: IEventManager[TransformControllerAddRemoveCallback]
     _buffer_layouts: dict[BufferType, VertexArrayLayout]
     _glcontext_manager: IGLContextManager
     _have_context: bool = False  # True if we've got a context from the context manager
 
     def __init__(self, glcontext_manager: IGLContextManager, buffer_layouts: dict[BufferType, VertexArrayLayout]):
         self._glcontext_manager = glcontext_manager
+        self._OnTransformControllerAddRemoveEventListeners = wxEventManager[TransformControllerAddRemoveCallback]()
         self._transform_controllers = {}
         self._buffer_layouts = buffer_layouts
         self._OnTransformControllerChangeEventListeners = set()
@@ -88,6 +92,11 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         if buffer_collection is not None:
             buffer_collection[BufferType.ControlPoint].data = transform_controller.points
 
+        if transform_controller in self._transform_controllers:
+            raise KeyError(f"Transform controller {transform_controller} already exists in the manager")
+
+        print(f'Adding transform controller {transform_controller} with buffer collection {buffer_collection}')
+
         self._transform_controllers[transform_controller] = buffer_collection
         self._fire_on_transform_controller_add_remove_event(Action.ADD, transform_controller)
         transform_controller.AddOnChangeEventListener(self._on_transform_changed)
@@ -95,6 +104,7 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
 
     def remove(self, transform_controller: TransformController):
         """Adds buffers for a transform controller"""
+        print(f'Removing transform controller {transform_controller}')
         del self._transform_controllers[transform_controller]
         self._fire_on_transform_controller_add_remove_event(Action.REMOVE, transform_controller)
 
@@ -155,8 +165,7 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
 
     def _fire_on_transform_controller_add_remove_event(self, action: Action, transform_controller: TransformController):
         """Send event to subscribers"""
-        for func in self._OnTransformControllerAddRemoveEventListeners:
-            func(action, transform_controller)
+        self._OnTransformControllerAddRemoveEventListeners.invoke(action, transform_controller)
 
     def __contains__(self, item: TransformController) -> bool:
         return item in self._transform_controllers

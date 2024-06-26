@@ -36,7 +36,7 @@ _texture_fragment_shader_program = """
         vec4 texColor = texture(
                 texture_sampler, frag_texture_coordinate
             ); 
-        // outputColor = vec4(texColor.r, frag_texture_coordinate.x, frag_texture_coordinate.y, 1);
+        //outputColor = vec4(texColor.r, frag_texture_coordinate.x, frag_texture_coordinate.y, 1);
         outputColor = texColor;
     }
 """
@@ -127,19 +127,21 @@ class TextureShader(BaseShader):
         try:
             gl.glUseProgram(self.program)
             check_for_error()
-            vertex_array_object.bind()
 
             gl.glActiveTexture(gl.GL_TEXTURE0)
             check_for_error()
             gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
+            check_for_error()
+
+            vertex_array_object.bind()
+
+            gl.glUniform1f(self.tween_location, tween)
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()
 
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0
-            gl.glUniform1f(self.tween_location, tween)
-            check_for_error()
             gl.glUniformMatrix4fv(self.model_view_projection_matrix_location, 1, False,
                                   model_view_proj_matrix.astype(np.float32))
             check_for_error()

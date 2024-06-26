@@ -1,9 +1,7 @@
-import abc
-
-import pyre
 import pyre.ui
 
 from pyre.state.viewtype import ViewType
+from pyre.wxevents import wx_EVT_INVOKE_ON_MAIN_THREAD, wxInvokeOnMainThreadEvent
 
 try:
     import wx
@@ -32,7 +30,23 @@ class PyreWindowBase(wx.Frame):
 
         print("Parent:" + str(self.Parent))
 
+        # Listen for events to invoke callbacks on the main thread
         self._ID = windowID
+
+        self.Bind(wx_EVT_INVOKE_ON_MAIN_THREAD, self._wx_invoke_on_main_thread_event_handler)
+
+    def _wx_invoke_on_main_thread_event_handler(self, event: wxInvokeOnMainThreadEvent):
+        """
+        Invoke the callback on the provided event object.
+        The first window to get this event should invoke the callback.
+        Others should ignore it.
+        """
+        event.invoke()
+        event.Skip()
+        # obj = event.GetEventObject()
+        # args, kwargs = event.GetPayload()
+        # obj.invoke(*args, **kwargs)
+        # event.Skip()
 
     def ToggleWindowShown(self):
         if self.IsShown():

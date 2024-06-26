@@ -6,6 +6,7 @@ from numpy._typing import NDArray
 import nornir_imageregistration
 
 from pyre import Space
+from pyre.viewmodels.transformcontroller import TransformController
 
 
 class IImageTransformView(ABC):
@@ -31,12 +32,16 @@ class IImageTransformView(ABC):
         """transform applied to the image to move it from source to target space"""
         raise NotImplementedError()
 
+    @property
+    @abstractmethod
+    def transform_controller(self) -> TransformController:
+        raise NotImplementedError()
+
     @abstractmethod
     def draw(self,
              view_proj: NDArray[np.floating],
              space: Space,
-             BoundingBox: nornir_imageregistration.Rectangle | None = None,
-             glFunc=None):
+             BoundingBox: nornir_imageregistration.Rectangle | None = None):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix"""
         raise NotImplementedError()

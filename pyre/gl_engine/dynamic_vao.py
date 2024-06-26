@@ -12,7 +12,6 @@ from pyre.gl_engine.interfaces import IVAO
 
 class DynamicVAO(IVAO):
     """Creates a Vertex Array Object for a set of vertex data that can be updated dynamically"""
-    """Defines a Vertex Array Object for a set of buffers with known layouts"""
     _vao: ctypes.c_uint | None = None
     _intializing: bool = False
     _initialized: bool = False
@@ -26,6 +25,7 @@ class DynamicVAO(IVAO):
 
     @property
     def indicies(self) -> NDArray[np.integer]:
+        """List of triangle indicies.  Should be in groups of three"""
         return self._index_buffer.data
 
     def __init__(self):
@@ -99,7 +99,8 @@ class DynamicVAO(IVAO):
     def bind(self):
         """Bind the VAO to the context for rendering"""
         valid = gl.glIsVertexArray(self._vao)
-        assert (valid != 0)
+        if valid == 0:
+            raise Exception("Vertex Array is invalid")
         gl.glBindVertexArray(self._vao)
         pyre.gl_engine.helpers.check_for_error()
 

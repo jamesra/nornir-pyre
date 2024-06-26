@@ -1,17 +1,20 @@
 import os
+from .interfaces import IImageManager, IImageViewModelManager
+from .action import Action
 from .viewtype import ViewType
 from .gl_context_manager import GLContextManager, IGLContextManager
 from .transformcontroller_glbuffer_manager import BufferType, TransformControllerGLBufferManager, \
     ITransformControllerGLBufferManager, GLBufferCollection
-from .image_viewmodel_manager import IImageViewModelManager, ImageViewModelManager
 
+from .viewtype import ViewType
 from .stos import StosState, StosWindowConfig
+from .imageloader import ImageLoader
 from .mosaic import MosaicState
 from .events import *
 from .window_manager import IWindowManager, WindowManager
-from .image_manager import ImageManager, IImageManager
-from .image_viewmodel_manager import ImageViewModelManager, IImageViewModelManager
+from .image_manager import ImageManager
 from .gl_context_manager import GLContextManager, IGLContextManager
+from .image_viewmodel_manager import ImageViewModelManager
 
 # The global gl_context_manager
 
@@ -28,16 +31,16 @@ def init():
     currentMosaicConfig = MosaicState()
 
 
-def InitializeStateFromArguments(arg_values):
+def InitializeStateFromArguments(image_loader: ImageLoader, arg_values):
     global currentStosConfig
 
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
-        currentStosConfig.LoadStos(arg_values.stosFullPath)
+        image_loader.load_stos(arg_values.stosFullPath)
     else:
         if 'WarpedImageFullPath' in arg_values and arg_values.WarpedImageFullPath is not None:
-            currentStosConfig.LoadWarpedImage(arg_values.WarpedImageFullPath)
+            image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)
         if 'FixedImageFullPath' in arg_values and arg_values.FixedImageFullPath is not None:
-            currentStosConfig.LoadFixedImage(arg_values.FixedImageFullPath)
+            image_loader.load_image_into_manager(ViewType.Source, arg_values.FixedImageFullPath)
 
     if 'mosaicFullPath' in arg_values and arg_values.mosaicFullPath is not None:
         tiles_path = os.path.dirname(arg_values.mosaicFullPath)
@@ -45,8 +48,3 @@ def InitializeStateFromArguments(arg_values):
             tiles_path = arg_values.mosaicTilesFullPath
 
         currentMosaicConfig.LoadMosaic(arg_values.mosaicFullPath, tiles_path)
-
-
-def create_gl_objects():
-    global transform_gl_viewmodel
-    transform_gl_viewmodel = pyre.viewmodels.TransformGLViewModel(currentStosConfig.TransformController)

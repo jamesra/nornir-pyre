@@ -3,16 +3,10 @@ Created on Oct 16, 2012
 
 @author: u0490822
 """
-
-import math
-import time
-import os
 import numpy as np
 import nornir_imageregistration
 import OpenGL.GL as gl
 import warnings
-# import pyglet
-# from pyglet import *
 
 import pyre.state
 from dataclasses import dataclass
@@ -20,15 +14,15 @@ from pyre.space import Space
 from pyre import history, state
 import wx
 
-from pyre.state import Action
+from pyre.state import Action, IImageViewModelManager
 
 from . import imagetransformpanelbase
-from pyre.ui import Camera
 from pyre.viewmodels import TransformController
+from pyre.views.interfaces import IImageTransformView
 from pyre.views import (CompositeTransformView, ImageTransformView,
                         SetDrawTextureState, ClearDrawTextureState,
                         ControlPointView)
-from pyre.state import IImageViewModelManager, ITransformControllerGLBufferManager, BufferType
+from pyre.state import ITransformControllerGLBufferManager, BufferType
 
 
 @dataclass
@@ -46,8 +40,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     """
     _CurrentDragPoint: int | None = None
     _HighlightedPointIndex: int | None = 0
-    _space: pyre.Space = pyre.Space.Source
-    _ImageTransformView: ImageTransformView | None = None  # The transformed image
+    _space: pyre.Space
+    _image_transform_view: IImageTransformView | None = None  # The transformed image
     _controlpoint_view: ControlPointView | None = None  # Control points for the transformed image, if they exist
     _show_lines: bool = False
     _config: ImageTransformPanelConfig
@@ -99,16 +93,16 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @property
     def TransformController(self) -> TransformController:
-        return state.currentStosConfig.TransformController
+        return self._config.transform_controller
 
     @property
-    def ImageGridTransformView(self) -> ImageTransformView:
-        return self._ImageTransformView
+    def image_transform_view(self) -> IImageTransformView:
+        return self._image_transform_view
 
-    @ImageGridTransformView.setter
-    def ImageGridTransformView(self, value: ImageTransformView):
+    @image_transform_view.setter
+    def image_transform_view(self, value: IImageTransformView):
 
-        self._ImageTransformView = value
+        self._image_transform_view = value
 
         if value is None:
             return
@@ -142,8 +136,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                          glcontextmanager=config.glcontext_manager,
                          **kwargs)
 
-        state.currentStosConfig.AddOnTransformControllerChangeEventListener(self.OnTransformViewModelChanged)
-        state.currentStosConfig.AddOnImageViewModelChangeEventListener(self.OnImageViewModelChanged)
+        # self._config.transform_controller.(self.OnTransformViewModelChanged)
+        # self._config.imageviewmodel_manager.add_change_event_listener(self.OnImageViewModelChanged)
 
         # self.schedule = clock.schedule_interval(func = self.update, interval = 1 / 2.)
         self.timer = wx.Timer(self)
@@ -165,12 +159,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
         self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
-        self.canvas.Bind(wx.EVT_SIZE, self.on_resize)
 
-        self.ImageGridTransformView = ImageTransformView(space=self.space,
-                                                         activate_context=self.activate_context,
-                                                         ImageViewModel=None,
-                                                         transform_controller=state.currentStosConfig.TransformController)
+        self._image_transform_view = None
+        # self._image_transform_view = ImageTransformView(space=self.space,
+        #                                                 activate_context=self.activate_context,
+        #                                                 image_view_model=None,
+        #                                                 transform_controller=state.currentStosConfig.TransformController)
 
         self.DebugTickCounter = 0
         self.timer.Start(100)
@@ -178,12 +172,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         config.imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
     def on_imageviewmodelmanager_change(self,
-                                        manager: IImageViewModelManager,
                                         name: str,
                                         action: Action,
                                         image: pyre.viewmodels.ImageViewModel):
         """Called when an imageviewmodel is added or removed from the manager"""
-        if name not in self.config.imagenames:
+        print(
+            f'* ImageTransformViewPanel.on_imageviewmodelmanager_change {name} {action.value} self: {self._config.imagenames}')
+        if name not in self._config.imagenames:
+            print('\tDoes not match')
             return  # Not of interest to our class
 
         if action == Action.ADD:
@@ -195,14 +191,19 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
         """Process an add event from the imageviewmodel manager"""
-        self.ImageGridTransformView = ImageTransformView(space=self.space,
-                                                         glcontexmanager=self.config.glcontext_manager,
-                                                         ImageViewModel=state.currentStosConfig.WarpedImageViewModel,
-                                                         transform_controller=state.currentStosConfig.TransformController)
+        # self._image_transform_view.image_view_model = image
+        view = ImageTransformView(space=self.space,
+                                  activate_context=self.activate_context,
+                                  image_view_model=image,
+                                  transform_controller=self._config.transform_controller)
+        print(f'Added image view model {name} to ImageTransformViewPanel')
+        self._image_transform_view = view
+
+        self.center_camera()
 
     def _handle_remove_imageviewmodel_event(self, name: str):
         """Process a remove event from the imageviewmodel manager"""
-        self.ImageGridTransformView = None
+        self._image_transform_view = None
 
     def create_objects(self):
         """create opengl objects when opengl is initialized"""
@@ -210,8 +211,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         # self.activate_context() Context should be set by parent class
         # load_point_textures() Textures should be loaded already by registration with context manager
 
-        if self._ImageTransformView is not None:
-            self._ImageTransformView.create_objects()
+        if self._image_transform_view is not None:
+            self._image_transform_view.create_objects()
 
         glcontrolpointbuffer = self.config.transformglbuffer_manager.get_glbuffer(
             self.config.transform_controller,
@@ -240,8 +241,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         return
 
     def OnTransformViewModelChanged(self, transform_controller: TransformController):
-        if self.ImageGridTransformView is not None:
-            self.ImageGridTransformView._transform_controller = transform_controller
+        if self.image_transform_view is not None:
+            self.image_transform_view._transform_controller = transform_controller
 
         self.canvas.Refresh()
 
@@ -252,7 +253,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Called when the image view model changes"""
         if space == self.space:
             imageviewmodel = self.config.imageviewmodel_manager[space]
-            self.ImageGridTransformView.image_view_model = imageviewmodel
+            self.image_transform_view.image_view_model = imageviewmodel
         else:
             return
 
@@ -261,9 +262,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         #     self.UpdateRawImageWindow()
         # elif self.FixedSpace and space == pyre.Space.Source:
         #     self.UpdateRawImageWindow()
-        #     if self.ImageGridTransformView.image_view_model is not None:
+        #     if self.image_transform_view.image_view_model is not None:
         #         self.TopLevelParent.Label = self._LabelPreamble() + os.path.basename(
-        #             self.ImageGridTransformView.image_view_model.ImageFilename)
+        #             self.image_transform_view.image_view_model.ImageFilename)
         #
         # # self.lookatfixedpoint((0,0), 1.0)
 
@@ -275,17 +276,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     #     if self.composite:
     #         if not (
     #                 state.currentStosConfig.FixedImageViewModel is None or state.currentStosConfig.WarpedImageViewModel is None):
-    #             self.ImageGridTransformView = CompositeTransformView(self._glcontextmanager,
+    #             self.image_transform_view = CompositeTransformView(self._glcontextmanager,
     #                                                                  state.currentStosConfig.FixedImageViewModel,
     #                                                                  state.currentStosConfig.WarpedImageViewModel,
     #                                                                  state.currentStosConfig.TransformController)
     #     elif self.space == pyre.Space.Target:
-    #         self.ImageGridTransformView = ImageTransformView(space=self.space,
+    #         self.image_transform_view = ImageTransformView(space=self.space,
     #                                                          glcontexmanager=self._glcontextmanager,
     #                                                          ImageViewModel=state.currentStosConfig.WarpedImageViewModel,
     #                                                          transform_controller=state.currentStosConfig.TransformController)
     #     else:
-    #         self.ImageGridTransformView = ImageTransformView(space=self.space,
+    #         self.image_transform_view = ImageTransformView(space=self.space,
     #                                                          glcontexmanager=self._glcontextmanager,
     #                                                          ImageViewModel=state.currentStosConfig.FixedImageViewModel,
     #                                                          transform_controller=state.currentStosConfig.TransformController)
@@ -376,7 +377,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         elif symbol == 'l':
             self.show_lines = not self.show_lines
         elif keycode == wx.WXK_F1:
-            self._ImageTransformView.Debug = not self._ImageTransformView.Debug
+            self._image_transform_view.Debug = not self._image_transform_view.Debug
         elif symbol == 'm':
             LookAt = [self.camera.y, self.camera.x]
 
@@ -405,59 +406,29 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)
 
-    def center_camera(self):
-        """Center the camera at whatever interesting thing this class displays
-        """
-
-        view = self.ImageGridTransformView
-
-        #         try:
-        #             if not view is None:
-
-        # self.camera = camera.Camera((view.width / 2.0, view.height / 2.0), max([view.width / 2.0, view.height / 2.0]))
-        if isinstance(self.TransformController.TransformModel, nornir_imageregistration.IDiscreteTransform):
-            fixed_bounding_box = self.TransformController.TransformModel.FixedBoundingBox
-            #         except TypeError:
-            #             print("Type error creating camera for ImageGridTransformView %s" % str(view))
-            #             self.camera = None
-            #             pass
-        elif self.ImageGridTransformView is not None and self.ImageGridTransformView.width is not None:
-            fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (
-                self.ImageGridTransformView.height, self.ImageGridTransformView.width))
-        else:
-            return
-            # raise NotImplementedError("Not done")
-
-        self.camera.lookat = fixed_bounding_box.Center
-        self.camera.scale = fixed_bounding_box.Width
-
-        return
-
     def draw_objects(self):
         """Region is [x,y,TextureWidth,TextureHeight] indicating where the image should be drawn on the window"""
-
-        if self._ImageTransformView is None or self.camera is None:
+        if self.camera is None:
             return
 
         self.camera.focus(self.width, self.height)
 
-        BoundingBox = self.camera.VisibleImageBoundingBox
+        if self._image_transform_view is not None:
+            BoundingBox = self.camera.VisibleImageBoundingBox
 
-        SetDrawTextureState()
+            SetDrawTextureState()
 
-        # Draw an image if we can
-        if not self.composite:
-            self._ImageTransformView.draw(self.camera.view_proj,
-                                          bounding_box=BoundingBox,
-                                          space=self.space,
-                                          glFunc=gl.GL_FUNC_ADD)
-        else:
-            self._ImageTransformView.draw(self.camera.view_proj,
-                                          bounding_box=BoundingBox,
-                                          space=self.space,
-                                          glFunc=self.glFunc)
+            # Draw an image if we can
+            if not self.composite:
+                self._image_transform_view.draw(self.camera.view_proj,
+                                                bounding_box=BoundingBox,
+                                                space=self.space)
+            else:
+                self._image_transform_view.draw(self.camera.view_proj,
+                                                bounding_box=BoundingBox,
+                                                space=self.space)
 
-        ClearDrawTextureState()
+            ClearDrawTextureState()
 
         # FixedSpacePoints = self.FixedSpace
         # FixedSpaceLines = FixedSpacePoints
@@ -474,10 +445,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         #     self._ImageTransformView.draw_lines(draw_in_fixed_space=FixedSpaceLines)
 
         # self._ImageTransformView.draw(view_proj=self.camera.view_proj, space=self.space)
-
-        tween = 0 if self.space == pyre.Space.Source else 1
-        point_scale = (self.camera.scale / min(self.height, self.width)) * 10
-        self._controlpoint_view.draw(self.camera.view_proj, tween=tween, scale_factor=point_scale)
+        if self._controlpoint_view is not None:
+            tween = 0 if self.space == pyre.Space.Source else 1
+            # print(f"Drawing {self.space.value} control points tween: {tween}")
+            point_scale = (self.camera.scale / min(self.height, self.width)) * 10
+            self._controlpoint_view.draw(self.camera.view_proj, tween=tween, scale_factor=point_scale)
 
         # pointScale = (BoundingBox[3] * BoundingBox[2]) / (self.height * self.width)
         # pointScale = self.camera.scale / self.height
@@ -543,7 +515,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             #                                            state.currentStosConfig.WarpedImageViewModel.RawImageSize[
             #                                                1] / 2.0))
 
-        else:
+        elif self.image_transform_view is not None:
             zdelta = (1 + (-scroll_y / 20))
 
             new_scale = self.camera.scale * zdelta
@@ -570,7 +542,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @property
     def max_image_dimension(self):
-        return max([self.ImageGridTransformView.width, self.ImageGridTransformView.height])
+        return max([self.image_transform_view.width, self.image_transform_view.height])
 
     def on_mouse_release(self, e):
         self.SelectedPointIndex = None
@@ -659,7 +631,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 self.TransformController.TranslateFixed((ImageDY, ImageDX))
             else:
                 # Create a point or drag a point
-                if not self.SelectedPointIndex is None:
+                if self.SelectedPointIndex is not None:
                     self.SelectedPointIndex = self.TransformController.MovePoint(self.SelectedPointIndex, ImageDX,
                                                                                  ImageDY, space=self.space)
                 elif e.ShiftDown():  # The shift key is selected and we do not have a last point dragged

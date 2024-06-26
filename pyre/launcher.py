@@ -9,6 +9,7 @@ import logging
 import os
 
 import nornir_shared.misc
+import pyre.state.imageloader
 
 from pyre.ui.windows.stoswindow import StosWindow
 from pyre import Windows
@@ -132,15 +133,21 @@ def Run():
     imageviewmodel_manager = pyre.state.image_viewmodel_manager.ImageViewModelManager()
 
     pyre.state.currentStosConfig = pyre.state.StosState(transform_controller=transform_controller,
-                                                        imageview_manager=imageviewmodel_manager,
+                                                        image_manager=image_manager,
                                                         imageviewmodel_manager=imageviewmodel_manager)
     pyre.state.currentMosaicConfig = pyre.state.MosaicState()
+
+    image_loader = pyre.state.imageloader.ImageLoader(transform_controller=transform_controller,
+                                                      image_manager=image_manager,
+                                                      imageviewmodel_manager=imageviewmodel_manager,
+                                                      search_dirs=None)
 
     stos_window_config = pyre.state.StosWindowConfig(glcontext_manager=gl_context_manager,
                                                      transform_controller=transform_controller,
                                                      transformglbuffer_manager=transform_glbuffermanager,
                                                      imageviewmodel_manager=imageviewmodel_manager,
-                                                     window_manager=window_manager)
+                                                     window_manager=window_manager,
+                                                     image_loader=image_loader)
 
     readmetxt = resource_paths.README()
     print(readmetxt)
@@ -151,16 +158,22 @@ def Run():
     app = wx.App(False)
 
     window_manager.add(ViewType.Fixed.value,
-                       StosWindow(None, "Fixed", 'Source Image', show_space=Space.Source, config=stos_window_config))
+                       StosWindow(None, ViewType.Source, 'Source Image', view_type=ViewType.Source,
+                                  config=stos_window_config))
     window_manager.add(ViewType.Warped.value,
-                       StosWindow(None, "Warped", 'Target Image', show_space=Space.Target, config=stos_window_config))
+                       StosWindow(None, ViewType.Target, 'Target Image', view_type=ViewType.Target,
+                                  config=stos_window_config))
     window_manager.add(ViewType.Composite.value,
-                       StosWindow(None, "Composite", 'Composite Image', show_space=Space.Composite,
+                       StosWindow(None, ViewType.Composite, 'Composite Image', view_type=ViewType.Composite,
                                   config=stos_window_config))
 
     # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
 
-    pyre.state.InitializeStateFromArguments(arg_values)
+    image_loader = pyre.state.imageloader.ImageLoader(transform_controller,
+                                                      image_manager,
+                                                      imageviewmodel_manager,
+                                                      search_dirs=None)
+    pyre.state.InitializeStateFromArguments(image_loader, arg_values)
 
     # Initialize the GL state
 

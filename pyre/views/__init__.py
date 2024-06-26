@@ -13,7 +13,6 @@ from . import compositetransformview
 from .mosaicview import MosaicView
 from .pointset_view import PointSetView
 from .controlpoint_view import ControlPointView
-from .transformcontrollerview import TransformControllerView
 from .imagetransformview import ImageTransformView
 
 
@@ -101,6 +100,9 @@ def SetDrawTextureState():
     # gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glDisable(gl.GL_CULL_FACE)
     gl.glEnable(gl.GL_DEPTH_TEST)
+
+    gl.glEnable(gl.GL_BLEND)
+    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
     # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
     # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)

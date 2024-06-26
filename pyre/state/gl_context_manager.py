@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from typing import Callable
 import OpenGL as gl
 import wx.glcanvas
+from pyre.interfaces import IEventManager
+from pyre.state.eventmanager import wxEventManager
 
 GLContextCreatedCallback = Callable[[wx.glcanvas.GLContext], None]
 
@@ -45,20 +47,25 @@ class GLContextManager(IGLContextManager):
     assumed to be shared.  When a context is created, an event is raised with
     the context so subscribers can create GL resources."""
 
-    _GLContextAddedEventListeners: list[GLContextCreatedCallback] = []
-    _known_contexts: set[wx.glcanvas.GLContext] = set()
+    _GLContextAddedEventListeners: IEventManager[GLContextCreatedCallback]
+    _known_contexts: set[wx.glcanvas.GLContext]
+
+    def __init__(self):
+        self._GLContextAddedEventListeners = wxEventManager[GLContextCreatedCallback]()
+        self._known_contexts = set()
 
     def add_context(self, context: wx.glcanvas.GLContext):
         """Add a context to the manager.  This will invoke all subscribers with the new context."""
         if context not in self._known_contexts:
+            print(f"Adding context {context}")
             self._known_contexts.add(context)
-            for listener in self._GLContextAddedEventListeners:
-                listener(context)
+            self._GLContextAddedEventListeners.invoke(context)  # Notify all subscribers
 
     def add_glcontext_added_event_listener(self, func: GLContextCreatedCallback):
         """Callbacks are invoked when a GLContext is created, or if a context already exists,
                 immediately upon registration."""
-        self._GLContextAddedEventListeners.append(func)
+        self._GLContextAddedEventListeners.add(func)
+        print(f"Adding context event listener {func}")
         for context in self._known_contexts:
             func(context)
 

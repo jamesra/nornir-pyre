@@ -11,6 +11,7 @@ import scipy.spatial.distance
 import numpy as np
 import dataclasses
 from typing import Any, Generator, Callable
+import warnings
 
 import wx.glcanvas
 
@@ -80,12 +81,6 @@ class ImageTransformView(IImageTransformView):
         [], None]  # A function we can call to ensure the view's GL context is current, must be used before creating GL Objects
 
     @property
-    def transform_view(self) -> ControlPointView:
-        return self._transform_view
-
-    # rendercache: RenderCache
-
-    @property
     def width(self) -> int:
         if self._image_viewmodel is None:
             return 1
@@ -143,33 +138,31 @@ class ImageTransformView(IImageTransformView):
     def z(self, value: float):
         self._z = value
 
-    @property
-    def glcontextmanager(self) -> IGLContextManager:
-        return self._glcontextmanager
-
     def __init__(self,
                  space: Space,
                  activate_context: Callable[[], None],
-                 ImageViewModel: pyre.viewmodels.ImageViewModel | None = None,
-                 ImageMaskViewModel: pyre.viewmodels.ImageViewModel | None = None,
+                 image_view_model: pyre.viewmodels.ImageViewModel | None = None,
+                 image_mask_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  transform_controller: pyre.viewmodels.TransformController | None = None,
                  ):
         """
         Constructor
-        :param imageviewmodel ImageViewModel: Textures for image
+        :param imageviewmodel image_view_model: Textures for image
         :param transform transform_controller: nornir_imageregistration transform
         """
         self._activate_context = activate_context
         self._tile_render_data = {}
         self._image_space = space
         self.rendercache = RenderCache()
-        self._image_viewmodel = ImageViewModel
-        self._image_mask_viewmodel = ImageMaskViewModel
-        self.transform_controller = transform_controller
+        self._image_viewmodel = image_view_model
+        self._image_mask_viewmodel = image_mask_view_model
+        self._transform_controller = transform_controller
         self._z = 0.5
 
+        self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
+
         self.Debug = False
-        self._activate_context()
+
         self.create_objects()
 
     def create_objects(self):
@@ -180,35 +173,20 @@ class ImageTransformView(IImageTransformView):
         self.update_all_tile_buffers()
 
     def OnTransformChanged(self, transform_controller: pyre.viewmodels.TransformController):
-
-        if not isinstance(self.transform, nornir_imageregistration.transforms.IControlPoints):
-            SavedPointCache = None
-        else:
-            # Keep the points if we can
-            SavedPointCache = RenderCache()
-            if hasattr(self.rendercache, 'PointCache'):
-                PointCache = self.rendercache.PointCache
-                if hasattr(PointCache, 'Sprites'):
-                    if len(PointCache.Sprites) == len(self.transform.TargetPoints):
-                        SavedPointCache = PointCache
-
-        self.rendercache = None
-        self.rendercache = RenderCache()
-
         if self._gl_initialized:
             self.update_all_tile_buffers()
-
-        if SavedPointCache is not None:
-            self.rendercache.PointCache = SavedPointCache
 
     def update_all_tile_buffers(self):
         """Update the buffers for all tiles in the image viewmodel"""
         unused_grid_coords = set(self._tile_render_data.keys())
 
+        self._activate_context()
+
         if self._image_viewmodel is not None:
             for grid_coords in self._image_viewmodel.generate_grid_indicies():
                 self._update_tile_buffers(grid_coords, self._image_viewmodel, self._image_space)
-                unused_grid_coords -= grid_coords
+                if grid_coords in unused_grid_coords:
+                    unused_grid_coords.remove(grid_coords)
 
         for grid_coord in unused_grid_coords:
             del self._tile_render_data[grid_coord]
@@ -303,8 +281,8 @@ class ImageTransformView(IImageTransformView):
 
         return WarpedCorners
 
-    @classmethod
-    def _find_corresponding_points(self, Transform: nornir_imageregistration.ITransform,
+    @staticmethod
+    def _find_corresponding_points(Transform: nornir_imageregistration.ITransform,
                                    Points: NDArray[np.floating],
                                    ForwardTransform: bool) -> NDArray[np.floating]:
         """
@@ -415,24 +393,18 @@ class ImageTransformView(IImageTransformView):
         return z
 
     @classmethod
-    def _texture_coordinates(cls, FixedPointsYX: NDArray[np.floating],
-                             fixed_bounding_rect: nornir_imageregistration.Rectangle) -> NDArray[np.floating]:
+    def _texture_coordinates(cls, points_yx: NDArray[np.floating],
+                             bounding_rect: nornir_imageregistration.Rectangle) -> NDArray[np.floating]:
         """
         Given a set of points inside a bounding rectangle that represents the texture space,
          return the texture coordinates for each point
-        :param FixedPointsYX: Points to generate texture coordinates for
-        :param fixed_bounding_rect: Bounding rectangle for the texture space
+        :param points_yx: Points to generate texture coordinates for
+        :param bounding_rect: Bounding rectangle for the texture space
         :return: texture coordinates for a rectangle in fixed (source) space
         """
+        texture_points = (points_yx - np.array(bounding_rect.BottomLeft)) / bounding_rect.Size
 
-        # tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(SourcePoints)
-        (y, x) = fixed_bounding_rect.BottomLeft
-        h = fixed_bounding_rect.Height
-        w = fixed_bounding_rect.Width
-
-        texture_points = (FixedPointsYX - np.array(fixed_bounding_rect.BottomLeft)) / fixed_bounding_rect.Size
-
-        # Need to convert to X,Y coordinates
+        # Need to convert texture coordinates to X,Y coordinates
         texture_points = np.fliplr(texture_points)
         return texture_points
 
@@ -453,23 +425,23 @@ class ImageTransformView(IImageTransformView):
 
         # tile_bounding_rect = nornir_imageregistration.spatial.BoundingPrimitiveFromPoints(SourcePoints)
         # Need to convert from Y,x to X,Y coordinates
-        # FixedPointsXY = np.fliplr(FixedPointsYX)
+        FixedPointsXY = np.fliplr(FixedPointsYX)
         WarpedPointsXY = np.fliplr(WarpedPointsYX)
         # Do triangulation before we transform the points to prevent concave edges having a texture mapped over them.
 
         # texturePoints = (FixedPointsXY - np.array((x,y))) / np.array((w,h))
 
-        texturePoints = cls._texture_coordinates(FixedPointsYX if space == Space.Source else WarpedPointsXY,
-                                                 fixed_bounding_rect=tile_bounding_rect)
+        texture_points = cls._texture_coordinates(WarpedPointsYX if space == Space.Source else FixedPointsYX,
+                                                  bounding_rect=tile_bounding_rect)
         # print(str(texturePoints[0, :]))
-        tri = scipy.spatial.Delaunay(texturePoints)
+        tri = scipy.spatial.Delaunay(texture_points)
         # np.array([[(u - x) / float(w), (v - y) / float(h)] for u, v in FixedPointsXY], dtype=np.float32)
 
         # Set vertex z according to distance from center
         if z is not None:
             z_array = np.ones((FixedPointsYX.shape[0], 1)) * z
         else:
-            z_array = cls._z_values_for_points_by_texture(texturePoints)
+            z_array = cls._z_values_for_points_by_texture(texture_points)
 
         verts3d = np.vstack((FixedPointsYX[:, 1],
                              FixedPointsYX[:, 0],
@@ -477,8 +449,8 @@ class ImageTransformView(IImageTransformView):
                              WarpedPointsYX[:, 1],
                              WarpedPointsYX[:, 0],
                              z_array.flat,
-                             texturePoints[:, 0],
-                             texturePoints[:, 1])).T
+                             texture_points[:, 0],
+                             texture_points[:, 1])).T
 
         verts3d = verts3d.astype(np.float32)
 
@@ -626,33 +598,25 @@ class ImageTransformView(IImageTransformView):
     def draw(self,
              view_proj: NDArray[np.floating],
              space: pyre.Space,
-             bounding_box: nornir_imageregistration.Rectangle | None = None,
-             z: float | None = None,
-             glFunc: int | None = None):
+             bounding_box: nornir_imageregistration.Rectangle | None = None):
+
+        if self._image_viewmodel is None:
+            warnings.warn("No image viewmodel to draw")
+
         self._draw_imageviewmodel(view_proj=view_proj,
                                   image_viewmodel=self._image_viewmodel,
-                                  space=space,
-                                  bounding_box=bounding_box,
-                                  z=z,
-                                  glFunc=glFunc)
+                                  space=space)
 
     def _draw_imageviewmodel(self,
                              view_proj: NDArray[np.floating],
                              image_viewmodel: pyre.viewmodels.ImageViewModel | None,
                              space: pyre.Space,
-                             bounding_box: nornir_imageregistration.Rectangle | None = None,
-                             z: float | None = None,
-                             glFunc: int | None = None):
+                             bounding_box: nornir_imageregistration.Rectangle | None = None):
 
         if image_viewmodel is None:
             return
 
         tween = 0 if space == Space.Source else 1
-        if z is None:
-            z = self.z
-
-        #        warped_image_data_grid = self.GetOrCreateWarpedImageDataGrid(
-        #            (self._image_viewmodel.NumRows, self._image_viewmodel.NumCols))
 
         for ix in range(0, image_viewmodel.NumCols):
             column = image_viewmodel.ImageArray[ix]
