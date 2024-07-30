@@ -12,6 +12,8 @@ import pyre.state
 from dataclasses import dataclass
 from pyre.space import Space
 from pyre import history, state
+from pyre.commands.navigationcommandbase import NavigationCommandBase, DefaultImageTransformCommand
+from ..commands.interfaces import ICommand
 import wx
 
 from pyre.state import Action, IImageViewModelManager
@@ -45,6 +47,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _controlpoint_view: ControlPointView | None = None  # Control points for the transformed image, if they exist
     _show_lines: bool = False
     _config: ImageTransformPanelConfig
+
+    _command: ICommand
+    _command_queue: list[ICommand] = []
 
     @property
     def config(self) -> ImageTransformPanelConfig:
@@ -92,7 +97,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         return ImageTransformViewPanel._HighlightedPointIndex
 
     @property
-    def TransformController(self) -> TransformController:
+    def transform(self) -> nornir_imageregistration.ITransform:
+        return self._config.transform_controller.TransformModel
+
+    @property
+    def transform_controller(self) -> TransformController:
         return self._config.transform_controller
 
     @property
@@ -109,7 +118,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         else:
             assert (isinstance(value, ImageTransformView))
 
-        (self.width, self.height) = self.canvas.GetSize()
+        # (self.width, self.height) = self.canvas.GetSize()
 
     @property
     def SelectionMaxDistance(self) -> float:
@@ -134,16 +143,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         super().__init__(parent=parent,
                          glcontextmanager=config.glcontext_manager,
+                         transform_controller=config.transform_controller,
                          **kwargs)
 
         # self._config.transform_controller.(self.OnTransformViewModelChanged)
         # self._config.imageviewmodel_manager.add_change_event_listener(self.OnImageViewModelChanged)
 
         # self.schedule = clock.schedule_interval(func = self.update, interval = 1 / 2.)
-        self.timer = wx.Timer(self)
-        self.Bind(wx.EVT_TIMER, self.on_timer)
-
-        (self.width, self.height) = self.canvas.GetSize()
+        self.timer = wx.Timer(self._glpanel)
+        self.glcanvas.Bind(wx.EVT_TIMER, self.on_timer)
 
         # wx.EVT_TIMER(self, -1, self.on_timer)
 
@@ -155,21 +163,39 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.LastDrawnBoundingBox = None
 
-        self._bind_mouse_events()
-
-        self.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
-        self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
+        # self._bind_mouse_events()
+        # self.glcanvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
 
         self._image_transform_view = None
         # self._image_transform_view = ImageTransformView(space=self.space,
         #                                                 activate_context=self.activate_context,
         #                                                 image_view_model=None,
-        #                                                 transform_controller=state.currentStosConfig.TransformController)
+        #                                                 transform_controller=state.currentStosConfig.transform_controller)
 
         self.DebugTickCounter = 0
         self.timer.Start(100)
 
         config.imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
+
+        wx.CallAfter(self.create_objects)
+        wx.CallAfter(self.activate_command)
+
+    def activate_command(self, previous_command=None):
+        if len(self._command_queue) == 0:
+            bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.width, self.height))
+            self._command = DefaultImageTransformCommand(parent=self.glcanvas,
+                                                         status_bar=self.statusbar,
+                                                         completed_func=None,
+                                                         camera=self.camera,
+                                                         bounds=bounds,
+                                                         transform_controller=self.transform_controller)
+        else:
+            self._command = self._command_queue.pop(0)
+
+        # Ensure we load the next command when this command finishes
+        self._command.add_completed_callback(self.activate_command)
+
+        self._command.activate()
 
     def on_imageviewmodelmanager_change(self,
                                         name: str,
@@ -193,7 +219,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Process an add event from the imageviewmodel manager"""
         # self._image_transform_view.image_view_model = image
         view = ImageTransformView(space=self.space,
-                                  activate_context=self.activate_context,
+                                  activate_context=self.glcanvas.activate_context,
                                   image_view_model=image,
                                   transform_controller=self._config.transform_controller)
         print(f'Added image view model {name} to ImageTransformViewPanel')
@@ -207,7 +233,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def create_objects(self):
         """create opengl objects when opengl is initialized"""
-        super().create_objects()
         # self.activate_context() Context should be set by parent class
         # load_point_textures() Textures should be loaded already by registration with context manager
 
@@ -225,26 +250,26 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                    texture=pyre.resources.pointtextures.PointArray)
 
     def _bind_mouse_events(self):
-        self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
-        self.canvas.Bind(wx.EVT_LEFT_DOWN, self.on_mouse_press)
-        self.canvas.Bind(wx.EVT_MIDDLE_DOWN, self.on_mouse_press)
-        self.canvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
-        self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
-        self.canvas.Bind(wx.EVT_LEFT_UP, self.on_mouse_release)
+        self.glcanvas.canvas.Bind(wx.EVT_LEFT_DOWN, self.on_mouse_press)
+        self.glcanvas.canvas.Bind(wx.EVT_MIDDLE_DOWN, self.on_mouse_press)
+        self.glcanvas.canvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
+        self.glcanvas.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
+        self.glcanvas.canvas.Bind(wx.EVT_LEFT_UP, self.on_mouse_release)
+        self.glcanvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
 
     def on_timer(self, e):
         #        DebugStr = '%d' % self.DebugTickCounter
         #        DebugStr = DebugStr + '\b' * len(DebugStr)
         #        print DebugStr
         self.DebugTickCounter += 1
-        self.canvas.Refresh()
+        self.glcanvas.Refresh()
         return
 
-    def OnTransformViewModelChanged(self, transform_controller: TransformController):
+    def OnTransformViewModelChanged(self, transform_controller: transform_controller):
         if self.image_transform_view is not None:
             self.image_transform_view._transform_controller = transform_controller
 
-        self.canvas.Refresh()
+        self.glcanvas.Refresh()
 
     def _LabelPreamble(self):
         return "Fixed: " if self.FixedSpace else "Warping: "
@@ -269,7 +294,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         # # self.lookatfixedpoint((0,0), 1.0)
 
         self.center_camera()
-        self.canvas.Refresh()
+        self.glcanvas.Refresh()
 
     # def UpdateRawImageWindow(self):
     #     """Update the control that displays images"""
@@ -279,17 +304,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     #             self.image_transform_view = CompositeTransformView(self._glcontextmanager,
     #                                                                  state.currentStosConfig.FixedImageViewModel,
     #                                                                  state.currentStosConfig.WarpedImageViewModel,
-    #                                                                  state.currentStosConfig.TransformController)
+    #                                                                  state.currentStosConfig.transform_controller)
     #     elif self.space == pyre.Space.Target:
     #         self.image_transform_view = ImageTransformView(space=self.space,
     #                                                          glcontexmanager=self._glcontextmanager,
     #                                                          ImageViewModel=state.currentStosConfig.WarpedImageViewModel,
-    #                                                          transform_controller=state.currentStosConfig.TransformController)
+    #                                                          transform_controller=state.currentStosConfig.transform_controller)
     #     else:
     #         self.image_transform_view = ImageTransformView(space=self.space,
     #                                                          glcontexmanager=self._glcontextmanager,
     #                                                          ImageViewModel=state.currentStosConfig.FixedImageViewModel,
-    #                                                          transform_controller=state.currentStosConfig.TransformController)
+    #                                                          transform_controller=state.currentStosConfig.transform_controller)
 
     def NextGLFunction(self):
         if self.glFunc == gl.GL_FUNC_ADD:
@@ -344,8 +369,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             delta[1] *= multiplier
 
             print(str(multiplier))
-            self.TransformController.MovePoint(self.HighlightedPointIndex, delta[1], delta[0],
-                                               FixedSpace=self.FixedSpace)
+            self.transform_controller.MovePoint(self.HighlightedPointIndex, delta[1], delta[0],
+                                                FixedSpace=self.FixedSpace)
 
         elif symbol == 'a':  # "A" Character
             ImageDX = 0.1 * self.camera.ViewWidth
@@ -368,12 +393,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             # If SHIFT is held down, align everything.  Otherwise align the selected point
             if not e.ShiftDown() and not self.HighlightedPointIndex is None:
-                self.SelectedPointIndex = self.TransformController.AutoAlignPoints(self.HighlightedPointIndex)
+                self.SelectedPointIndex = self.transform_controller.AutoAlignPoints(self.HighlightedPointIndex)
 
             elif e.ShiftDown():
-                self.TransformController.AutoAlignPoints(range(0, self.TransformController.NumPoints))
+                self.transform_controller.AutoAlignPoints(range(0, self.transform_controller.NumPoints))
 
-            history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
+            history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
         elif symbol == 'l':
             self.show_lines = not self.show_lines
         elif keycode == wx.WXK_F1:
@@ -393,20 +418,20 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         elif symbol == 'x' and e.CmdDown():
             history.Redo()
         elif symbol == 'f':
-            self.TransformController.FlipWarped()
-            history.SaveState(self.TransformController.FlipWarped)
+            self.transform_controller.FlipWarped()
+            history.SaveState(self.transform_controller.FlipWarped)
 
     def lookatfixedpoint(self, point, scale):
         """specify a point to look at in fixed space"""
 
         if not self.FixedSpace:
             if not self.ShowWarped:
-                if not self.TransformController is None:
-                    point = self.TransformController.InverseTransform([point]).flat
+                if not self.transform_controller is None:
+                    point = self.transform_controller.InverseTransform([point]).flat
 
         super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)
 
-    def draw_objects(self):
+    def draw(self):
         """Region is [x,y,TextureWidth,TextureHeight] indicating where the image should be drawn on the window"""
         if self.camera is None:
             return
@@ -414,19 +439,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.camera.focus(self.width, self.height)
 
         if self._image_transform_view is not None:
-            BoundingBox = self.camera.VisibleImageBoundingBox
+            bounding_box = self.camera.VisibleImageBoundingBox
 
             SetDrawTextureState()
 
             # Draw an image if we can
-            if not self.composite:
-                self._image_transform_view.draw(self.camera.view_proj,
-                                                bounding_box=BoundingBox,
-                                                space=self.space)
-            else:
-                self._image_transform_view.draw(self.camera.view_proj,
-                                                bounding_box=BoundingBox,
-                                                space=self.space)
+            self._image_transform_view.draw(self.camera.view_proj,
+                                            bounding_box=bounding_box,
+                                            space=self.space)
 
             ClearDrawTextureState()
 
@@ -451,9 +471,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             point_scale = (self.camera.scale / min(self.height, self.width)) * 10
             self._controlpoint_view.draw(self.camera.view_proj, tween=tween, scale_factor=point_scale)
 
-        # pointScale = (BoundingBox[3] * BoundingBox[2]) / (self.height * self.width)
+        # pointScale = (bounding_box[3] * bounding_box[2]) / (self.height * self.width)
         # pointScale = self.camera.scale / self.height
-        # self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, BoundingBox=BoundingBox,
+        # self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, bounding_box=bounding_box,
         #                                     FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
 
     #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
@@ -483,10 +503,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         scroll_y = e.GetWheelRotation() / 120.0
 
-        if e.CmdDown() and e.AltDown() and isinstance(self.TransformController.TransformModel,
+        if e.CmdDown() and e.AltDown() and isinstance(self.transform_controller.TransformModel,
                                                       nornir_imageregistration.ITransformRelativeScaling):
             scale_delta = (1.0 + (-scroll_y / 50.0))
-            self.TransformController.TransformModel.ScaleWarped(scale_delta)
+            self.transform_controller.TransformModel.ScaleWarped(scale_delta)
         elif e.CmdDown():  # We rotate when command is down
             angle = float(abs(scroll_y) * 2) ** 2.0
             if e.ShiftDown():
@@ -498,7 +518,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             # print "Angle: " + str(angle)
             try:
-                self.TransformController.Rotate(rangle, np.array(
+                self.transform_controller.Rotate(rangle, np.array(
                     pyre.state.currentStosConfig.WarpedImageViewModel.Image.shape) / 2.0)
             except NotImplementedError:
                 print("Current transform does not support rotation")
@@ -520,8 +540,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             new_scale = self.camera.scale * zdelta
             max_image_dimension_value = self.max_image_dimension
-            if self.TransformController.width is not None:
-                max_transform_dimension = max(self.TransformController.width, self.TransformController.height)
+            if self.transform_controller.width is not None:
+                max_transform_dimension = max(self.transform_controller.width, self.transform_controller.height)
                 max_image_dimension_value = max(max_image_dimension_value, max_transform_dimension)
 
             if new_scale > max_image_dimension_value * 2.0:
@@ -538,7 +558,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             # self.camera.lookat = scrolling_at_position[:2]
             print(f'Scrolling at {scrolling_at} position {world_coordinates[:2]}')
 
-        self.statusBar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
+        self.statusbar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
 
     @property
     def max_image_dimension(self):
@@ -556,45 +576,45 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.LastMousePosition = (y, x)
 
-        if self.TransformController is None:
+        if self.transform_controller is None:
             return
 
         if e.MiddleIsDown():
             self.center_camera()
 
-        if not isinstance(self.TransformController.TransformModel, nornir_imageregistration.transforms.IControlPoints):
+        if not isinstance(self.transform_controller.TransformModel, nornir_imageregistration.transforms.IControlPoints):
             # The remaining functions require control points
             return
 
         if e.ShiftDown():
             if e.LeftDown() and self.SelectedPointIndex is None:
-                self.SelectedPointIndex = self.TransformController.TryAddPoint(ImageX, ImageY,
-                                                                               space=self.space)
+                self.SelectedPointIndex = self.transform_controller.TryAddPoint(ImageX, ImageY,
+                                                                                space=self.space)
                 if e.AltDown():
-                    self.TransformController.AutoAlignPoints(self.SelectedPointIndex)
+                    self.transform_controller.AutoAlignPoints(self.SelectedPointIndex)
 
-                history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
+                history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
             elif e.RightDown():
-                self.TransformController.TryDeletePoint(ImageX, ImageY, self.SelectionMaxDistance,
-                                                        space=self.space)
+                self.transform_controller.TryDeletePoint(ImageX, ImageY, self.SelectionMaxDistance,
+                                                         space=self.space)
                 if self.SelectedPointIndex is not None:
-                    if self.SelectedPointIndex > self.TransformController.NumPoints:
-                        self.SelectedPointIndex = self.TransformController.NumPoints - 1
+                    if self.SelectedPointIndex > self.transform_controller.NumPoints:
+                        self.SelectedPointIndex = self.transform_controller.NumPoints - 1
 
-                history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
+                history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
 
         elif e.LeftDown():
             if e.AltDown() and not self.HighlightedPointIndex is None:
-                self.TransformController.SetPoint(self.HighlightedPointIndex, ImageX, ImageY,
-                                                  space=self.space)
-                history.SaveState(self.TransformController.SetPoints, self.TransformController.points)
+                self.transform_controller.SetPoint(self.HighlightedPointIndex, ImageX, ImageY,
+                                                   space=self.space)
+                history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
             else:
                 distance, index = (None, None)
                 if not self.composite:
-                    distance, index = self.TransformController.NearestPoint((ImageY, ImageX),
-                                                                            space=self.space)
+                    distance, index = self.transform_controller.NearestPoint((ImageY, ImageX),
+                                                                             space=self.space)
                 else:
-                    distance, index = self.TransformController.NearestPoint((ImageY, ImageX), space=self.space)
+                    distance, index = self.transform_controller.NearestPoint((ImageY, ImageX), space=self.space)
 
                 if distance is None:
                     return
@@ -628,18 +648,18 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if e.LeftIsDown():
             if e.CmdDown():
                 # Translate all points
-                self.TransformController.TranslateFixed((ImageDY, ImageDX))
+                self.transform_controller.TranslateFixed((ImageDY, ImageDX))
             else:
                 # Create a point or drag a point
                 if self.SelectedPointIndex is not None:
-                    self.SelectedPointIndex = self.TransformController.MovePoint(self.SelectedPointIndex, ImageDX,
-                                                                                 ImageDY, space=self.space)
+                    self.SelectedPointIndex = self.transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
+                                                                                  ImageDY, space=self.space)
                 elif e.ShiftDown():  # The shift key is selected and we do not have a last point dragged
                     return
                 else:
                     # find nearest point
-                    self.SelectedPointIndex = self.TransformController.TryDrag(ImageX, ImageY, ImageDX, ImageDY,
-                                                                               self.SelectionMaxDistance,
-                                                                               space=self.space)
+                    self.SelectedPointIndex = self.transform_controller.TryDrag(ImageX, ImageY, ImageDX, ImageDY,
+                                                                                self.SelectionMaxDistance,
+                                                                                space=self.space)
 
-        self.statusBar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
+        self.statusbar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)

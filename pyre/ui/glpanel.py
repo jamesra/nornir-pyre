@@ -6,6 +6,7 @@ import abc
 import pyre.ui
 import OpenGL.GL as gl
 from pyre.wxevents import wx_EVT_GL_CONTEXT_CREATED, wxGLContextCreatedEvent
+from typing import Callable
 
 try:
     import wx
@@ -26,12 +27,13 @@ def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
 debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 
 
-class GLPanel(wx.Panel):
-    """A simple class for using OpenGL with wxPython."""
+class GLPanel:
+    """A wxPython panel that contains an OpenGL canvas. and a BoxSizer"""
 
     _glinitialized: bool = False
     canvas: wx.glcanvas.GLCanvas
     sizer = wx.BoxSizer
+    _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
 
     SharedGLContext = None  # type: wx.glcanvas.GLContext
     _glcontextmanager: pyre.state.IGLContextManager
@@ -39,15 +41,18 @@ class GLPanel(wx.Panel):
     def __init__(self,
                  parent: wx.Window,
                  glcontextmanager: pyre.state.IGLContextManager,
+                 draw_method: Callable[[], None],
                  window_id: int,
                  pos=wx.DefaultPosition,
                  size=wx.DefaultSize,
-                 style=0):
+                 style=0,
+                 **kwargs):
         self._glcontextmanager = glcontextmanager
+        self._draw_method = draw_method
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
         # call super function
-        super(GLPanel, self).__init__(parent=parent, id=window_id, pos=pos, size=size, style=style)
+        super(GLPanel, self).__init__(parent=parent, id=window_id, pos=pos, size=size, style=style, **kwargs)
 
         # init gl canvas data
         disp_attrs = wx.glcanvas.GLAttributes()
@@ -93,13 +98,14 @@ class GLPanel(wx.Panel):
         self.canvas.Bind(wx.EVT_SIZING, self.processSizeEvent)
         self.canvas.Bind(wx.EVT_PAINT, self.processPaintEvent)
 
-        self.Bind(wx.EVT_SIZE, self.processSizeEvent)
+        # self.Bind(wx.EVT_SIZE, self.processSizeEvent)
 
         # Send an event that a context was created.
-        self.Bind(wx_EVT_GL_CONTEXT_CREATED, self.OnInitGL)
+        wx.CallAfter(self.OnInitGL)
+        # self.Bind(wx_EVT_GL_CONTEXT_CREATED, self.OnInitGL)
 
-        context_created_event = wxGLContextCreatedEvent(context=context)
-        wx.PostEvent(self, context_created_event)
+        # context_created_event = wxGLContextCreatedEvent(context=context)
+        # wx.PostEvent(self, context_created_event)
 
     # ==========================================================================
     # Canvas Proxy Methods
@@ -135,32 +141,27 @@ class GLPanel(wx.Panel):
     def processPaintEvent(self, event):
         """Process the drawing event."""
         # self.canvas.SetCurrent(GLPanel.SharedGLContext)
-
         self.OnDraw()
         event.Skip()
 
     def Destroy(self):
-        # clean up the pyglet OpenGL context
-        # GLPanel.pygletcontext.destroy()
         # call the super method
         super(GLPanel, self).Destroy()
 
-    def OnContextCreated(self, event):
-        """Called when our custom wx_EVT_GL_CONTEXT_CREATED event is received"""
-        self.OnInitGL()
-        event.Skip()
+    # def OnContextCreated(self, event):
+    #     """Called when our custom wx_EVT_GL_CONTEXT_CREATED event is received"""
+    #     self.OnInitGL()
+    #     event.Skip()
 
     # ==========================================================================
     # GLFrame OpenGL Event Handlers
     # ==========================================================================
-    def OnInitGL(self, event: wxGLContextCreatedEvent):
+    def OnInitGL(self):
         """
         Initialize OpenGL for use in the window.  This is invoked by the
         wx.EVT_GL_CONTEXT_CREATED event.  This call notifies the GLContextManager
         after it has completed its own initialization.
         """
-        # create a pyglet context for this panel
-
         if self._glinitialized:
             return
 
@@ -176,18 +177,9 @@ class GLPanel(wx.Panel):
         self._glcontextmanager.add_context(self.canvas.context)
 
         # allow inheritors the chance to create their objects
-        self.create_objects()
+        # self.create_objects()
 
         self._glinitialized = True
-
-    def _InitGLState(self):
-        gl.glEnable(gl.GL_BLEND)
-        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
-        #        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glClearColor(0, 0, 0, 1)
-        gl.glDepthRangef(0, 2)
-
-        # gl.glDebugMessageCallback(gl.GLDEBUGPROC(cb_dbg_msg), None)
 
     def OnReshape(self, width: int, height: int):
         """Reshape the OpenGL viewport based on the dimensions of the window."""
@@ -197,17 +189,8 @@ class GLPanel(wx.Panel):
             return
 
         self.canvas.SetCurrent(self.canvas.context)
-
         gl.glViewport(0, 0, width, height)
-        # gl.glMatrixMode(gl.GL_PROJECTION)
-        # gl.glLoadIdentity()
-        # gl.glOrtho(0, width, 0, height, 1, -1)
-        # gl.glMatrixMode(gl.GL_MODELVIEW)
-        # pyglet stuff
-
-        # Wrap text to the width of the window
-        # GLPanel.pygletcontext.set_current()
-        self.update_object_resize()
+        # self.update_object_resize()
 
     def activate_context(self):
         """Set this widgets GL context as the current context"""
@@ -235,24 +218,7 @@ class GLPanel(wx.Panel):
         # gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glDisable(gl.GL_CULL_FACE)
         # draw objects
-        self.draw_objects()
+        # self.draw_objects()
+        self._draw_method()
         # update screen
         self.SwapBuffers()
-
-    # ==========================================================================
-    # To be implamented by a sub class
-    # ==========================================================================
-    @abc.abstractmethod
-    def create_objects(self):
-        """create opengl objects when opengl is initialized"""
-        pass
-
-    @abc.abstractmethod
-    def update_object_resize(self):
-        """called when the window resizes"""
-        pass
-
-    @abc.abstractmethod
-    def draw_objects(self):
-        """called in the middle of ondraw after the buffer has been cleared"""
-        pass

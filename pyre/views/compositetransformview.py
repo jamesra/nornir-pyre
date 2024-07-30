@@ -11,12 +11,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 import OpenGL.GL as gl
-from pyre.views.imagetransformview import ImageTransformView
 from pyre.viewmodels.transformcontroller import TransformController
-from pyre.viewmodels.imageviewmodel import ImageViewModel
 from pyre.space import Space
 from pyre.state import Action, IImageViewModelManager
-from pyre.state.gl_context_manager import IGLContextManager
 from pyre.views.interfaces import IImageTransformView
 
 
@@ -119,71 +116,75 @@ class CompositeTransformView(IImageTransformView):
 
         self._tranformed_verts_cache = None
 
-        self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
+        # self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
-        self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
+        # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
-    def on_imageviewmodelmanager_change(self,
-                                        name: str,
-                                        action: Action,
-                                        image: ImageViewModel):
-        """Called when an imageviewmodel is added or removed from the manager"""
-        print(
-            f'* ImageTransformViewPanel.on_imageviewmodelmanager_change {name} {action.value} self: {self._config.imagenames}')
-        if name not in self._nameset:
-            print('\tDoes not match')
-            return  # Not of interest to our class
+    # def on_imageviewmodelmanager_change(self,
+    #                                     name: str,
+    #                                     action: Action,
+    #                                     image: ImageViewModel):
+    #     """Called when an imageviewmodel is added or removed from the manager"""
+    #     print(
+    #         f'* ImageTransformViewPanel.on_imageviewmodelmanager_change {name} {action.value} self: {self._config.imagenames}')
+    #     if name not in self._nameset:
+    #         print('\tDoes not match')
+    #         return  # Not of interest to our class
+    #
+    #     if action == Action.ADD:
+    #         self._handle_add_imageviewmodel_event(name, image)
+    #     elif action == Action.REMOVE:
+    #         self._handle_remove_imageviewmodel_event(name)
+    #     else:
+    #         raise NotImplementedError()
+    #
+    # def _handle_add_imageviewmodel_event(self, name: str, image: ImageViewModel):
+    #     """Process an add event from the imageviewmodel manager"""
+    #     # self._image_transform_view.image_view_model = image
+    #     view = ImageTransformView(space=self.space,
+    #                               activate_context=self.activate_context,
+    #                               image_view_model=image,
+    #                               transform_controller=self._config.transform_controller)
+    #     print(f'Added image view model {name} to ImageTransformViewPanel')
+    #     self._image_transform_view = view
+    #
+    #     self.center_camera()
+    #
+    # def _handle_remove_imageviewmodel_event(self, name: str):
+    #     """Process a remove event from the imageviewmodel manager"""
+    #     raise NotImplementedError()
 
-        if action == Action.ADD:
-            self._handle_add_imageviewmodel_event(name, image)
-        elif action == Action.REMOVE:
-            self._handle_remove_imageviewmodel_event(name)
-        else:
-            raise NotImplementedError()
-
-    def _handle_add_imageviewmodel_event(self, name: str, image: ImageViewModel):
-        """Process an add event from the imageviewmodel manager"""
-        # self._image_transform_view.image_view_model = image
-        view = ImageTransformView(space=self.space,
-                                  activate_context=self.activate_context,
-                                  image_view_model=image,
-                                  transform_controller=self._config.transform_controller)
-        print(f'Added image view model {name} to ImageTransformViewPanel')
-        self._image_transform_view = view
-
-        self.center_camera()
-
-    def OnTransformChanged(self, transform_controller: TransformController):
-
-        super(CompositeTransformView, self).OnTransformChanged(transform_controller)
-
-        self._tranformed_verts_cache = None
-        self._ClearVertexAngleDelta()
-
-    def PopulateTransformedVertsCache(self):
-        # verts = self.transform.WarpedPoints
-        # self._tranformed_verts_cache = self.transform.transform(verts)
-        if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
-            self._tranformed_verts_cache = self.Transform.TargetPoints
-        return
-
-    def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
-        Triangles = np.array(T)
-        if Triangles.ndim == 1:
-            Triangles = Triangles.reshape(len(Triangles) / 3, 3)
-
-        convex_hull_flat = np.unique(convex_hull)
-
-        iTri = len(Triangles) - 1
-        while iTri >= 0:
-            tri = Triangles[iTri]
-            if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
-                # OK, find out if the midpoint of any lines are outside the convex hull
-                Triangles = np.delete(Triangles, iTri, 0)
-
-            iTri -= 1
-
-        return Triangles
+    # def OnTransformChanged(self, transform_controller: TransformController):
+    #
+    #     #super(CompositeTransformView, self).OnTransformChanged(transform_controller)
+    #
+    #     self._tranformed_verts_cache = None
+    #     #self._ClearVertexAngleDelta()
+    #
+    # def PopulateTransformedVertsCache(self):
+    #     # verts = self.transform.WarpedPoints
+    #     # self._tranformed_verts_cache = self.transform.transform(verts)
+    #     if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
+    #         self._tranformed_verts_cache = self.Transform.TargetPoints
+    #     return
+    #
+    # def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
+    #     Triangles = np.array(T)
+    #     if Triangles.ndim == 1:
+    #         Triangles = Triangles.reshape(len(Triangles) / 3, 3)
+    #
+    #     convex_hull_flat = np.unique(convex_hull)
+    #
+    #     iTri = len(Triangles) - 1
+    #     while iTri >= 0:
+    #         tri = Triangles[iTri]
+    #         if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
+    #             # OK, find out if the midpoint of any lines are outside the convex hull
+    #             Triangles = np.delete(Triangles, iTri, 0)
+    #
+    #         iTri -= 1
+    #
+    #     return Triangles
 
     def setup_composite_rendering(self):
 

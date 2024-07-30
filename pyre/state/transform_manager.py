@@ -18,7 +18,7 @@ class ITransformControllerManager(abc.ABC):
         raise NotImplementedError()
 
     def __getitem__(self, key: ITransform) -> TransformController:
-        """Return the TransformController for a transform"""
+        """Return the transform_controller for a transform"""
         raise NotImplementedError()
 
     def __contains__(self, key: ITransform) -> bool:

@@ -1,11 +1,11 @@
-import nornir_imageregistration.spatial 
+import nornir_imageregistration.spatial
 
 try:
     import wx
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
-from . import command_base
+from pyre.ui import command_base
 import pyre.views
 
 

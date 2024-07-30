@@ -1,4 +1,6 @@
 import wx
+
+import pyre.commands.commandbase
 from . import command_base
 from pyre.viewmodels import TransformController
 import pyre.views.controlpoint_view
@@ -6,7 +8,7 @@ from pyre.gl_engine.gl_buffer import GLBuffer
 from pyre.state import ITransformControllerGLBufferManager, GLBufferCollection, BufferType
 
 
-class DefaultStosCommand(command_base.CommandBase):
+class DefaultStosCommand(pyre.commands.commandbase.CommandBase):
     """
     Supports:
      1. Navigating around the view of the images.

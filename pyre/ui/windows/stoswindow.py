@@ -101,7 +101,6 @@ class StosWindow(PyreWindowBase):
         # wx.CallAfter(self.UpdateRawImageWindow)
 
     def CreateMenu(self):
-
         menuBar = wx.MenuBar()
 
         filemenu = self.__CreateFileMenu()
@@ -412,7 +411,7 @@ class StosWindow(PyreWindowBase):
     #         imageTransformView = pyre.views.CompositeTransformView(glcontexmanager=self.config.glcontext_manager,
     #                                                                FixedImageArray=state.currentStosConfig.FixedImageViewModel,
     #                                                                WarpedImageArray=state.currentStosConfig.WarpedImageViewModel,
-    #                                                                transform_controller=state.currentStosConfig.TransformController)
+    #                                                                transform_controller=state.currentStosConfig.transform_controller)
     #     else:
     #         imageViewModel = state.currentStosConfig.FixedImageViewModel
     #         if not self.showFixed:
@@ -421,7 +420,7 @@ class StosWindow(PyreWindowBase):
     #         imageTransformView = pyre.views.ImageTransformView(space=self.space,
     #                                                            glcontexmanager=self.config.glcontext_manager,
     #                                                            ImageViewModel=imageViewModel,
-    #                                                            transform_controller=state.currentStosConfig.TransformController)
+    #                                                            transform_controller=state.currentStosConfig.transform_controller)
     #
     #     self.imagepanel.image_transform_view = imageTransformView
 

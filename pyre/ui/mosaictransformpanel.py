@@ -77,11 +77,11 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.center_camera()
 
     def _bind_mouse_events(self):
-        self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
-        self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
-        self.canvas.Bind(wx.EVT_LEFT_DOWN, self.on_mouse_press)
-        self.canvas.Bind(wx.EVT_MIDDLE_DOWN, self.on_mouse_press)
-        self.canvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
+        self.glcanvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
+        self.glcanvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
+        self.glcanvas.Bind(wx.EVT_LEFT_DOWN, self.on_mouse_press)
+        self.glcanvas.Bind(wx.EVT_MIDDLE_DOWN, self.on_mouse_press)
+        self.glcanvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
 
     def AddStatusBar(self):
         self.statusBar = pyre.ui.camerastatusbar.CameraStatusBar(self, self.camera)

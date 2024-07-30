@@ -8,7 +8,7 @@ import nornir_imageregistration.spatial
 import numpy
 import wx
 
-from . import command_base
+from pyre.ui import command_base
 import pyre.views
 
 
@@ -69,7 +69,8 @@ class RectangleCommand(command_base.VolumeCommandBase):
         self._bind_mouse_events()
 
         print("Start Rect: %d x %d" % (
-        self.Origin[nornir_imageregistration.spatial.iPoint.X], self.Origin[nornir_imageregistration.spatial.iPoint.Y]))
+            self.Origin[nornir_imageregistration.spatial.iPoint.X],
+            self.Origin[nornir_imageregistration.spatial.iPoint.Y]))
 
     def _bind_mouse_events(self):
         self.parent.Bind(wx.EVT_MOTION, self.on_mouse_drag)

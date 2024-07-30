@@ -62,7 +62,7 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
     # WarpedShape)
 
 
-TransformChangedCallback = Callable[['TransformController'], None]
+TransformChangedCallback = Callable[['transform_controller'], None]
 
 
 class TransformController:
@@ -83,7 +83,7 @@ class TransformController:
         """Creates a default transform controller with a rigid transform and no control points"""
         raise DeprecationWarning("Use the TransformManager instead")
         # T = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID, FixedShape, WarpedShape)
-        # return TransformController(T)
+        # return transform_controller(T)
 
     @property
     def width(self) -> float | None:

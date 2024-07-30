@@ -23,7 +23,7 @@ class CameraStatusBar(wx.StatusBar):
     def TransformController(self) -> pyre.viewmodels.TransformController:
         return state.currentStosConfig.TransformController
 
-    def __init__(self, parent, camera, **kwargs):
+    def __init__(self, parent: wx.Window, camera: Camera, **kwargs):
         self._camera = camera
         # self._TransformController = transformController
         super(CameraStatusBar, self).__init__(parent, **kwargs)
@@ -54,17 +54,19 @@ class CameraStatusBar(wx.StatusBar):
 
         if in_target_space:
             target_point = point
-            source_point = None if self.TransformController is None else self.TransformController.InverseTransform(target_point).flat
+            source_point = None if self.TransformController is None else self.TransformController.InverseTransform(
+                target_point).flat
         else:
             source_point = point
-            target_point = None if self.TransformController is not None else self.TransformController.Transform(point).flat
+            target_point = None if self.TransformController is not None else self.TransformController.Transform(
+                point).flat
 
         # self.SetStatusText('%dx, %dy' % (point[nornir_imageregistration.iPoint.X], point[nornir_imageregistration.iPoint.Y]), 0)
 
         src_txt = f'Source/Warped: {source_point[nornir_imageregistration.iPoint.X]: 0.1f}x {source_point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if source_point is not None else ''
-        self.SetStatusText(src_txt,0)
+        self.SetStatusText(src_txt, 0)
         tgt_txt = f'Target/Fixed: {target_point[nornir_imageregistration.iPoint.X]: 0.1f}x {target_point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if target_point is not None else ''
-        self.SetStatusText(tgt_txt,1)
+        self.SetStatusText(tgt_txt, 1)
 
         self.SetStatusText('Zoom: %4.2f%%' % zoom_percentage, 2)
 

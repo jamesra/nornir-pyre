@@ -106,9 +106,9 @@ class Camera:
         self._FireChangeEvent()
 
     def ImageCoordsForMouse(self, y: float, x: float) -> tuple[float, float]:
-        ImageX = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
-        ImageY = ((float(y) / self.WindowHeight) * self.ViewHeight) + (self.y - (self.ViewHeight / 2.0))
-        return ImageY, ImageX
+        image_x = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
+        image_y = ((float(y) / self.WindowHeight) * self.ViewHeight) + (self.y - (self.ViewHeight / 2.0))
+        return image_y, image_x
 
     @property
     def VisibleImageBoundingBox(self) -> nornir_imageregistration.Rectangle:

@@ -9,6 +9,16 @@ from pyre import Space
 from pyre.viewmodels.transformcontroller import TransformController
 
 
+class IGLPanel(ABC):
+    """
+    Interface to a UI Panel that supports OpenGL rendering
+    """
+
+    def swap_buffers(self):
+        """Swap the front and back buffers"""
+        raise NotImplementedError()
+
+
 class IImageTransformView(ABC):
     """
     Base class for ImageTransformView objects
@@ -41,7 +51,6 @@ class IImageTransformView(ABC):
     def draw(self,
              view_proj: NDArray[np.floating],
              space: Space,
-             BoundingBox: nornir_imageregistration.Rectangle | None = None):
-        """Draw the image in either source (fixed) or target (warped) space
-        :param view_proj: View projection matrix"""
+             bounding_box: nornir_imageregistration.Rectangle | None = None):
+        """Draw the image in either source (fixed) or target (warped) space"""
         raise NotImplementedError()
