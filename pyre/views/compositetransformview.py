@@ -5,16 +5,23 @@ Created on Oct 19, 2012
 """
 
 from typing import Callable
+
+import numpy
+
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
 import numpy as np
 from numpy.typing import NDArray
 
 import OpenGL.GL as gl
+import pyre.viewmodels
 from pyre.viewmodels.transformcontroller import TransformController
 from pyre.space import Space
 from pyre.state import Action, IImageViewModelManager
 from pyre.views.interfaces import IImageTransformView
+from pyre.gl_engine import FrameBuffer
+import pyre.gl_engine.shaders as shaders
+from pyre.views import ImageTransformView
 
 
 class CompositeTransformView(IImageTransformView):
@@ -28,6 +35,18 @@ class CompositeTransformView(IImageTransformView):
     _target_image_view: IImageTransformView | None
     _transform_controller: TransformController
     _imageviewmodel_manager: IImageViewModelManager
+
+    # These hold the rendered images for the source and target images.
+    # These images are aligned if the transform aligns them.
+    # A second pass rendering will blend the images together and draw to the back buffer
+    _source_frame_buffer: FrameBuffer
+    _target_frame_buffer: FrameBuffer
+
+    _display_space: Space
+
+    @property
+    def display_space(self) -> Space:
+        return self._display_space
 
     def _ClearVertexAngleDelta(self):
         self._transformVertexAngleDeltas = None
@@ -87,6 +106,7 @@ class CompositeTransformView(IImageTransformView):
         return self._transform_controller
 
     def __init__(self,
+                 display_space: Space,
                  activate_context: Callable[[], None],
                  image_viewmodel_manager: IImageViewModelManager,
                  source_image_name: str,
@@ -95,6 +115,7 @@ class CompositeTransformView(IImageTransformView):
         """
         Constructor
         """
+        self._display_space = display_space
         self._source_viewmodel_name = source_image_name
         self._target_viewmodel_name = target_image_name
         self._nameset = frozenset([source_image_name, target_image_name])
@@ -116,9 +137,59 @@ class CompositeTransformView(IImageTransformView):
 
         self._tranformed_verts_cache = None
 
+        self._source_frame_buffer = FrameBuffer()
+        self._target_frame_buffer = FrameBuffer()
+
+        self._source_image_view = None
+        self._target_image_view = None
+
+        self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
+
         # self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
         # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
+
+    def on_imageviewmodelmanager_change(self,
+                                        name: str,
+                                        action: Action,
+                                        image: pyre.viewmodels.ImageViewModel):
+        """Called when an imageviewmodel is added or removed from the manager"""
+        print(
+            f'* CompositeTransformView.on_imageviewmodelmanager_change {name} {action.value} self: {self._nameset}')
+        if name not in self._nameset:
+            print('\tDoes not match')
+            return  # Not of interest to our class
+
+        if action == Action.ADD:
+            self._handle_add_imageviewmodel_event(name, image)
+        elif action == Action.REMOVE:
+            self._handle_remove_imageviewmodel_event(name)
+        else:
+            raise NotImplementedError()
+
+    def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
+        """Process an add event from the imageviewmodel manager"""
+        space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
+        view = ImageTransformView(space=space_mapping,
+                                  activate_context=self._activate_context,
+                                  image_view_model=image,
+                                  transform_controller=self._transform_controller)
+        print(f'Added image view model {name} to existing CompositeTransformView')
+
+        if space_mapping == Space.Source:
+            self._source_image_view = view
+        elif space_mapping == Space.Target:
+            self._target_image_view = view
+
+        # self.center_camera()
+
+    def _handle_remove_imageviewmodel_event(self, name: str):
+        """Process a remove event from the imageviewmodel manager"""
+        space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
+        if space_mapping == Space.Source:
+            self._source_image_view = None
+        elif space_mapping == Space.Target:
+            self._target_image_view = None
 
     # def on_imageviewmodelmanager_change(self,
     #                                     name: str,
@@ -200,12 +271,56 @@ class CompositeTransformView(IImageTransformView):
     def draw(self,
              view_proj: NDArray[np.floating],
              space: Space,
-             BoundingBox: nornir_imageregistration.Rectangle | None = None):
+             client_size: tuple[int, int],
+             bounding_box: nornir_imageregistration.Rectangle | None = None):
         """Draw the image in either source (fixed) or target (warped) space
-        :param view_proj: View projection matrix"""
+        :param view_proj: View projection matrix
+        :param client_size: Size of the client area in pixels. (height, width)"""
 
-        self._source_image_view.draw(view_proj, space, BoundingBox)
-        self._target_image_view.draw(view_proj, space, BoundingBox)
+        # Rough idea:
+        # 1. Render each image to a FrameBufferObject
+        # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
+        if self._source_image_view is not None and self._target_image_view is not None:
+
+            source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, source_fbo)
+
+            gl.glClearDepth(10000.0)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+
+            target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
+
+            gl.glClearDepth(10000.0)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
+
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            # OK, we have two textures with the rendered+transformed images of source and target images.
+            # Inject textures into an overlay renderer and blend the images
+            ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
+                                                                           -1, 1,
+                                                                           -1, 1)
+
+            ortho_projection = np.identity(4)
+            ortho_projection[0, 0] = 2.0
+            ortho_projection[1, 1] = 2.0
+            shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
+                                        source_texture=self._source_frame_buffer.fbo_texture,
+                                        target_texture=self._target_frame_buffer.fbo_texture,
+                                        overlay_type=None,
+                                        source_channel_mix=np.array([1.0, 0.0, 0.5, 1.0]),
+                                        target_channel_mix=np.array([0.0, 1.0, 0.5, 1.0]))
+
+        elif self._source_image_view is not None:
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+        elif self._target_image_view is not None:
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
 
     def draw_textures(self, view_proj: NDArray[np.floating],
                       space: Space,

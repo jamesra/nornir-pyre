@@ -8,12 +8,11 @@ import scipy.spatial
 import OpenGL.GL as gl
 from OpenGL.arrays import vbo
 
-from .compositetransformview import CompositeTransformView
-from . import compositetransformview
 from .mosaicview import MosaicView
 from .pointset_view import PointSetView
 from .controlpoint_view import ControlPointView
 from .imagetransformview import ImageTransformView
+from .compositetransformview import CompositeTransformView
 
 
 def LineIndiciesFromTri(T: scipy.spatial.Delaunay) -> list[int]:

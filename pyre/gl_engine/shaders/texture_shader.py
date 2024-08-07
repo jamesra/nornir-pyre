@@ -143,7 +143,7 @@ class TextureShader(BaseShader):
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0
             gl.glUniformMatrix4fv(self.model_view_projection_matrix_location, 1, False,
-                                  model_view_proj_matrix.astype(np.float32))
+                                  model_view_proj_matrix.astype(np.float32, copy=False))
             check_for_error()
 
             # status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)

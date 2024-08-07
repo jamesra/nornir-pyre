@@ -11,6 +11,7 @@ import numpy as np
 import nornir_imageregistration
 from pyre.commands.commandbase import CommandBase
 from pyre.commands.interfaces import CompletionCallback
+from pyre.space import Space
 
 import pyre.ui
 
@@ -22,9 +23,9 @@ class NavigationCommandBase(CommandBase):
     A command that needs to handle the mouse position in volume coordinates
     """
 
-    _last_mouse_position = tuple[float, float]
-    _statusbar = CameraStatusBar | None
-    _transform_controller = pyre.state.TransformController
+    _last_mouse_position: tuple[float, float]
+    _statusbar: CameraStatusBar | None
+    _transform_controller: pyre.state.TransformController
 
     # Bounds the camera is allowed to travel within
     _bounds: nornir_imageregistration.Rectangle
@@ -50,9 +51,10 @@ class NavigationCommandBase(CommandBase):
         self._statusbar = status_bar
         self._transform_controller = transform_controller
         self._camera = camera
+        self._last_mouse_position = None
         super(NavigationCommandBase, self).__init__(parent=parent,
                                                     completed_func=completed_func)
-
+ 
     def GetCorrectedMousePosition(self, e: wx.MouseEvent, height: int) -> tuple[float, float]:
         """wxPython inverts the mouse position, flip it back"""
         (x, y) = e.GetPosition()
@@ -80,28 +82,29 @@ class NavigationCommandBase(CommandBase):
         ImageDY = (float(dy) / height) * self.camera.ViewHeight
 
         if self._statusbar is not None:
-            self._statusbar.update_status_bar(self._last_mouse_position, in_target_space=self.FixedSpace)
+            self._statusbar.update_status_bar(self._last_mouse_position, in_target_space=False)
 
         if event.RightIsDown():
             self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
 
-        if event.LeftIsDown():
-            if event.CmdDown():
-                # Translate all points
-                self._transform_controller.TranslateFixed((ImageDY, ImageDX))
-            else:
-                # Create a point or drag a point
-                if self.SelectedPointIndex is not None:
-                    self.SelectedPointIndex = self._transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
-                                                                                   ImageDY, space=self.space)
-                elif event.ShiftDown():  # The shift key is selected and we do not have a last point dragged
-                    return
-                else:
-                    # find nearest point
-                    self.SelectedPointIndex = self._transform_controller.TryDrag(ImageX, ImageY, ImageDX, ImageDY,
-                                                                                 self.SelectionMaxDistance,
-                                                                                 space=self.space)
-        self._statusbar.update_status_bar(self._last_mouse_position, in_target_space=self.FixedSpace)
+        # Commenting this block until I have a command to translate control points
+        # if event.LeftIsDown():
+        #     if event.CmdDown():
+        #         # Translate all points
+        #         self._transform_controller.TranslateFixed((ImageDY, ImageDX))
+        #     else:
+        #         # Create a point or drag a point
+        #         if self.SelectedPointIndex is not None:
+        #             self.SelectedPointIndex = self._transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
+        #                                                                            ImageDY, space=self.space)
+        #         elif event.ShiftDown():  # The shift key is selected and we do not have a last point dragged
+        #             return
+        #         else:
+        #             # find nearest point
+        #             self.SelectedPointIndex = self._transform_controller.TryDrag(ImageX, ImageY, ImageDX, ImageDY,
+        #                                                                          self.SelectionMaxDistance,
+        #                                                                          space=self.space)
+        self._statusbar.update_status_bar(self._last_mouse_position, in_target_space=False)
 
     def on_mouse_scroll(self, e: wx.MouseEvent):
 
@@ -169,7 +172,73 @@ class NavigationCommandBase(CommandBase):
 
         self._statusbar.update_status_bar(self._last_mouse_position, in_target_space=False)
 
- 
+    def on_key_press(self, e):
+        keycode = e.GetKeyCode()
+
+        symbol = ''
+        try:
+            key_char = '%c' % keycode
+            symbol = key_char.lower()
+        except:
+            pass
+
+        # if keycode == wx.WXK_TAB:
+        #     try:
+        #         if self.composite:
+        #             self.NextGLFunction()
+        #         else:
+        #             self.ShowWarped = not self.ShowWarped
+        #     except:
+        #         pass
+
+        if symbol == 'a':  # "A" Character
+            ImageDX = 0.1 * self.camera.ViewWidth
+            self._camera.translate((-ImageDX, 0.0, float))
+        elif symbol == 'd':  # "D" Character
+            ImageDX = -0.1 * self.camera.ViewWidth
+            self._camera.translate((ImageDX, 0.0, float))
+        elif symbol == 'w':  # "W" Character
+            ImageDY = -0.1 * self.camera.ViewHeight
+            self._camera.translate((0, -ImageDY, float))
+        elif symbol == 's':  # "S" Character
+            ImageDY = 0.1 * self.camera.ViewHeight
+            self._camera.translate((0, ImageDY, float))
+
+        elif keycode == wx.WXK_PAGEUP:
+            self.camera.scale *= 0.9
+        elif keycode == wx.WXK_PAGEDOWN:
+            self.camera.scale *= 1.1
+        elif keycode == wx.WXK_SPACE:
+
+            # If SHIFT is held down, align everything.  Otherwise align the selected point
+            if not e.ShiftDown() and not self.HighlightedPointIndex is None:
+                self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.HighlightedPointIndex)
+
+            elif e.ShiftDown():
+                self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
+
+            pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
+        # elif symbol == 'l':
+        #    self.show_lines = not self.show_lines
+        # elif keycode == wx.WXK_F1:
+        #    self._image_transform_view.Debug = not self._image_transform_view.Debug
+        elif symbol == 'm':
+            LookAt = [self.camera.y, self.camera.x]
+
+            # if not self.FixedSpace and self.ShowWarped:
+            #    LookAt = self._transform_controller.transform([LookAt])
+            #    LookAt = LookAt[0]
+
+            pyre.state.currentStosConfig.WindowsLookAtFixedPoint(LookAt, self.camera.scale)
+            # pyre.SyncWindows(LookAt, self.camera.scale)
+
+        elif symbol == 'z' and e.CmdDown():
+            pyre.history.Undo()
+        elif symbol == 'x' and e.CmdDown():
+            pyre.history.Redo()
+        elif symbol == 'f':
+            self._transform_controller.FlipWarped()
+            pyre.history.SaveState(self._transform_controller.FlipWarped)
 
 
 class DefaultImageTransformCommand(NavigationCommandBase):
@@ -179,14 +248,25 @@ class DefaultImageTransformCommand(NavigationCommandBase):
     def executed(self) -> bool:
         return self._executed
 
+    @property
+    def SelectionMaxDistance(self) -> float:
+        """How close we need to be to a control point to select it"""
+        selection_max_distance = (float(self.camera.ViewHeight) / float(self.height)) * 20.0
+        if selection_max_distance < 16:
+            selection_max_distance = 16
+
+        return selection_max_distance
+
     # A command that lets the user manipulate the camera and
     def subscribe_to_parent(self):
         self._bind_mouse_events()
         self._bind_key_events()
+        self._bind_resize_event()
 
     def unsubscribe_to_parent(self):
         self._unbind_mouse_events()
         self._unbind_key_events()
+        self._unbind_resize_event()
 
     def can_execute(self) -> bool:
         return True
@@ -210,3 +290,84 @@ class DefaultImageTransformCommand(NavigationCommandBase):
 
     def on_mouse_release(self, event):
         return
+
+    class TranslatePointSelectionCommand(NavigationCommandBase):
+        """This command takes a selection of control points and adjusts the position"""
+
+        _selected_points: list[int]  # The indices of the selected points
+        _space: Space
+
+        def __init__(self,
+                     parent: wx.Window,
+                     status_bar: CameraStatusBar,
+                     transform_controller: pyre.viewmodels.TransformController,
+                     camera: pyre.ui.Camera,
+                     bounds: nornir_imageregistration.Rectangle,
+                     selected_points: list[int],  # The indices of the selected points
+                     space: Space,  # Space we are moving the points in, source or target side
+                     completed_func: CompletionCallback = None):
+            super().__init__(parent, status_bar, transform_controller, camera, bounds, completed_func)
+            self._selected_points = selected_points
+
+        def on_mouse_press(self, event: wx.MouseEvent):
+            """Called when the mouse is pressed"""
+            pass
+
+        def on_mouse_release(self, event: wx.MouseEvent):
+            """Called when the mouse is released"""
+            self.execute()
+
+        def on_key_down(self, event: wx.KeyEvent):
+            """Called when a key is pressed"""
+            keycode = event.GetKeyCode()
+
+            if (keycode == wx.WXK_LEFT or
+                keycode == wx.WXK_RIGHT or
+                keycode == wx.WXK_UP or
+                keycode == wx.WXK_DOWN) and self.HighlightedPointIndex is not None:
+
+                # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
+                multiplier = 1
+                print(str(multiplier))
+                if event.ShiftDown():
+                    multiplier *= 5
+                    print(str(multiplier))
+                if event.ControlDown():
+                    multiplier *= 25
+                    print(str(multiplier))
+
+                delta = [0, 0]
+                if keycode == wx.WXK_LEFT:
+                    delta = [0, -1]
+                elif keycode == wx.WXK_RIGHT:
+                    delta = [0, 1]
+                elif keycode == wx.WXK_UP:
+                    delta = [1, 0]
+                elif keycode == wx.WXK_DOWN:
+                    delta = [-1, 0]
+
+                delta[0] *= multiplier
+                delta[1] *= multiplier
+
+                self._transform_controller.MovePoint(self._selected_points, delta[1], delta[0],
+                                                     space=self._space)
+            elif keycode == wx.WXK_SPACE:
+
+                # If SHIFT is held down, align everything.  Otherwise align the selected point
+                if not event.ShiftDown() and self._selected_points is not None:
+                    self._selected_points = self._transform_controller.AutoAlignPoints(self._selected_points)
+
+                elif event.ShiftDown():
+                    self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
+
+                pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
+
+            return
+
+        def on_mouse_scroll(self, event: wx.MouseEvent):
+            """Called when the mouse wheel is scrolled"""
+            pass
+
+        def on_mouse_drag(self, event: wx.MouseEvent):
+            """Called when the mouse is dragged"""
+            pass

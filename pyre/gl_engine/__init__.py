@@ -13,3 +13,4 @@ from pyre.gl_engine.shaders.shader_base import BaseShader
 from .shader_vao import ShaderVAO
 from .dynamic_vao import DynamicVAO
 from .instanced_vao import InstancedVAO
+from .framebuffer import FrameBuffer

@@ -78,31 +78,41 @@ class ImageTransformPanelBase:
                  parent: wx.Window,
                  glcontextmanager: pyre.state.IGLContextManager,
                  transform_controller: TransformController,
-                 window_id: int = -1, **kwargs):
+                 window_id: int = wx.ID_ANY, **kwargs):
         """
         Constructor
         """
+        self._parent = parent
         self._transform_controller = transform_controller
         self._glpanel = glpanel.GLPanel(parent=parent,
                                         glcontextmanager=glcontextmanager,
                                         draw_method=self.draw,
                                         window_id=window_id,
                                         **kwargs)
+
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.sizer.Add(self._glpanel, 1, wx.EXPAND)
+        parent.SetSizer(self.sizer)
+        self.sizer.Fit(parent)
+        parent.Layout()
+
         self._camera = Camera((0, 0), 1)
 
-        self._glpanel.Bind(wx.EVT_SIZE, self.on_resize)
+        # self._glpanel.Bind(wx.EVT_SIZE, self.on_resize)
+        parent.Bind(wx.EVT_SIZE, self.on_resize)
 
-        self._width, self._height = self._glpanel.GetSize()
-        self._statusbar = None
-
+        self._width, self._height = self._glpanel.GetClientSize()
         self.AddStatusBar()
 
         self._camera.AddOnChangeEventListener(self.OnCameraChanged)
+
+        # wx.CallAfter(self.on_resize)
         pass
 
     def AddStatusBar(self):
-        self._statusbar = CameraStatusBar(self._glpanel, self.camera)
-        self._glpanel.sizer.Add(self._statusbar, flag=wx.BOTTOM | wx.EXPAND)
+        self._statusbar = CameraStatusBar(self._parent, self.camera)
+        self.sizer.Add(self._statusbar, flag=wx.BOTTOM | wx.EXPAND)
         self._statusbar.SetFieldsCount(3)
 
     def __str__(self, *args, **kwargs):
@@ -112,9 +122,10 @@ class ImageTransformPanelBase:
         return self.camera.ImageCoordsForMouse(y, x)
 
     def on_resize(self, e):
-        (self._width, self._height) = self._glpanel.GetSize()
-        if self.camera is not None:
+        (self._width, self._height) = self._glpanel.GetClientSize()
+        if self.camera is not None and self._width > 0 and self._height > 0:
             # try:
+            self.camera.WindowSize = np.array((self._height, self._width))
             self.camera.focus(self.height, self.width)
             # except:
             # pass

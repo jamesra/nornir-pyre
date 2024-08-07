@@ -375,10 +375,14 @@ class TransformController:
 
         return index
 
-    def MovePoint(self, index: int, ImageDX: float, ImageDY: float, space: pyre.Space = pyre.Space.Source) -> int:
+    def MovePoint(self, index: int | list[int], ImageDX: float, ImageDY: float,
+                  space: pyre.Space = pyre.Space.Source) -> int:
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPoints):
             return
+
+        if isinstance(index, list):
+            raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
 
         original_point = self.GetNearestPoint(index, space)
         if original_point is None:

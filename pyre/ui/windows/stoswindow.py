@@ -72,13 +72,26 @@ class StosWindow(PyreWindowBase):
         display_image_names = set([ViewType.Source.value, ViewType.Target.value]) if view_type == ViewType.Composite \
             else set([view_type.value])
 
+        imagename_space_mapping = {}
+        if view_type == ViewType.Composite:
+            imagename_space_mapping[ViewType.Source] = Space.Source
+            imagename_space_mapping[ViewType.Target] = Space.Target
+        elif view_type == ViewType.Source:
+            imagename_space_mapping[ViewType.Source] = Space.Source
+        elif view_type == ViewType.Target:
+            imagename_space_mapping[ViewType.Target] = Space.Target
+        else:
+            raise NotImplementedError("Unknown ViewType")
+
         # This is the GL Panel, so GL initialization happens after this
         image_panel_config = pyre.ui.ImageTransformPanelConfig(
             transform_controller=config.transform_controller,
             imageviewmodel_manager=config.imageviewmodel_manager,
             glcontext_manager=config.glcontext_manager,
             transformglbuffer_manager=config.transformglbuffer_manager,
-            imagenames=display_image_names)
+            view_type=view_type,
+            imagename_space_mapping=imagename_space_mapping
+        )
 
         self.imagepanel = pyre.ui.ImageTransformViewPanel(parent=self,
                                                           space=self._space,
@@ -96,6 +109,10 @@ class StosWindow(PyreWindowBase):
         # Allows Drag and Drop
         dt = FileDrop(self)
         self.SetDropTarget(dt)
+
+        wx.CallAfter(self.setPosition)
+
+        wx.CallAfter(self.Show, True)
 
         # Make sure we have a GL context before initializing view window
         # wx.CallAfter(self.UpdateRawImageWindow)
@@ -122,9 +139,6 @@ class StosWindow(PyreWindowBase):
         # print "Drop target set"
 
         # print str(self.GetDropTarget())
-
-        self.Show(True)
-        self.setPosition()
 
         self.SetMenuBar(menuBar)
 

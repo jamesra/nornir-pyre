@@ -3,6 +3,7 @@ from .texture_shader import TextureShader
 from .transform_shader import TransformShader
 from .pointset_shader import PointSetShader
 from .controlpointset_shader import ControlPointSetShader
+from .overlay_shader import OverlayShader
 
 __initialized = False
 texture_shader = TextureShader()  # type: TextureShader | None
@@ -10,6 +11,7 @@ color_shader = ColorShader()  # type: ColorShader | None
 transform_shader = TransformShader()  # type: TransformShader | None
 pointset_shader = PointSetShader()  # type: PointSetShader | None
 controlpointset_shader = ControlPointSetShader()  # Type: ControlPointSetShader | None
+overlay_shader = OverlayShader()  # Type: OverlayShader | None
 
 
 def InitializeShaders():
@@ -27,4 +29,5 @@ def InitializeShaders():
         transform_shader.initialize_gl_objects()
         pointset_shader.initialize_gl_objects()
         controlpointset_shader.initialize_gl_objects()
+        overlay_shader.initialize_gl_objects()
         __initialized = True

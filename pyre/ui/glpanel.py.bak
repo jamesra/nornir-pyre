@@ -27,16 +27,26 @@ def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
 debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 
 
-class GLPanel(wx.glcanvas.GLCanvas):
+class GLPanel:
     """A wxPython panel that contains an OpenGL canvas. and a BoxSizer"""
 
     _glinitialized: bool = False
-    # canvas: wx.glcanvas.GLCanvas
+    _canvas: wx.glcanvas.GLCanvas
     sizer = wx.BoxSizer
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
 
     SharedGLContext = None  # type: wx.glcanvas.GLContext
     _glcontextmanager: pyre.state.IGLContextManager
+
+    @property
+    def canvas(self) -> wx.glcanvas.GLCanvas:
+        return self._canvas
+
+    def GetSize(self):
+        return self._canvas.GetSize()
+
+    def Show(self):
+        self._canvas.Show()
 
     def __init__(self,
                  parent: wx.Window,
@@ -52,19 +62,18 @@ class GLPanel(wx.glcanvas.GLCanvas):
         # Forcing a no full repaint to stop flickering
         style = style | wx.NO_FULL_REPAINT_ON_RESIZE
         # call super function
-        disp_attrs = wx.glcanvas.GLAttributes()
-        disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()
-        super(GLPanel, self).__init__(parent=parent, dispAttrs=disp_attrs,
-                                      id=window_id, pos=pos, size=size,
-                                      style=style, **kwargs)
+        # super(GLPanel, self).__init__(parent=parent, id=window_id, pos=pos, size=size, style=style, **kwargs)
 
         # init gl canvas data
+        disp_attrs = wx.glcanvas.GLAttributes()
+        disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()
         # Create context
-        # self.canvas = wx.glcanvas.GLCanvas(self, disp_attrs, -1)
+        self._canvas = wx.glcanvas.GLCanvas(dispAttrs=disp_attrs, parent=parent, id=window_id, pos=pos, size=size,
+                                            style=style, **kwargs)
 
         context_attrs = wx.glcanvas.GLContextAttrs()
         context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
-        context = wx.glcanvas.GLContext(self, GLPanel.SharedGLContext, context_attrs)
+        context = wx.glcanvas.GLContext(self.canvas, GLPanel.SharedGLContext, context_attrs)
         add_listener = False
         if GLPanel.SharedGLContext is None:
             # Install our debug message callback
@@ -72,8 +81,8 @@ class GLPanel(wx.glcanvas.GLCanvas):
             GLPanel.SharedGLContext = context
             add_listener = True
 
-        self.context = context
-        self.SetCurrent(self.context)
+        self.canvas.context = context
+        self.canvas.SetCurrent(self.canvas.context)
 
         if add_listener:
             gl.glDebugMessageCallback(debug_callback_func, None)
@@ -95,10 +104,10 @@ class GLPanel(wx.glcanvas.GLCanvas):
         # self.Layout()
 
         # bind events
-        self.Bind(wx.EVT_ERASE_BACKGROUND, self.processEraseBackgroundEvent)
-        self.Bind(wx.EVT_SIZE, self.processSizeEvent)
-        self.Bind(wx.EVT_SIZING, self.processSizeEvent)
-        self.Bind(wx.EVT_PAINT, self.processPaintEvent)
+        self.canvas.Bind(wx.EVT_ERASE_BACKGROUND, self.processEraseBackgroundEvent)
+        self.canvas.Bind(wx.EVT_SIZE, self.processSizeEvent)
+        self.canvas.Bind(wx.EVT_SIZING, self.processSizeEvent)
+        self.canvas.Bind(wx.EVT_PAINT, self.processPaintEvent)
 
         # self.Bind(wx.EVT_SIZE, self.processSizeEvent)
 
@@ -114,11 +123,11 @@ class GLPanel(wx.glcanvas.GLCanvas):
     # ==========================================================================
     def GetGLExtents(self):
         """Get the extents of the OpenGL canvas."""
-        return self.GetClientSize()
+        return self.canvas.GetClientSize()
 
-    # def SwapBuffers(self):
-    #    """Swap the OpenGL buffers."""
-    #    self.canvas.SwapBuffers()
+    def SwapBuffers(self):
+        """Swap the OpenGL buffers."""
+        self.canvas.SwapBuffers()
 
     # ==========================================================================
     # wxPython Window Handlers
@@ -129,13 +138,14 @@ class GLPanel(wx.glcanvas.GLCanvas):
 
     def processSizeEvent(self, event):
         """Process the resize event."""
-        # Make sure the frame is shown before calling SetCurrent.
-        self.Show()
-        self.SetCurrent(self.context)
-        size = self.GetGLExtents()
-        self.width, self.height = size.width, size.height
-        self.OnReshape(size.width, size.height)
-        self.Refresh(False)
+        if self.canvas is not None:
+            # Make sure the frame is shown before calling SetCurrent.
+            self.Show()
+            self.canvas.SetCurrent(self.canvas.context)
+            size = self.GetGLExtents()
+            self.width, self.height = size.width, size.height
+            self.OnReshape(size.width, size.height)
+            self.canvas.Refresh(False)
 
         event.Skip()
 
@@ -172,10 +182,10 @@ class GLPanel(wx.glcanvas.GLCanvas):
         #         GLPanel.pygletcontext.set_current()
 
         # Set the current context as our context.  This is expected by create_objects
-        self.SetCurrent(self.context)
+        self.canvas.SetCurrent(self.canvas.context)
 
         # Notify the context manager that a new context has been created
-        self._glcontextmanager.add_context(self.context)
+        self._glcontextmanager.add_context(self.canvas.context)
 
         # allow inheritors the chance to create their objects
         # self.create_objects()
@@ -189,18 +199,13 @@ class GLPanel(wx.glcanvas.GLCanvas):
         if width == 0 or height == 0:
             return
 
-        self.SetCurrent(self.context)
+        self.canvas.SetCurrent(self.canvas.context)
         gl.glViewport(0, 0, width, height)
         # self.update_object_resize()
 
     def activate_context(self):
         """Set this widgets GL context as the current context"""
-        self.SetCurrent(self.context)
-
-    def clear(self):
-        gl.glClearDepth(10000.0)
-        gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self.canvas.SetCurrent(self.canvas.context)
 
     def OnDraw(self, *args, **kwargs):
         """Draw the window."""
@@ -212,11 +217,6 @@ class GLPanel(wx.glcanvas.GLCanvas):
             return
 
         self.activate_context()
-
-        # This should be set by OnReshape, but it is not being called for some reason
-        self.width, self.height = self.GetClientSize()
-        extents = self.GetGLExtents()
-        gl.glViewport(0, 0, extents[0], extents[1])
 
         # self.canvas.SetCurrent(GLPanel.SharedGLContext)
         gl.glClearDepth(10000.0)

@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 import pyre
+import logging
 
 
 def screen_to_volume(camera, point):
@@ -42,6 +43,7 @@ class Camera:
 
     @WindowSize.setter
     def WindowSize(self, value: tuple[int, int]):
+        "Sets the size of the window the camera is within"
         # print("Update window size: %d x %d" % (value[1], value[0]))
         self._window_size = np.array(value)
         self._aspect = float(self._window_size[nornir_imageregistration.iPoint.X]) / float(
@@ -117,11 +119,13 @@ class Camera:
 
         return nornir_imageregistration.Rectangle.CreateFromBounds(np.array((bottom, left, top, right)))
 
-    def __init__(self, position: nornir_imageregistration.PointLike, scale=1, angle=0, size=None):
+    def __init__(self, position: nornir_imageregistration.PointLike, scale=1, angle=0, size=None,
+                 log: logging.Logger = logging.getLogger("camera")):
         """
         :param tuple size: Size of the window the camera is within
 
         """
+        self._log = log
         self._lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)  # centered on
         self._angle = 0  # tilt
         self._scale = scale  # zoom
@@ -143,6 +147,11 @@ class Camera:
     def _FireChangeEvent(self):
         for func in self.__OnChangeEventListeners:
             func()
+
+    def translate(self, delta: nornir_imageregistration.PointLike):
+        """translate the camera by the specified amount"""
+        delta = nornir_imageregistration.EnsureArray(delta, float)
+        self.lookat += delta
 
     @property
     def lookat(self) -> NDArray[float]:
@@ -183,6 +192,10 @@ class Camera:
 
         scale = self.scale / 2.0
 
+        if aspect == 0:
+            self._log.warn("No aspect ratio in camera.focus")
+            return
+
         # self._projection = Mat4.orthogonal_projection(
         #     -scale * aspect, scale * aspect, -scale, scale, -255, 255
         # )
@@ -216,10 +229,10 @@ class Camera:
         ty = -(top + bottom) / height
         tz = -(z_far + z_near) / depth
 
-        return np.array(((sx, 0.0, 0.0, 0.0),
-                         (0.0, sy, 0.0, 0.0),
-                         (0.0, 0.0, sz, 0.0),
-                         (tx, ty, tz, 1.0)),
+        return np.array(((sx, 0, 0, tx),
+                         (0, sy, 0, ty),
+                         (0, 0, sz, tz),
+                         (0, 0, 0, 1.0)),
                         dtype=np.float32)
 
     @staticmethod

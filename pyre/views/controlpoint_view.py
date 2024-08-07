@@ -132,6 +132,7 @@ class ControlPointView:
 
     def draw(self, view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float):
         """Draw the points"""
+        gl.glDisable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
         pyre.gl_engine.shaders.controlpointset_shader.draw(view_proj_matrix,
@@ -139,3 +140,4 @@ class ControlPointView:
                                                            self._vao,
                                                            len(self._point_buffer.data),
                                                            tween=tween, scale=scale_factor)
+        gl.glEnable(gl.GL_DEPTH_TEST)

@@ -6,7 +6,7 @@ import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader
+from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader, bind_texture
 from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
@@ -158,8 +158,8 @@ class TransformShader(BaseShader):
             check_for_error()
             vertex_array_object.bind()
 
-            self.bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
-            self.bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
+            bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
+            bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
 
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0
@@ -189,21 +189,3 @@ class TransformShader(BaseShader):
             # gl.glDisableClientState(gl.GL_INDEX_ARRAY)
             # index_buffer.unbind()
             gl.glUseProgram(0)
-
-    def bind_texture(self, texture: int, texture_location: int, gl_texture: int = gl.GL_TEXTURE0):
-        """
-        :param gl_texture_number: gl.GL_TEXTURE0, gl.GL_TEXTURE1, etc
-        :param texture: Texture resource ID
-        :param texture_location: Sampler location ID in the shader
-        :return:
-        """
-        # Set the active texture and bind it
-        gl.glActiveTexture(gl.GL_TEXTURE0)
-        check_for_error()
-        gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
-        check_for_error()
-
-        # Assign the sampler to the texture we just bound
-        offset = gl_texture - gl.GL_TEXTURE0
-        gl.glUniform1i(texture_location, gl.GL_TEXTURE0 + offset)
-        check_for_error()

@@ -51,6 +51,10 @@ class IImageTransformView(ABC):
     def draw(self,
              view_proj: NDArray[np.floating],
              space: Space,
+             client_size: tuple[int, int],
              bounding_box: nornir_imageregistration.Rectangle | None = None):
-        """Draw the image in either source (fixed) or target (warped) space"""
+        """
+        Draw the image in either source (fixed) or target (warped) space
+        :param client_size: Size of the client area in pixels. (height, width)
+        """
         raise NotImplementedError()

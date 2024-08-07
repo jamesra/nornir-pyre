@@ -17,6 +17,16 @@ class CommandBase(ICommand):
     _active: bool = False
 
     @property
+    def width(self) -> int:
+        """Width of the window command is active in, in pixels"""
+        return self._width
+
+    @property
+    def height(self) -> int:
+        """Height of the window command is active in, in pixels"""
+        return self._height
+
+    @property
     def active(self) -> bool:
         return self._active
 
@@ -34,13 +44,11 @@ class CommandBase(ICommand):
 
     @abc.abstractmethod
     def subscribe_to_parent(self):
-        raise NotImplemented(
-            "All commands should implement subscribe_to_parent which binds to events on the parent window")
+        raise NotImplementedError()
 
     @abc.abstractmethod
     def unsubscribe_to_parent(self):
-        raise NotImplemented(
-            "All commands should implement unsubscribe_to_parent which executes when the command is completed")
+        raise NotImplementedError()
 
     def __init__(self,
                  parent: wx.Window,
@@ -50,11 +58,14 @@ class CommandBase(ICommand):
         :param func completed_func: Function to call when command has completed
         """
         self._parent = parent
+        self._width, self._height = parent.GetSize()
         self._command_completed_callbacks = list()
         if completed_func is not None:
             self._command_completed_callbacks.append(completed_func)
 
-        self._bind_mouse_events()
+    def on_resize(self, event: wx.SizeEvent):
+        """Resize our window the command is active within"""
+        self._width, self._height = event.GetSize()
 
     def activate(self):
         self.subscribe_to_parent()
@@ -62,6 +73,12 @@ class CommandBase(ICommand):
 
     def add_completed_callback(self, callback: CompletionCallback):
         self._command_completed_callbacks.append(callback)
+
+    def _bind_resize_event(self):
+        self._parent.Bind(wx.EVT_SIZE, self.on_resize)
+
+    def _unbind_resize_event(self):
+        self._parent.Unbind(wx.EVT_SIZE, self.on_resize)
 
     def _bind_mouse_events(self):
         self._parent.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
