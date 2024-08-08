@@ -303,9 +303,9 @@ class CompositeTransformView(IImageTransformView):
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
             # OK, we have two textures with the rendered+transformed images of source and target images.
             # Inject textures into an overlay renderer and blend the images
-            ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
-                                                                           -1, 1,
-                                                                           -1, 1)
+            # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
+            #                                                                -1, 1,
+            #                                                                -1, 1)
 
             ortho_projection = np.identity(4)
             ortho_projection[0, 0] = 2.0

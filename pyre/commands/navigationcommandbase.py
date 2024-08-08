@@ -54,7 +54,7 @@ class NavigationCommandBase(CommandBase):
         self._last_mouse_position = None
         super(NavigationCommandBase, self).__init__(parent=parent,
                                                     completed_func=completed_func)
- 
+
     def GetCorrectedMousePosition(self, e: wx.MouseEvent, height: int) -> tuple[float, float]:
         """wxPython inverts the mouse position, flip it back"""
         (x, y) = e.GetPosition()
@@ -62,7 +62,7 @@ class NavigationCommandBase(CommandBase):
 
     def on_mouse_motion(self, event: wx.MouseEvent):
         """Called when the mouse moves"""
-        width, height = self.parent.GetSize()
+        width, height = self.parent.GetClientSize()
         (y, x) = self.GetCorrectedMousePosition(event, height)
 
         if self._last_mouse_position is None:
@@ -128,8 +128,13 @@ class NavigationCommandBase(CommandBase):
 
             # print "Angle: " + str(angle)
             try:
-                self._transform_controller.Rotate(rangle, np.array(
-                    pyre.state.currentStosConfig.WarpedImageViewModel.Image.shape) / 2.0)
+                width, height = self.parent.GetClientSize()
+
+                area = np.array([height, width])
+                center = area / 2.0
+                world_center = self.camera.ImageCoordsForMouse(center[0], center[1])
+
+                self._transform_controller.Rotate(rangle, world_center)
             except NotImplementedError:
                 print("Current transform does not support rotation")
                 pass
@@ -291,83 +296,84 @@ class DefaultImageTransformCommand(NavigationCommandBase):
     def on_mouse_release(self, event):
         return
 
-    class TranslatePointSelectionCommand(NavigationCommandBase):
-        """This command takes a selection of control points and adjusts the position"""
 
-        _selected_points: list[int]  # The indices of the selected points
-        _space: Space
+class TranslatePointSelectionCommand(NavigationCommandBase):
+    """This command takes a selection of control points and adjusts the position"""
 
-        def __init__(self,
-                     parent: wx.Window,
-                     status_bar: CameraStatusBar,
-                     transform_controller: pyre.viewmodels.TransformController,
-                     camera: pyre.ui.Camera,
-                     bounds: nornir_imageregistration.Rectangle,
-                     selected_points: list[int],  # The indices of the selected points
-                     space: Space,  # Space we are moving the points in, source or target side
-                     completed_func: CompletionCallback = None):
-            super().__init__(parent, status_bar, transform_controller, camera, bounds, completed_func)
-            self._selected_points = selected_points
+    _selected_points: list[int]  # The indices of the selected points
+    _space: Space
 
-        def on_mouse_press(self, event: wx.MouseEvent):
-            """Called when the mouse is pressed"""
-            pass
+    def __init__(self,
+                 parent: wx.Window,
+                 status_bar: CameraStatusBar,
+                 transform_controller: pyre.viewmodels.TransformController,
+                 camera: pyre.ui.Camera,
+                 bounds: nornir_imageregistration.Rectangle,
+                 selected_points: list[int],  # The indices of the selected points
+                 space: Space,  # Space we are moving the points in, source or target side
+                 completed_func: CompletionCallback = None):
+        super().__init__(parent, status_bar, transform_controller, camera, bounds, completed_func)
+        self._selected_points = selected_points
 
-        def on_mouse_release(self, event: wx.MouseEvent):
-            """Called when the mouse is released"""
-            self.execute()
+    def on_mouse_press(self, event: wx.MouseEvent):
+        """Called when the mouse is pressed"""
+        pass
 
-        def on_key_down(self, event: wx.KeyEvent):
-            """Called when a key is pressed"""
-            keycode = event.GetKeyCode()
+    def on_mouse_release(self, event: wx.MouseEvent):
+        """Called when the mouse is released"""
+        self.execute()
 
-            if (keycode == wx.WXK_LEFT or
-                keycode == wx.WXK_RIGHT or
-                keycode == wx.WXK_UP or
-                keycode == wx.WXK_DOWN) and self.HighlightedPointIndex is not None:
+    def on_key_down(self, event: wx.KeyEvent):
+        """Called when a key is pressed"""
+        keycode = event.GetKeyCode()
 
-                # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
-                multiplier = 1
+        if (keycode == wx.WXK_LEFT or
+            keycode == wx.WXK_RIGHT or
+            keycode == wx.WXK_UP or
+            keycode == wx.WXK_DOWN) and self.HighlightedPointIndex is not None:
+
+            # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
+            multiplier = 1
+            print(str(multiplier))
+            if event.ShiftDown():
+                multiplier *= 5
                 print(str(multiplier))
-                if event.ShiftDown():
-                    multiplier *= 5
-                    print(str(multiplier))
-                if event.ControlDown():
-                    multiplier *= 25
-                    print(str(multiplier))
+            if event.ControlDown():
+                multiplier *= 25
+                print(str(multiplier))
 
-                delta = [0, 0]
-                if keycode == wx.WXK_LEFT:
-                    delta = [0, -1]
-                elif keycode == wx.WXK_RIGHT:
-                    delta = [0, 1]
-                elif keycode == wx.WXK_UP:
-                    delta = [1, 0]
-                elif keycode == wx.WXK_DOWN:
-                    delta = [-1, 0]
+            delta = [0, 0]
+            if keycode == wx.WXK_LEFT:
+                delta = [0, -1]
+            elif keycode == wx.WXK_RIGHT:
+                delta = [0, 1]
+            elif keycode == wx.WXK_UP:
+                delta = [1, 0]
+            elif keycode == wx.WXK_DOWN:
+                delta = [-1, 0]
 
-                delta[0] *= multiplier
-                delta[1] *= multiplier
+            delta[0] *= multiplier
+            delta[1] *= multiplier
 
-                self._transform_controller.MovePoint(self._selected_points, delta[1], delta[0],
-                                                     space=self._space)
-            elif keycode == wx.WXK_SPACE:
+            self._transform_controller.MovePoint(self._selected_points, delta[1], delta[0],
+                                                 space=self._space)
+        elif keycode == wx.WXK_SPACE:
 
-                # If SHIFT is held down, align everything.  Otherwise align the selected point
-                if not event.ShiftDown() and self._selected_points is not None:
-                    self._selected_points = self._transform_controller.AutoAlignPoints(self._selected_points)
+            # If SHIFT is held down, align everything.  Otherwise align the selected point
+            if not event.ShiftDown() and self._selected_points is not None:
+                self._selected_points = self._transform_controller.AutoAlignPoints(self._selected_points)
 
-                elif event.ShiftDown():
-                    self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
+            elif event.ShiftDown():
+                self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
 
-                pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
+            pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
 
-            return
+        return
 
-        def on_mouse_scroll(self, event: wx.MouseEvent):
-            """Called when the mouse wheel is scrolled"""
-            pass
+    def on_mouse_scroll(self, event: wx.MouseEvent):
+        """Called when the mouse wheel is scrolled"""
+        pass
 
-        def on_mouse_drag(self, event: wx.MouseEvent):
-            """Called when the mouse is dragged"""
-            pass
+    def on_mouse_drag(self, event: wx.MouseEvent):
+        """Called when the mouse is dragged"""
+        pass
