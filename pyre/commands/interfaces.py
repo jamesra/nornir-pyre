@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import abc
+import dataclasses
+import numpy as np
+from numpy.typing import NDArray
 from typing import Callable
+import enum
+
+from nornir_imageregistration import PointLike
 
 
 class ICommand(abc.ABC):
@@ -48,3 +54,40 @@ class ICommand(abc.ABC):
 # A callback function when the command is complete. The first parameter is the command that completed,
 # use the executed attribute to determine if the command executed or canceled
 CompletionCallback = Callable[[ICommand], None]
+
+
+class SelectionEvent(enum.Enum):
+    """Events that can trigger a selection"""
+    Press = 1
+    Release = 2
+    Drag = 3
+
+
+class InputType(enum.Enum):
+    """Type of input"""
+    Mouse = 1
+    Touch = 2
+    Pen = 3
+    Keyboard = 4
+
+
+@dataclasses.dataclass
+class SelectionEventData:
+    """Describes an input event"""
+    type: InputType
+    event: SelectionEvent
+    world_positon: NDArray[np.floating]
+
+
+class IRegion(abc.ABC):
+    """Interface to an object that can start commands for an interactable region"""
+
+    def HasInteraction(self, world_position: PointLike) -> float:
+        """True if the point is within the region
+        :return A float indicating distance to the point if the object feels the point should trigger an interaction.
+        """
+        raise NotImplementedError()
+
+    def GetInteractiveCommandForPosition(self, event: SelectionEventData) -> ICommand | None:
+        """Return the command to execute for the given position"""
+        raise NotImplementedError()

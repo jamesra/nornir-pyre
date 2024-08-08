@@ -30,24 +30,6 @@ full_screen_indices = np.array([
     2, 3, 0  # Second triangle
 ], dtype=np.uint32)
 
-_overlay_vertex_shader_direct_program = """
-        #version 450
-        out vec2 frag_texture_coordinate;
-        void main(){
-            float x = float(((uint(gl_VertexID) + 2u) / 3u)%2u); 
-            float y = float(((uint(gl_VertexID) + 1u) / 3u)%2u); 
-
-            gl_Position = vec4(-1.0f + x*2.0f, -1.0f+y*2.0f, 0.0f, 1.0f);
-            frag_texture_coordinate = vec2(x, y);
-    }"""
-
-_overlay_vertex_shader_direct_program_two = """
-        #version 450
-        out vec2 frag_texture_coordinate;
-        void main(){  
-            frag_texture_coordinate = gl_FragCoord.xy / framebufferSize.xy;
-    }"""
-
 _overlay_vertex_shader_program = """
         #version 450
         uniform mat4 model_view_projection_matrix; //Should be identity matrix to render 1:1 from an Frame Buffer Object texture directly back to same coordinates on a back buffer
@@ -225,8 +207,6 @@ class OverlayShader(BaseShader):
             bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
             bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
 
-            # tween = math.floor(time.time() % 2)
-            # tween = (time.time() % 15) / 15.0
             gl.glUniform4fv(self.source_channel_blend_location, 1, source_channel_mix.astype(np.float32, copy=False))
             check_for_error()
             gl.glUniform4fv(self.target_channel_blend_location, 1, target_channel_mix.astype(np.float32, copy=False))
@@ -235,9 +215,6 @@ class OverlayShader(BaseShader):
                                   model_view_proj_matrix.astype(np.float32, copy=False))
             check_for_error()
 
-            # status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
-            # if status != gl.GL_FRAMEBUFFER_COMPLETE:
-            #    print("Framebuffer is not complete")
             if self._vao.num_elements == 0:
                 warnings.warn("No elements to draw")
             gl.glDrawElements(gl.GL_TRIANGLES, self._vao.num_elements, gl.GL_UNSIGNED_SHORT, None)
@@ -245,12 +222,4 @@ class OverlayShader(BaseShader):
         finally:
             check_for_error()
             self._vao.unbind()
-            # gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
-            # gl.glDisableVertexAttribArray(self.source_pos_location)
-            # gl.glDisableVertexAttribArray(self.target_pos_location)
-            # gl.glDisableVertexAttribArray(self.texture_coord_location)
-            # #vertex_buffer.unbind()
-            #
-            # gl.glDisableClientState(gl.GL_INDEX_ARRAY)
-            # index_buffer.unbind()
             gl.glUseProgram(0)
