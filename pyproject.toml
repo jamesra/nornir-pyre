@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = 'setuptools.build_meta'
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nornir-pyre"]
+
+[project]
+name = "pyre"
+version = "1.5.1"
+authors = [
+    { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
+]
+description = "A helper library that wraps python threads, multiprocessing, a process pool for shell commands, and parallel python with the same interface"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "six >= 1.16",
+    "numpy >= 1.26",
+    "matplotlib >= 3.8",
+    "nornir_pools>=1.5.1",
+    "nornir_shared>=1.5.1",
+    "nornir_imageregistration>=1.5.1",
+    "PyOpenGL>=3.0",
+    "pillow>=2.3",
+    "wxPython>=4.0",
+    "nornir_shared>=1.5.1",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+test = ["nose"]
+gl = [""]
+
+
+[project.urls]
+Homepage = "https://github.com/jamesra/nornir-pyre"
+Issues = "https://github.com/jamesra/nornir-pyre/issues"
