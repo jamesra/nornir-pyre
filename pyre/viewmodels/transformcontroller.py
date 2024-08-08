@@ -12,6 +12,7 @@ from typing import Sequence, Callable
 import numpy
 import numpy as np
 from numpy.typing import NDArray
+import wx
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms.base import IControlPoints
@@ -179,7 +180,10 @@ class TransformController:
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
         #        Pool = pools.GetGlobalThreadPool()
         # tlist = list()
-        self.__OnChangeEventListeners.invoke(self)
+        if wx.App.Get() is None:
+            self.__OnChangeEventListeners.invoke(self)
+        else:
+            wx.CallAfter(self.__OnChangeEventListeners.invoke, self)
         #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
 
         # for task in tlist:
