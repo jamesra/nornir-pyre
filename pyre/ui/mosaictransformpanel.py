@@ -84,7 +84,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.glcanvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
 
     def AddStatusBar(self):
-        self.statusBar = pyre.ui.camerastatusbar.CameraStatusBar(self, self.camera)
+        self.statusBar = pyre.ui.camerastatusbar.CameraStatusBar(self,
+                                                                 self.camera,
+                                                                 self.glcanvas)
         self.sizer.Add(self.statusBar, flag=wx.BOTTOM | wx.EXPAND)
 
     def center_camera(self):
@@ -153,8 +155,8 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if ImageX is None:
             return
 
-        ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
-        ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
+        ImageDX = (float(dx) / self.width) * self.camera.visible_world_width
+        ImageDY = (float(dy) / self.height) * self.camera.visible_world_height
 
         if e.RightIsDown():
             self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)

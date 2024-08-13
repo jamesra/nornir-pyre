@@ -37,7 +37,7 @@ class StosWindow(PyreWindowBase):
 
     @property
     def Composite(self) -> bool:
-        return self.space == Space.Composite
+        return self._view_type == ViewType.Composite
 
     def lookatfixedpoint(self, point, scale):
         self.imagepanel.lookatfixedpoint(point, scale)
@@ -56,7 +56,7 @@ class StosWindow(PyreWindowBase):
                                          window_manager=config.window_manager)
         self._config = config
         # self.imagepanel = wx.Panel(self, -1)
-        self._space = Space.Source if view_type == ViewType.Source else Space.Target if view_type == ViewType.Target else Space.Composite
+        self._space = Space.Source if view_type == ViewType.Source else Space.Target
         self._view_type = view_type
 
         self.FixedImageFullPath = None

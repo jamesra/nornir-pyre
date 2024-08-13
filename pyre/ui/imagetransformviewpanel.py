@@ -160,6 +160,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.DebugTickCounter = 0
         self.timer.Start(100)
 
+        self.statusbar.space = self.space
+
         config.imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
         wx.CallAfter(self.create_objects)
@@ -169,7 +171,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if len(self._command_queue) == 0:
             bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.width, self.height))
             self._command = DefaultImageTransformCommand(parent=self.glcanvas,
-                                                         status_bar=self.statusbar,
                                                          completed_func=None,
                                                          camera=self.camera,
                                                          bounds=bounds,
@@ -203,17 +204,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
         """Process an add event from the imageviewmodel manager"""
         # self._image_transform_view.image_view_model = image
-        if self.config.view_type == pyre.state.ViewType.Composite: 
+        if self.config.view_type == pyre.state.ViewType.Composite:
             if self._image_transform_view is None:
                 print('\tAdding CompositeTransformView')
                 self._image_transform_view = CompositeTransformView(display_space=Space.Target,
-                                                                activate_context=self.glcanvas.activate_context,
-                                                                image_viewmodel_manager=self.config.imageviewmodel_manager,
-                                                                source_image_name=pyre.state.ViewType.Source,
-                                                                target_image_name=pyre.state.ViewType.Target,
-                                                                transform_controller=self._config.transform_controller)
+                                                                    activate_context=self.glcanvas.activate_context,
+                                                                    image_viewmodel_manager=self.config.imageviewmodel_manager,
+                                                                    source_image_name=pyre.state.ViewType.Source,
+                                                                    target_image_name=pyre.state.ViewType.Target,
+                                                                    transform_controller=self._config.transform_controller)
             else:
-                #The CompositeTransformView should exist and be subscribed so this ViewModel should be added by the View
+                # The CompositeTransformView should exist and be subscribed so this ViewModel should be added by the View
                 pass
         else:
             print(f'\tAdding ImageTransformView {name} in space {self.space.value}')
@@ -260,7 +261,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         #        DebugStr = '%d' % self.DebugTickCounter
         #        DebugStr = DebugStr + '\b' * len(DebugStr)
         #        print DebugStr
-        #print(f'{self.config.view_type}')
+        # print(f'{self.config.view_type}')
         self.DebugTickCounter += 1
         self.glcanvas.Refresh()
         return
@@ -535,8 +536,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     #     if ImageX is None:
     #         return
     #
-    #     ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
-    #     ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
+    #     ImageDX = (float(dx) / self.width) * self.camera.visible_world_width
+    #     ImageDY = (float(dy) / self.height) * self.camera.visible_world_height
     #
     #     if e.RightIsDown():
     #         self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)

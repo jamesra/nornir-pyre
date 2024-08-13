@@ -111,6 +111,8 @@ def Run():
 
     gl_context_manager = pyre.state.GLContextManager()
 
+    mouse_position_history_manager = pyre.state.MousePositionHistoryManager()
+
     # Initialize shaders when a context is created
     gl_context_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders())
     gl_context_manager.add_glcontext_added_event_listener(
@@ -147,7 +149,8 @@ def Run():
                                                      transformglbuffer_manager=transform_glbuffermanager,
                                                      imageviewmodel_manager=imageviewmodel_manager,
                                                      window_manager=window_manager,
-                                                     image_loader=image_loader)
+                                                     image_loader=image_loader,
+                                                     mouse_position_history_manager=mouse_position_history_manager)
 
     readmetxt = resource_paths.README()
     print(readmetxt)

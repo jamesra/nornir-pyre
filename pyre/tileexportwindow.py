@@ -74,8 +74,10 @@ class TileExportWindow(window.Window):
         return rawData
 
     def ImageCoordsForMouse(self, x, y):
-        ImageX = ((float(x) / self.width) * self.camera.ViewWidth) + (self.camera.x - (self.camera.ViewWidth / 2))
-        ImageY = ((float(y) / self.height) * self.camera.ViewHeight) + (self.camera.y - (self.camera.ViewHeight / 2))
+        ImageX = ((float(x) / self.width) * self.camera.visible_world_width) + (
+                    self.camera.x - (self.camera.visible_world_width / 2))
+        ImageY = ((float(y) / self.height) * self.camera.visible_world_height) + (
+                    self.camera.y - (self.camera.visible_world_height / 2))
         return ImageX, ImageY
 
     def VisibleImageBoundingBox(self):

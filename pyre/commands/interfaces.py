@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typing import Callable
 import enum
+from pyre.ui.camera import Camera
 
 from nornir_imageregistration import PointLike
 
@@ -73,21 +74,9 @@ class InputType(enum.Enum):
 
 @dataclasses.dataclass
 class SelectionEventData:
-    """Describes an input event"""
+    """Describes an input event that triggers a selection"""
+
+    camera: Camera  # Describes the camera state at the time of the event
     type: InputType
     event: SelectionEvent
-    world_positon: NDArray[np.floating]
-
-
-class IRegion(abc.ABC):
-    """Interface to an object that can start commands for an interactable region"""
-
-    def HasInteraction(self, world_position: PointLike) -> float:
-        """True if the point is within the region
-        :return A float indicating distance to the point if the object feels the point should trigger an interaction.
-        """
-        raise NotImplementedError()
-
-    def GetInteractiveCommandForPosition(self, event: SelectionEventData) -> ICommand | None:
-        """Return the command to execute for the given position"""
-        raise NotImplementedError()
+    world_position: NDArray[np.floating]  # The world position of the event

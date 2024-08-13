@@ -1,5 +1,5 @@
 from pyre.wxevents import (wxGLContextCreatedEvent)
-from .camera import Camera, screen_to_volume
+from .camera import Camera, screen_to_volume, IReadOnlyCamera
 from .camerastatusbar import CameraStatusBar
 from .glpanel import GLPanel
 from .imagetransformviewpanel import ImageTransformViewPanel, ImageTransformPanelConfig
@@ -10,4 +10,4 @@ from . import windows
 
 __all__ = ['Camera', 'screen_to_volume', 'CameraStatusBar',
            'GLPanel', 'ImageTransformViewPanel', 'MosaicTransformPanel',
-           'GridTransformSettingsDialog', 'wxGLContextCreatedEvent']
+           'GridTransformSettingsDialog', 'wxGLContextCreatedEvent', 'IReadOnlyCamera']

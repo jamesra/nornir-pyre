@@ -13,6 +13,7 @@ import pyre
 from pyre.viewmodels import ImageViewModel, TransformController
 from pyre.state.events import StateEventsImpl, ImageChangedCallback, TransformControllerChangedCallback
 from .interfaces import IImageLoader
+from pyre.state import IMousePositionHistoryManager
 
 from pyre.state.gl_context_manager import IGLContextManager
 from .transformcontroller_glbuffer_manager import ITransformControllerGLBufferManager
@@ -30,6 +31,7 @@ class StosWindowConfig:
     imageviewmodel_manager: IImageViewModelManager
     window_manager: IWindowManager
     image_loader: IImageLoader
+    mouse_position_history_manager: IMousePositionHistoryManager
 
 
 def LoadImage(imageFullPath: str) -> ImageViewModel | None:

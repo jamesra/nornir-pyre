@@ -5,6 +5,8 @@ Created on Oct 17, 2012
 """
 
 import math
+import abc
+from typing import Callable
 
 import nornir_imageregistration
 import numpy as np
@@ -18,7 +20,79 @@ def screen_to_volume(camera, point):
     camera.ImageCoordsForMouse(point)
 
 
-class Camera:
+class IReadOnlyCamera(abc.ABC):
+    """Readinly interface to a generic camera"""
+
+    @property
+    @abc.abstractmethod
+    def x(self) -> float:
+        """Position in volume space"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def y(self) -> float:
+        """Position in volume space"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def window_size(self) -> tuple[int, int]:
+        """Size of the window camera is within"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def visible_world_size(self):
+        return self._view_size
+
+    @property
+    @abc.abstractmethod
+    def visible_world_width(self) -> float:
+        """Visible volume width"""
+        return float(self._view_size[nornir_imageregistration.iPoint.X])
+
+    @property
+    @abc.abstractmethod
+    def visible_world_height(self) -> float:
+        """Visible volume height"""
+        return float(self._view_size[nornir_imageregistration.iPoint.Y])
+
+    @property
+    @abc.abstractmethod
+    def aspect(self) -> float:
+        """aspect ration of the window"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def scale(self) -> float:
+        """Scale (zoom) factor of the camera"""
+        raise NotImplementedError()
+
+    def AddOnChangeEventListener(self, func):
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def projection(self) -> NDArray[np.floating]:
+        """projection matrix"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def view(self) -> NDArray[np.floating]:
+        """View matrix"""
+        raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def view_proj(self) -> NDArray[np.floating]:
+        """View projection matrix"""
+        raise NotImplementedError()
+
+
+class Camera(IReadOnlyCamera):
     """
     classdocs
     """
@@ -26,70 +100,69 @@ class Camera:
     _projection: NDArray[np.floating]
     _view: NDArray[np.floating]
     _view_proj: NDArray[np.floating]
+    __on_change_event_listeners: list[Callable[[], None]]
+    _angle: float
+    _scale: float
+    _lookat: NDArray[float]
+    _log: logging.Logger
+    _window_size: NDArray[int]
 
     @property
     def x(self) -> float:
         """Position in volume space"""
-        return self._lookat[nornir_imageregistration.iPoint.X]
+        return float(self._lookat[nornir_imageregistration.iPoint.X])
 
     @property
     def y(self) -> float:
         """Position in volume space"""
-        return self._lookat[nornir_imageregistration.iPoint.Y]
+        return float(self._lookat[nornir_imageregistration.iPoint.Y])
 
     @property
-    def WindowSize(self) -> tuple[int, int]:
+    def window_size(self) -> tuple[int, int]:
         return self._window_size
 
-    @WindowSize.setter
+    @window_size.setter
     def WindowSize(self, value: tuple[int, int]):
         "Sets the size of the window the camera is within"
         # print("Update window size: %d x %d" % (value[1], value[0]))
         self._window_size = np.array(value)
         self._aspect = float(self._window_size[nornir_imageregistration.iPoint.X]) / float(
             self._window_size[nornir_imageregistration.iPoint.Y])
-        self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
+        self._view_size = Camera._calc_view_size(self.scale, self.aspect)
 
     @property
-    def Aspect(self) -> float:
+    def aspect(self) -> float:
         return self._aspect
 
     @property
     def WindowWidth(self) -> int:
-        return self._window_size[nornir_imageregistration.iPoint.X]
+        return int(self._window_size[nornir_imageregistration.iPoint.X])
 
     @property
     def WindowHeight(self) -> int:
-        return self._window_size[nornir_imageregistration.iPoint.Y]
-
-    @property
-    def VisibleImageWidth(self) -> float:
-        return self._window_size[nornir_imageregistration.iPoint.X] * self.scale
-
-    @property
-    def VisibleImageHeight(self) -> float:
-        return self._window_size[nornir_imageregistration.iPoint.Y] * self.scale
+        return int(self._window_size[nornir_imageregistration.iPoint.Y])
 
     @classmethod
-    def _Calc_ViewSize(cls, scale: float, aspect: float):
+    def _calc_view_size(cls, scale: float, aspect: float):
         return np.array((scale, aspect * scale))
 
     @property
-    def ViewSize(self):
+    def visible_world_size(self):
         return self._view_size
 
     @property
-    def ViewWidth(self) -> float:
+    def visible_world_width(self) -> float:
         """Visible volume width"""
-        return self._view_size[nornir_imageregistration.iPoint.X]
+        return float(self._view_size[nornir_imageregistration.iPoint.X])
 
     @property
-    def ViewHeight(self) -> float:
+    def visible_world_height(self) -> float:
         """Visible volume height"""
-        return self._view_size[nornir_imageregistration.iPoint.Y]
+        return float(self._view_size[nornir_imageregistration.iPoint.Y])
 
     @property
     def angle(self) -> float:
+        """Angle of rotation in radians"""
         return self._angle
 
     @angle.setter
@@ -104,12 +177,14 @@ class Camera:
     @scale.setter
     def scale(self, value: float):
         self._scale = float(value)
-        self._view_size = Camera._Calc_ViewSize(self.scale, self.Aspect)
+        self._view_size = Camera._calc_view_size(self.scale, self.aspect)
         self._FireChangeEvent()
 
     def ImageCoordsForMouse(self, y: float, x: float) -> tuple[float, float]:
-        image_x = ((float(x) / self.WindowWidth) * self.ViewWidth) + (self.x - (self.ViewWidth / 2.0))
-        image_y = ((float(y) / self.WindowHeight) * self.ViewHeight) + (self.y - (self.ViewHeight / 2.0))
+        image_x = ((float(x) / self.WindowWidth) * self.visible_world_width) + (
+                    self.x - (self.visible_world_width / 2.0))
+        image_y = ((float(y) / self.WindowHeight) * self.visible_world_height) + (
+                    self.y - (self.visible_world_height / 2.0))
         return image_y, image_x
 
     @property
@@ -137,10 +212,10 @@ class Camera:
         else:
             self.WindowSize = np.array(size)
 
-    def AddOnChangeEventListener(self, func):
+    def AddOnChangeEventListener(self, func: Callable[[], None]):
         self.__OnChangeEventListeners.append(func)
 
-    def RemoveOnChangeEventListener(self, func):
+    def RemoveOnChangeEventListener(self, func: Callable[[], None]):
         if func in self.__OnChangeEventListeners:
             self.__OnChangeEventListeners.remove(func)
 
@@ -188,7 +263,7 @@ class Camera:
 
         self.WindowSize = (win_height, win_width)
 
-        aspect = self.Aspect
+        aspect = self.aspect
 
         scale = self.scale / 2.0
 

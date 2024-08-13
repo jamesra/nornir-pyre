@@ -96,10 +96,13 @@ class RectangleCommand(command_base.VolumeCommandBase):
         :param obj e: wx mouse move object
         :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL        
         '''
-        self._update_last_mouse_position(e)
-        print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
-                                 self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
-        self.parent.Refresh()
+        try:
+            self._update_last_mouse_position(e)
+            print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
+                                     self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
+            self.parent.Refresh()
+        finally:
+            e.Skip()
         pass
 
     def on_mouse_release(self, e):

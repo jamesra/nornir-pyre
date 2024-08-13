@@ -111,7 +111,7 @@ class ImageTransformPanelBase:
         pass
 
     def AddStatusBar(self):
-        self._statusbar = CameraStatusBar(self._parent, self.camera)
+        self._statusbar = CameraStatusBar(self._parent, self.camera, self.glcanvas)
         self.sizer.Add(self._statusbar, flag=wx.BOTTOM | wx.EXPAND)
         self._statusbar.SetFieldsCount(3)
 

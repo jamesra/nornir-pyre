@@ -23,6 +23,7 @@ dependencies = [
     "nornir_pools>=1.5.1",
     "nornir_shared>=1.5.1",
     "nornir_imageregistration>=1.5.1",
+    "rtree>=1.3",
     "PyOpenGL>=3.0",
     "pillow>=2.3",
     "wxPython>=4.0",
@@ -42,3 +43,6 @@ gl = [""]
 [project.urls]
 Homepage = "https://github.com/jamesra/nornir-pyre"
 Issues = "https://github.com/jamesra/nornir-pyre/issues"
+
+[project.scripts]
+start-pyre = "scripts/start_pyre.py"

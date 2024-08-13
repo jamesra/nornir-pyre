@@ -1,5 +1,6 @@
 import os
 from .interfaces import IImageManager, IImageViewModelManager
+from .mousepositionhistorymanager import MousePositionHistoryManager, IMousePositionHistoryManager
 from .action import Action
 from .viewtype import ViewType
 from .gl_context_manager import GLContextManager, IGLContextManager
@@ -15,6 +16,7 @@ from .window_manager import IWindowManager, WindowManager
 from .image_manager import ImageManager
 from .gl_context_manager import GLContextManager, IGLContextManager
 from .image_viewmodel_manager import ImageViewModelManager
+from .roi_manager import RegionManager, IRegionManager, IRegion
 
 # The global gl_context_manager
 

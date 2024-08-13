@@ -42,16 +42,16 @@ class CameraCommand(command_base.VolumeCommandBase):
             pass
 
         if symbol == 'a':  # "A" Character
-            ImageDX = 0.1 * self.camera.ViewWidth
+            ImageDX = 0.1 * self.camera.visible_world_width
             self.camera.x = self.camera.x + ImageDX
         elif symbol == 'd':  # "D" Character
-            ImageDX = -0.1 * self.camera.ViewWidth
+            ImageDX = -0.1 * self.camera.visible_world_width
             self.camera.x = self.camera.x + ImageDX
         elif symbol == 'w':  # "W" Character
-            ImageDY = -0.1 * self.camera.ViewHeight
+            ImageDY = -0.1 * self.camera.visible_world_height
             self.camera.y = self.camera.y + ImageDY
         elif symbol == 's':  # "S" Character
-            ImageDY = 0.1 * self.camera.ViewHeight
+            ImageDY = 0.1 * self.camera.visible_world_height
             self.camera.y = self.camera.y + ImageDY
         elif keycode == wx.WXK_PAGEUP:
             self.camera.scale = self.scale * 0.9
@@ -88,25 +88,28 @@ class CameraCommand(command_base.VolumeCommandBase):
             self.statusBar.update_status_bar(self.LastMousePosition)
 
     def on_mouse_drag(self, e):
+        try:
+            (y, x) = self.GetCorrectedMousePosition(e)
 
-        (y, x) = self.GetCorrectedMousePosition(e)
+            if self.LastMousePosition is None:
+                self.LastMousePosition = (y, x)
+                return
 
-        if self.LastMousePosition is None:
+            dx = x - self.LastMousePosition[nornir_imageregistration.iPoint.X]
+            dy = (y - self.LastMousePosition[nornir_imageregistration.iPoint.Y])
+
             self.LastMousePosition = (y, x)
-            return
 
-        dx = x - self.LastMousePosition[nornir_imageregistration.iPoint.X]
-        dy = (y - self.LastMousePosition[nornir_imageregistration.iPoint.Y])
+            ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
+            if ImageX is None:
+                return
 
-        self.LastMousePosition = (y, x)
+            ImageDX = (float(dx) / self.width) * self.camera.visible_world_width
+            ImageDY = (float(dy) / self.height) * self.camera.visible_world_height
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
-        if ImageX is None:
-            return
-
-        ImageDX = (float(dx) / self.width) * self.camera.ViewWidth
-        ImageDY = (float(dy) / self.height) * self.camera.ViewHeight
-
-        if e.RightIsDown():
-            self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
-            self.statusBar.update_status_bar(self.LastMousePosition)
+            if e.RightIsDown():
+                self.camera.lookat((self.camera.y - ImageDY, self.camera.x - ImageDX))
+                self.statusBar.update_status_bar(self.LastMousePosition)
+        finally:
+            # We always skip the event in case others care about mouse motion
+            e.Skip()
