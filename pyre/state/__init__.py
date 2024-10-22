@@ -1,22 +1,18 @@
 import os
-from .interfaces import IImageManager, IImageViewModelManager
-from .mousepositionhistorymanager import MousePositionHistoryManager, IMousePositionHistoryManager
-from .action import Action
-from .viewtype import ViewType
-from .gl_context_manager import GLContextManager, IGLContextManager
-from .transformcontroller_glbuffer_manager import BufferType, TransformControllerGLBufferManager, \
-    ITransformControllerGLBufferManager, GLBufferCollection
 
-from .viewtype import ViewType
-from .stos import StosState, StosWindowConfig
-from .imageloader import ImageLoader
-from .mosaic import MosaicState
+from dependency_injector.wiring import Provide, inject
+
+from pyre.state.managers.image_manager import ImageManager
+from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
+from pyre.state.managers.transformcontroller_glbuffer_manager import TransformControllerGLBufferManager
 from .events import *
-from .window_manager import IWindowManager, WindowManager
-from .image_manager import ImageManager
-from .gl_context_manager import GLContextManager, IGLContextManager
-from .image_viewmodel_manager import ImageViewModelManager
-from .roi_manager import RegionManager, IRegionManager, IRegion
+from .imageloader import ImageLoader
+from .managers import *
+from .mosaic import MosaicState
+from .stos import StosState, StosWindowConfig
+from pyre.interfaces.viewtype import ViewType
+from ..container import IContainer
+import pyre.interfaces.managers
 
 # The global gl_context_manager
 
@@ -33,11 +29,16 @@ def init():
     currentMosaicConfig = MosaicState()
 
 
-def InitializeStateFromArguments(image_loader: ImageLoader, arg_values):
+@inject
+def InitializeStateFromArguments(stos_transform_controller: TransformController,
+                                 arg_values,
+                                 image_loader: pyre.interfaces.managers.IImageLoader = Provide[
+                                     IContainer.image_loader]):
     global currentStosConfig
 
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
-        image_loader.load_stos(arg_values.stosFullPath)
+        transform = image_loader.load_stos(arg_values.stosFullPath)
+        stos_transform_controller.TransformModel = transform
     else:
         if 'WarpedImageFullPath' in arg_values and arg_values.WarpedImageFullPath is not None:
             image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)

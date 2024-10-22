@@ -1,13 +1,13 @@
-from numpy.typing import NDArray
-import numpy as np
-import OpenGL.GL as gl
 import ctypes
 
+import OpenGL.GL as gl
+import numpy as np
+from numpy.typing import NDArray
+
+from pyre.gl_engine.gl_buffer import GLIndexBuffer
 import pyre.gl_engine.helpers
 from pyre.gl_engine.helpers import check_for_error
-from pyre.gl_engine.interfaces import IBuffer
-from pyre.gl_engine.gl_buffer import GLBuffer, GLIndexBuffer
-from pyre.gl_engine.interfaces import IVAO
+from pyre.gl_engine.interfaces import IBuffer, IVAO
 
 
 class DynamicVAO(IVAO):

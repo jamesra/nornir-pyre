@@ -1,13 +1,16 @@
 import concurrent.futures
 from enum import Enum
 import os
+from dependency_injector.wiring import inject, Provide
 
-from nornir_imageregistration import StosFile
+from nornir_imageregistration import ITransform, StosFile
 import nornir_imageregistration.transforms
-from pyre.state import IImageManager, IImageViewModelManager
+from pyre.interfaces.managers import IImageManager, IImageViewModelManager
 from pyre.resources import try_locate_file
-from pyre.state.viewtype import ViewType
-from pyre.viewmodels import ImageViewModel, TransformController
+from pyre.interfaces.viewtype import ViewType
+from pyre.viewmodels import ImageViewModel
+from pyre.controllers.transformcontroller import TransformController
+from pyre.container import IContainer
 
 
 class ImageLoader:
@@ -17,24 +20,22 @@ class ImageLoader:
     _image_viewmodel_manager: IImageViewModelManager
     _search_dirs: list[str] | None
 
+    @inject
     def __init__(self,
-                 transform_controller: TransformController,
-                 image_manager: IImageManager,
-                 imageviewmodel_manager: IImageViewModelManager,
-                 search_dirs: list[str] | None = None
-                 ):
-        self._transform_controller = transform_controller
+                 image_manager: IImageManager = Provide[IContainer.image_manager],
+                 imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+                 config=Provide[IContainer.config]):
         self._image_manager = image_manager
         self._image_viewmodel_manager = imageviewmodel_manager
-        self._search_dirs = search_dirs
+        self._search_dirs = config['image_search_paths']
 
     def load_stos(self,
-                  stos_path: str) -> nornir_imageregistration.ITransform:
-        """Loads a stos file and the images it references."""
+                  stos_path: str) -> ITransform | None:
+        """Loads a stos file, images are loaded into the image manager and the transform is returned"""
         obj = StosFile.Load(stos_path)
 
         search_paths = list(self._search_dirs) if self._search_dirs is not None else []
-        search_paths.append(os.path.dirname(stos_path))
+        search_paths.insert(0, os.path.dirname(stos_path))
 
         # source_key, source_permutations = self.load_image_into_manager(key=ViewType.Source.value,
         #                                                                image_path=obj.ControlImageFullPath,
@@ -67,7 +68,7 @@ class ImageLoader:
             target_task.add_done_callback(
                 lambda task: self.create_image_viewmodel(*task.result()))
 
-        self._transform_controller.TransformModel = nornir_imageregistration.transforms.LoadTransform(obj.Transform)
+        return nornir_imageregistration.transforms.LoadTransform(obj.Transform)
 
     def load_image_into_manager(
             self,

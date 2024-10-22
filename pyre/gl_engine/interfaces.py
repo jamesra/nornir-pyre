@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
+import ctypes
+
 import numpy as np
 from numpy.typing import NDArray
-import ctypes
 
 from .vertexarraylayout import VertexArrayLayout
 

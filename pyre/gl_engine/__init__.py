@@ -1,16 +1,15 @@
-from .interfaces import IVAO, IBuffer, IIndexBuffer
-from .helpers import check_for_error, get_gl_type_size
-from . import textures
-from .textures import (create_grayscale_texture, create_rgba_texture, create_rgba_texture_array,
-                       read_grayscale_texture, read_rgba_texture)
-from . import shaders as shaders
-from . import vertex_attribute
-from .vertex_attribute import VertexAttribute
-from . import vertexarraylayout
-from .vertexarraylayout import VertexArrayLayout
-from .gl_buffer import GLBuffer, GLIndexBuffer
+from .helpers import check_for_error, get_gl_type_size, get_dtype_for_gl_type
+from .interfaces import IBuffer, IIndexBuffer, IVAO
 from pyre.gl_engine.shaders.shader_base import BaseShader
-from .shader_vao import ShaderVAO
+from . import shaders as shaders, textures, vertex_attribute, vertexarraylayout
 from .dynamic_vao import DynamicVAO
-from .instanced_vao import InstancedVAO
 from .framebuffer import FrameBuffer
+from .gl_buffer import GLBuffer, GLIndexBuffer
+from .helpers import check_for_error, get_gl_type_size
+from .instanced_vao import InstancedVAO
+from .interfaces import IBuffer, IIndexBuffer, IVAO
+from .shader_vao import ShaderVAO
+from .textures import (create_grayscale_texture, create_rgba_texture, create_rgba_texture_array,
+                       read_grayscale_texture, read_rgba_texture, get_texture_array_length)
+from .vertex_attribute import VertexAttribute
+from .vertexarraylayout import VertexArrayLayout

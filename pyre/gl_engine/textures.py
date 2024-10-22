@@ -1,6 +1,7 @@
 import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
+
 import nornir_imageregistration
 
 
@@ -170,3 +171,10 @@ def create_rgba_texture_array(images: NDArray[np.uint8]) -> int:
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
     return textureid
+
+
+def get_texture_array_length(texture_id: int):
+    gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, texture_id)
+    num_layers = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D_ARRAY, 0, gl.GL_TEXTURE_DEPTH)
+    gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
+    return num_layers

@@ -1,13 +1,12 @@
 from typing import Sequence
 
 from OpenGL import GL as gl
-from OpenGL.GL import shaders as glshaders
 import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader
 from pyre.gl_engine.instanced_vao import InstancedVAO
+from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 

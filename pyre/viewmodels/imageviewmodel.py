@@ -6,20 +6,17 @@ Created on Oct 17, 2012
 
 import logging
 import math
-import OpenGL.GL as gl
-from typing import Generator
 import sys
+from typing import Generator
 
-import nornir_imageregistration
+import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
-# from pylab import *
 import scipy.ndimage
-import pyre.gl_engine as gl_engine
 
-import nornir_imageregistration.core as core
-import nornir_shared.images as images
+import nornir_imageregistration
 from nornir_shared.mathhelper import NearestPowerOfTwo
+import pyre.gl_engine as gl_engine
 
 Logger = logging.getLogger("ImageArray")
 

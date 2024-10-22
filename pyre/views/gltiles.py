@@ -3,15 +3,15 @@ Contains routines that divide a transform and image into tiles that fit into a G
 """
 import dataclasses
 from typing import Any, Callable
-import scipy.spatial
-import scipy.spatial.distance
+
 import numpy as np
 from numpy.typing import NDArray
+import scipy.spatial
+import scipy.spatial.distance
+
 import nornir_imageregistration
-
-from pyre.space import Space
-
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
+from pyre.space import Space
 
 
 @dataclasses.dataclass

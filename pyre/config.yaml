@@ -1,0 +1,8 @@
+image_search_paths:
+  # Directories to search for images when loading files, automatically starts with the same directory as the config file
+  - ./Leveled/Tileset/004
+control_point_search_radius: 10
+max_zoom: 16
+min_zoom: 0.00390625
+debug: True
+readme_file: README.txt

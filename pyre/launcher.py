@@ -1,29 +1,29 @@
-'''
+"""
 Created on Sep 12, 2013
 
 @author: u0490822
-'''
-
+"""
+from __future__ import annotations
 import argparse
 import logging
 import os
 
-import nornir_shared.misc
-import pyre.state.imageloader
-
-from pyre.ui.windows.stoswindow import StosWindow
-from pyre import Windows
-from pyre.space import Space
-import pyre.state
-import pyre.gl_engine.shaders as shaders
-import pyre.resources
-from . import resources
-from . import resource_paths
-from pyre.state.transformcontroller_glbuffer_manager import BufferType, TransformControllerGLBufferManager, \
-    ITransformControllerGLBufferManager
-from pyre.state.viewtype import ViewType
+from dependency_injector.wiring import inject, Provide
 
 import wx
+
+import nornir_shared.misc
+from pyre.interfaces.managers import IImageViewModelManager, IWindowManager
+from pyre.interfaces.managers.image_manager import IImageManager
+import pyre.ui
+import pyre.gl_engine.shaders as shaders
+import pyre.resources
+from pyre.interfaces.viewtype import ViewType
+from . import resource_paths
+
+from pyre.container import IContainer
+from pyre.stos_container import StosContainer
+import pyre.commands.stos
 
 app = None
 
@@ -102,55 +102,73 @@ def OnImageAdded(action, key, value):
     print("Image added: " + key)
 
 
-def Run():
+def readme(path) -> str:
+    fullpath = os.path.join(os.path.dirname(__file__), path)
+    try:
+        with open(fullpath, 'r') as file:
+            return file.read()
+    except FileNotFoundError:
+        return "README file not found at " + fullpath
+
+
+def build_container() -> IContainer:
+    module_dir = os.path.dirname(__file__)
+    container_interface = IContainer()
+
+    stos_container = StosContainer()
+    stos_container.config.from_yaml(os.path.join(module_dir, 'config.yaml'))
+    readme_path = stos_container.config()['readme_file']
+    stos_container.config.readme.from_value(readme(readme_path))
+    stos_container.init_resources()
+    container_interface.override(stos_container)
+
+    # Ensure we intialize the shaders and textures before anyone can subscribe to context creation events
+    glcontext_manager = stos_container.glcontext_manager()
+    glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders())
+    glcontext_manager.add_glcontext_added_event_listener(
+        lambda context: pyre.resources.point_textures.PointTextures.LoadTextures())
+
+    # Set the default commands for stos files
+    # container_interface.action_command_map.override(pyre.commands.action_command_map)
+
+    container_interface.check_dependencies()
+    container_interface.wire(modules=[__name__], packages=['pyre'])
+    # stos_container.check_dependencies()
+    # stos_container.wire(modules=[__name__], packages=['pyre'])
+
+    stos_transform_controller = container_interface.transform_controller()
+    transform_glbuffermanager = container_interface.transform_glbuffermanager()
+    transform_glbuffermanager.add(stos_transform_controller)
+
+    return container_interface
+
+
+@inject
+def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
+        imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+        window_manager: IWindowManager = Provide[IContainer.window_manager],
+        stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]
+        ):
+    global app
     print("Starting Pyre")
 
     StartProfilerCheck()
 
     nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir, "PyreLogs"), Level=logging.WARNING)
 
-    gl_context_manager = pyre.state.GLContextManager()
-
-    mouse_position_history_manager = pyre.state.MousePositionHistoryManager()
-
-    # Initialize shaders when a context is created
-    gl_context_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders())
-    gl_context_manager.add_glcontext_added_event_listener(
-        lambda context: pyre.resources.point_textures.PointTextures.LoadTextures())
-
-    imagetransformview_layouts = {
-        BufferType.ControlPoint: shaders.controlpointset_shader.pointset_layout,
-        BufferType.Selection: shaders.controlpointset_shader.texture_index_layout
-    }
-
-    window_manager = pyre.state.WindowManager()
-
-    image_manager = pyre.state.image_manager.ImageManager()
-    imageviewmodel_manager = pyre.state.image_viewmodel_manager.ImageViewModelManager()
-
-    transform_controller = pyre.state.TransformController()
-    transform_glbuffermanager = TransformControllerGLBufferManager(glcontext_manager=gl_context_manager,
-                                                                   buffer_layouts=imagetransformview_layouts)  # type: ITransformControllerGLBufferManager
-    transform_glbuffermanager.add(transform_controller)
-    imageviewmodel_manager = pyre.state.image_viewmodel_manager.ImageViewModelManager()
-
-    pyre.state.currentStosConfig = pyre.state.StosState(transform_controller=transform_controller,
+    pyre.state.currentStosConfig = pyre.state.StosState(transform_controller=stos_transform_controller,
                                                         image_manager=image_manager,
                                                         imageviewmodel_manager=imageviewmodel_manager)
     pyre.state.currentMosaicConfig = pyre.state.MosaicState()
 
-    image_loader = pyre.state.imageloader.ImageLoader(transform_controller=transform_controller,
-                                                      image_manager=image_manager,
-                                                      imageviewmodel_manager=imageviewmodel_manager,
-                                                      search_dirs=None)
-
-    stos_window_config = pyre.state.StosWindowConfig(glcontext_manager=gl_context_manager,
-                                                     transform_controller=transform_controller,
-                                                     transformglbuffer_manager=transform_glbuffermanager,
-                                                     imageviewmodel_manager=imageviewmodel_manager,
-                                                     window_manager=window_manager,
-                                                     image_loader=image_loader,
-                                                     mouse_position_history_manager=mouse_position_history_manager)
+    #
+    # stos_window_config = pyre.state.StosWindowConfig(glcontext_manager=glcontext_manager,
+    #                                                  transform_controller=stos_transform_controller,
+    #                                                  transformglbuffer_manager=transform_glbuffermanager,
+    #                                                  imageviewmodel_manager=imageviewmodel_manager,
+    #                                                  window_manager=window_manager,
+    #                                                  image_loader=image_loader,
+    #                                                  mouse_position_history_manager=mouse_position_history_manager)
 
     readmetxt = resource_paths.README()
     print(readmetxt)
@@ -161,22 +179,16 @@ def Run():
     app = wx.App(False)
 
     window_manager.add(ViewType.Fixed.value,
-                       StosWindow(None, ViewType.Source, 'Source Image', view_type=ViewType.Source,
-                                  config=stos_window_config))
+                       pyre.ui.windows.StosWindow(None, ViewType.Source, 'Source Image',
+                                                  view_type=ViewType.Source))
     window_manager.add(ViewType.Warped.value,
-                       StosWindow(None, ViewType.Target, 'Target Image', view_type=ViewType.Target,
-                                  config=stos_window_config))
+                       pyre.ui.windows.StosWindow(None, ViewType.Target, 'Target Image',
+                                                  view_type=ViewType.Target))
     window_manager.add(ViewType.Composite.value,
-                       StosWindow(None, ViewType.Composite, 'Composite Image', view_type=ViewType.Composite,
-                                  config=stos_window_config))
+                       pyre.ui.windows.StosWindow(None, ViewType.Composite, 'Composite Image',
+                                                  view_type=ViewType.Composite))
 
-    # Windows["Mosaic"] = PyreGui.MosaicWindow(None, "Mosaic", 'Mosaic')
-
-    image_loader = pyre.state.imageloader.ImageLoader(transform_controller,
-                                                      image_manager,
-                                                      imageviewmodel_manager,
-                                                      search_dirs=None)
-    pyre.state.InitializeStateFromArguments(image_loader, arg_values)
+    pyre.state.InitializeStateFromArguments(stos_transform_controller, arg_values)
 
     # Initialize the GL state
 

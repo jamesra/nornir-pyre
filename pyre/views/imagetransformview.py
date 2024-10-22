@@ -4,26 +4,25 @@ Created on Oct 19, 2012
 @author: u0490822
 """
 
-# from imageop import scale
-from numpy.typing import NDArray
-import scipy.spatial
-import scipy.spatial.distance
-import numpy as np
 from typing import Callable
 import warnings
+
+import OpenGL.GL as gl
+import numpy as np
+# from imageop import scale
+from numpy.typing import NDArray
 
 import nornir_imageregistration
 import nornir_imageregistration.transforms.base
 import nornir_imageregistration.transforms.triangulation
-
-import OpenGL.GL as gl
 import pyre
-from pyre.space import Space
-import pyre.gl_engine.shaders as shaders
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer
-import pyre.views.gltiles as gltiles
+import pyre.gl_engine.shaders as shaders
+from pyre.space import Space
 from pyre.views.gltiles import RenderCache, RenderDataMap, TileGLObjects
+import pyre.views.gltiles as gltiles
 from pyre.views.interfaces import IImageTransformView
+from pyre.controllers.transformcontroller import TransformController
 
 
 class ImageTransformView(IImageTransformView):
@@ -38,7 +37,7 @@ class ImageTransformView(IImageTransformView):
     _z: float
     _image_viewmodel: pyre.viewmodels.ImageViewModel
     _image_mask_viewmodel: pyre.viewmodels.ImageViewModel | None
-    _transform_controller: pyre.viewmodels.TransformController = None
+    _transform_controller: TransformController = None
     Debug: bool
     _gl_initialized: bool = False
     _tile_render_data: RenderDataMap
@@ -79,18 +78,18 @@ class ImageTransformView(IImageTransformView):
         return self._transform_controller.TransformModel
 
     @property
-    def transform_controller(self) -> pyre.viewmodels.TransformController:
+    def transform_controller(self) -> TransformController:
         return self._transform_controller
 
     @transform_controller.setter
-    def transform_controller(self, value: pyre.viewmodels.TransformController):
+    def transform_controller(self, value: TransformController):
         if self._transform_controller is not None:
             self._transform_controller.RemoveOnChangeEventListener(self.OnTransformChanged)
 
         self._transform_controller = value
 
         if value is not None:
-            if not isinstance(value, pyre.viewmodels.TransformController):
+            if not isinstance(value, TransformController):
                 raise ValueError(f"Expected _transform_controller type, got {value}")
             self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
@@ -109,7 +108,7 @@ class ImageTransformView(IImageTransformView):
                  activate_context: Callable[[], None],
                  image_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  image_mask_view_model: pyre.viewmodels.ImageViewModel | None = None,
-                 transform_controller: pyre.viewmodels.TransformController | None = None,
+                 transform_controller: TransformController | None = None,
                  ):
         """
         Constructor
@@ -138,7 +137,7 @@ class ImageTransformView(IImageTransformView):
 
         self.update_all_tile_buffers()
 
-    def OnTransformChanged(self, transform_controller: pyre.viewmodels.TransformController):
+    def OnTransformChanged(self, transform_controller: TransformController):
         if self._gl_initialized:
             self.update_all_tile_buffers()
 
@@ -241,7 +240,7 @@ class ImageTransformView(IImageTransformView):
         if image_viewmodel is None:
             return
 
-        tween = 0 if space == Space.Source else 1
+        tween = space
 
         for ix in range(0, image_viewmodel.NumCols):
             column = image_viewmodel.ImageArray[ix]

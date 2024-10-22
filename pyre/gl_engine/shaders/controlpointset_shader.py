@@ -1,13 +1,12 @@
 from typing import Sequence
 
 from OpenGL import GL as gl
-from OpenGL.GL import shaders as glshaders
 import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import FragmentShader, VertexShader, BaseShader
 from pyre.gl_engine.instanced_vao import InstancedVAO
+from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
@@ -122,10 +121,11 @@ class ControlPointSetShader(BaseShader):
              VertexAttribute(lambda: self.texture_coord_location, "vertex_texture_coordinate", 2, gl.GL_FLOAT)])
 
         self._pointset_layout = VertexArrayLayout(
-            [VertexAttribute(lambda: self.point_source_offset_location, "point_source_offset", 2, gl.GL_FLOAT,
+            [VertexAttribute(lambda: self.point_target_offset_location, "point_target_offset", 2, gl.GL_FLOAT,
                              instanced=True),
-             VertexAttribute(lambda: self.point_target_offset_location, "point_target_offset", 2, gl.GL_FLOAT,
-                             instanced=True)])
+             VertexAttribute(lambda: self.point_source_offset_location, "point_source_offset", 2, gl.GL_FLOAT,
+                             instanced=True),
+             ])
 
         self._texture_index_layout = VertexArrayLayout(
             [VertexAttribute(lambda: self.texture_index_location, "texture_index", 1, gl.GL_FLOAT,

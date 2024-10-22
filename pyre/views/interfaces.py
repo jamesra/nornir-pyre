@@ -4,9 +4,8 @@ import numpy as np
 from numpy._typing import NDArray
 
 import nornir_imageregistration
-
 from pyre import Space
-from pyre.viewmodels.transformcontroller import TransformController
+from pyre.controllers.transformcontroller import TransformController
 
 
 class IGLPanel(ABC):

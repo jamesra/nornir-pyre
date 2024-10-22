@@ -4,15 +4,15 @@ Created on Feb 10, 2015
 @author: u0490822
 '''
 
-import nornir_imageregistration.spatial
 import numpy
 import wx
 
-from pyre.ui import command_base
+import nornir_imageregistration.spatial
+from pyre.commands.commandbase import CommandBase
 import pyre.views
 
 
-class RectangleCommand(command_base.VolumeCommandBase):
+class RectangleCommand(CommandBase):
     '''
     The user interface to draw and size a rectangle
     '''

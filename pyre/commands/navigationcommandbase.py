@@ -5,18 +5,25 @@ Created on Feb 10, 2015
 """
 
 from __future__ import annotations
-import wx
-import numpy as np
 
+from dependency_injector.wiring import Provide, inject
+import numpy as np
+import wx
 import nornir_imageregistration
+
+import abc
+import pyre
+from pyre.selection_event_data import PointPair
+import pyre.ui
+from pyre.command_interfaces import StatusChangeCallback
 from pyre.commands.commandbase import CommandBase
-from pyre.commands.interfaces import CompletionCallback
+from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
-import pyre.ui
+from pyre.container import IContainer
 
 
-class NavigationCommandBase(CommandBase):
+class NavigationCommandBase(CommandBase, abc.ABC):
     """
     A command that needs to handle the mouse position in volume coordinates
     """
@@ -27,33 +34,99 @@ class NavigationCommandBase(CommandBase):
     # Bounds the camera is allowed to travel within
     _bounds: nornir_imageregistration.Rectangle
 
+    _history_manager: ICommandHistory = Provide[pyre.container.IContainer.history_manager]
+
+    _commandqueue: ICommandQueue
+
+    config = Provide[IContainer.config]
+
+    @property
+    def history_manager(self) -> ICommandHistory:
+        return self._history_manager
+
     @property
     def camera(self) -> pyre.ui.Camera:
         """The camera used by the command."""
         return self._camera
 
+    @property
+    def space(self) -> Space:
+        """The space the command is operating in"""
+        return self._space
+
+    @inject
     def __init__(self,
                  parent: wx.Window,
                  transform_controller: pyre.viewmodels.TransformController,
                  camera: pyre.ui.Camera,
+                 space: Space,
                  bounds: nornir_imageregistration.Rectangle,
-                 completed_func: CompletionCallback | None = None, ):
+                 commandqueue: ICommandQueue,
+                 completed_func: StatusChangeCallback | None = None):
         """
         :param window parent: Window to subscribe to for events
         :param func completed_func: Function to call when command has completed
         :param Camera camera: Camera to use for mapping screen to volume coordinates
+        :param commandqueue: Queue to add commands to if we need to start a new command
         """
+        self._last_mouse_position = None
+        self._space = space
         self._bounds = bounds
         self._transform_controller = transform_controller
         self._camera = camera
-        self._last_mouse_position = None
+        self._commandqueue = commandqueue
         super(NavigationCommandBase, self).__init__(parent=parent,
                                                     completed_func=completed_func)
 
-    def GetCorrectedMousePosition(self, e: wx.MouseEvent, height: int) -> tuple[float, float]:
+    @staticmethod
+    def ParamToMousePosition(e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+        """
+        :param e Either a wx.MouseEvent or a tuple of (y, x) coordinates:
+        :return: (y, x) coordinates of mouse
+        """
+
+        if isinstance(e, tuple):
+            y, x = e
+        elif isinstance(e, wx.MouseEvent):
+            x, y = e.GetPosition()
+        else:
+            raise ValueError("Unknown e type")
+
+        return y, x
+
+    @staticmethod
+    def GetCorrectedMousePosition(e: wx.MouseEvent | tuple[float, float], height: int) -> tuple[float, float]:
         """wxPython inverts the mouse position, flip it back"""
-        (x, y) = e.GetPosition()
+        y, x = NavigationCommandBase.ParamToMousePosition(e)
+
         return height - y, x
+
+    def get_space_position(self, e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+        """
+        Return the mouse position in the source or target space, matching the source property of our instance
+        :param e: wx.MouseEvent or (y,x) tuple
+        :return: (y,x) tuple
+        """
+        y, x = NavigationCommandBase.ParamToMousePosition(e)
+        cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
+        return self.camera.ImageCoordsForMouse(cy, cx)
+
+    def get_world_positions(self, e: wx.MouseEvent | tuple[float, float]) -> PointPair:
+        """
+        Returns a tuple of the mouse position in both source and target space
+        :param e:
+        :return:
+        """
+        position = np.array(self.get_space_position(e))
+
+        if self._space == Space.Source:
+            return PointPair(target=np.squeeze(self._transform_controller.InverseTransform(position)),
+                             source=position)
+        elif self._space == Space.Target:
+            return PointPair(target=position,
+                             source=np.squeeze(self._transform_controller.InverseTransform(position)))
+        else:
+            raise ValueError("Unknown space")
 
     def on_mouse_motion(self, event: wx.MouseEvent):
         """Called when the mouse moves"""
@@ -103,7 +176,6 @@ class NavigationCommandBase(CommandBase):
             event.Skip()
 
     def on_mouse_scroll(self, e: wx.MouseEvent):
-
         try:
             if self.camera is None:
                 return
@@ -148,7 +220,7 @@ class NavigationCommandBase(CommandBase):
                 #                                                1] / 2.0))
 
             else:
-                zdelta = (1 + (-scroll_y / 20))
+                zdelta = (1 + (scroll_y / 20))
 
                 new_scale = self.camera.scale * zdelta
                 max_image_dimension_value = max(self._bounds.Width, self._bounds.Height)
@@ -158,9 +230,6 @@ class NavigationCommandBase(CommandBase):
 
                 if new_scale > max_image_dimension_value * 2.0:
                     new_scale = max_image_dimension_value * 2.0
-
-                if new_scale < 0.5:
-                    new_scale = 0.5
 
                 self.camera.scale = new_scale
 
@@ -174,7 +243,7 @@ class NavigationCommandBase(CommandBase):
         finally:
             e.Skip()
 
-    def on_key_press(self, e):
+    def on_key_down(self, e):
         keycode = e.GetKeyCode()
 
         symbol = ''
@@ -219,7 +288,7 @@ class NavigationCommandBase(CommandBase):
             elif e.ShiftDown():
                 self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
 
-            pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
+            self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         # elif symbol == 'l':
         #    self.show_lines = not self.show_lines
         # elif keycode == wx.WXK_F1:
@@ -235,142 +304,9 @@ class NavigationCommandBase(CommandBase):
             # pyre.SyncWindows(LookAt, self.camera.scale)
 
         elif symbol == 'z' and e.CmdDown():
-            pyre.history.Undo()
+            self.history_manager.Undo()
         elif symbol == 'x' and e.CmdDown():
-            pyre.history.Redo()
+            self.history_manager.Redo()
         elif symbol == 'f':
             self._transform_controller.FlipWarped()
-            pyre.history.SaveState(self._transform_controller.FlipWarped)
-
-
-class DefaultImageTransformCommand(NavigationCommandBase):
-    _executed: bool | None = None
-
-    @property
-    def executed(self) -> bool:
-        return self._executed
-
-    @property
-    def SelectionMaxDistance(self) -> float:
-        """How close we need to be to a control point to select it"""
-        selection_max_distance = (float(self.camera.visible_world_height) / float(self.height)) * 20.0
-        if selection_max_distance < 16:
-            selection_max_distance = 16
-
-        return selection_max_distance
-
-    # A command that lets the user manipulate the camera and
-    def subscribe_to_parent(self):
-        self._bind_mouse_events()
-        self._bind_key_events()
-        self._bind_resize_event()
-
-    def unsubscribe_to_parent(self):
-        self._unbind_mouse_events()
-        self._unbind_key_events()
-        self._unbind_resize_event()
-
-    def can_execute(self) -> bool:
-        return True
-
-    def execute(self):
-        _execute = True
-        return
-
-    def cancel(self):
-        _execute = False
-        return
-
-    def on_key_down(self, event):
-        return
-
-    def on_key_up(self, event):
-        return
-
-    def on_mouse_press(self, event):
-        return
-
-    def on_mouse_release(self, event):
-        return
-
-
-class TranslatePointSelectionCommand(NavigationCommandBase):
-    """This command takes a selection of control points and adjusts the position"""
-
-    _selected_points: list[int]  # The indices of the selected points
-    _space: Space
-
-    def __init__(self,
-                 parent: wx.Window,
-                 status_bar: CameraStatusBar,
-                 transform_controller: pyre.viewmodels.TransformController,
-                 camera: pyre.ui.Camera,
-                 bounds: nornir_imageregistration.Rectangle,
-                 selected_points: list[int],  # The indices of the selected points
-                 space: Space,  # Space we are moving the points in, source or target side
-                 completed_func: CompletionCallback = None):
-        super().__init__(parent, status_bar, transform_controller, camera, bounds, completed_func)
-        self._selected_points = selected_points
-
-    def on_mouse_press(self, event: wx.MouseEvent):
-        """Called when the mouse is pressed"""
-        pass
-
-    def on_mouse_release(self, event: wx.MouseEvent):
-        """Called when the mouse is released"""
-        self.execute()
-
-    def on_key_down(self, event: wx.KeyEvent):
-        """Called when a key is pressed"""
-        keycode = event.GetKeyCode()
-
-        if (keycode == wx.WXK_LEFT or
-            keycode == wx.WXK_RIGHT or
-            keycode == wx.WXK_UP or
-            keycode == wx.WXK_DOWN) and self.HighlightedPointIndex is not None:
-
-            # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
-            multiplier = 1
-            print(str(multiplier))
-            if event.ShiftDown():
-                multiplier *= 5
-                print(str(multiplier))
-            if event.ControlDown():
-                multiplier *= 25
-                print(str(multiplier))
-
-            delta = [0, 0]
-            if keycode == wx.WXK_LEFT:
-                delta = [0, -1]
-            elif keycode == wx.WXK_RIGHT:
-                delta = [0, 1]
-            elif keycode == wx.WXK_UP:
-                delta = [1, 0]
-            elif keycode == wx.WXK_DOWN:
-                delta = [-1, 0]
-
-            delta[0] *= multiplier
-            delta[1] *= multiplier
-
-            self._transform_controller.MovePoint(self._selected_points, delta[1], delta[0],
-                                                 space=self._space)
-        elif keycode == wx.WXK_SPACE:
-
-            # If SHIFT is held down, align everything.  Otherwise align the selected point
-            if not event.ShiftDown() and self._selected_points is not None:
-                self._selected_points = self._transform_controller.AutoAlignPoints(self._selected_points)
-
-            elif event.ShiftDown():
-                self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
-
-            pyre.history.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
-
-        return
-
-    def on_mouse_scroll(self, event: wx.MouseEvent):
-        """Called when the mouse wheel is scrolled"""
-        pass
-
-    def on_mouse_drag(self, event: wx.MouseEvent):
-        """Called when the mouse is dragged"""
-        pass
+            self.history_manager.SaveState(self._transform_controller.FlipWarped)

@@ -1,9 +1,9 @@
 from .color_shader import ColorShader
-from .texture_shader import TextureShader
-from .transform_shader import TransformShader
-from .pointset_shader import PointSetShader
 from .controlpointset_shader import ControlPointSetShader
 from .overlay_shader import OverlayShader
+from .pointset_shader import PointSetShader
+from .texture_shader import TextureShader
+from .transform_shader import TransformShader
 
 __initialized = False
 texture_shader = TextureShader()  # type: TextureShader | None

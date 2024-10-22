@@ -4,7 +4,7 @@ from typing import Sequence
 from OpenGL import GL as gl
 import numpy as np
 
-from pyre.gl_engine.helpers import get_gl_type_size, check_for_error, get_dtype_for_gl_type
+from pyre.gl_engine.helpers import check_for_error, get_dtype_for_gl_type, get_gl_type_size
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 
 

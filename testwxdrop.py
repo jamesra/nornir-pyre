@@ -1,5 +1,4 @@
 import sys
-import sys
 
 try:
     import wx

@@ -1,18 +1,17 @@
 """
 Displays two textures and overlays them with a blend function
 """
-from typing import Sequence
 from enum import Enum
+from typing import Sequence
 import warnings
 
 from OpenGL import GL as gl
-from OpenGL.GL import shaders as glshaders
 import numpy as np
 from numpy._typing import NDArray
 
 from pyre.gl_engine import check_for_error
-from pyre.gl_engine.shaders.shader_base import VertexShader, FragmentShader, BaseShader, bind_texture
 from pyre.gl_engine.shader_vao import ShaderVAO
+from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader, bind_texture
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 

@@ -1,5 +1,6 @@
+from .stoswindow import StosWindow
+from . import mosaicwindow, pyrewindows, stoswindow
 from .filedrop import FileDrop
 from .textdrop import TextDrop
-from . import pyrewindows
-from . import stoswindow
-from . import mosaicwindow
+from .grid_transform_settings_dialog import GridTransformSettingsDialog
+from .refine_grid_settings_dialog import RefineGridSettingsDialog

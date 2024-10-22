@@ -1,5 +1,6 @@
-from pyre.state.roi_manager import IRegion, InteractionCandidate, IRegionManager, SelectionEventData
-from pyre.commands.interfaces import ICommand
+from pyre.commands.commandbase import ICommand
+from pyre.interfaces.managers.region_manager import IRegion, SelectionEventData
+
 import nornir_imageregistration
 from nornir_imageregistration import PointLike
 
@@ -14,7 +15,7 @@ class ControlPointRegion(IRegion):
     def bounding_box(self) -> nornir_imageregistration.Rectangle:
         return self._control_point.bounding_box
 
-    def HasInteraction(self, world_position: PointLike) -> float:
+    def interaction_distance(self, world_position: PointLike) -> float:
         return self._control_point.bounding_box.DistanceToPoint(world_position)
 
     def GetInteractiveCommandForPosition(self, event: SelectionEventData) -> ICommand | None:

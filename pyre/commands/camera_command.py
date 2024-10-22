@@ -5,31 +5,17 @@ try:
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
-from pyre.ui import command_base
-import pyre.views
+import pyre.commands.commandbase as command_base
 
 
-class CameraCommand(command_base.VolumeCommandBase):
+class CameraCommand(command_base.CommandBase):
     '''
     The user interface to adjust the camera
     '''
 
     def __init__(self, parent, completed_func, camera):
         super(CameraCommand, self).__init__(parent, completed_func)
-
         self.LastMousePosition = None
-        self._bind_events()
-
-    def _bind_events(self):
-        self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
-        self.canvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
-        self.canvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
-
-    def _unbind_events(self):
-        self.canvas.Unbind(wx.EVT_MOUSEWHEEL, handler=self.on_mouse_scroll)
-        self.canvas.Unbind(wx.EVT_KEY_DOWN, handler=self.on_key_press)
-        self.canvas.Unbind(wx.EVT_MOTION, handler=self.on_mouse_drag)
-        return
 
     def on_key_press(self, e):
         keycode = e.GetKeyCode()

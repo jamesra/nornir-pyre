@@ -1,8 +1,9 @@
 import abc
 from typing import Callable
+
 from pyre.space import Space
-from pyre.state.action import Action
-from pyre.viewmodels.transformcontroller import TransformController
+from pyre.interfaces.action import Action
+from pyre.controllers.transformcontroller import TransformController
 
 TransformControllerAddRemoveCallback = Callable[[Action, TransformController], None]
 TransformControllerChangedCallback = Callable[[TransformController], None]

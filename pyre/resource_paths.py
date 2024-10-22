@@ -1,6 +1,7 @@
 import logging
-from pkg_resources import resource_filename
 import os
+
+from pkg_resources import resource_filename
 
 
 def ResourcePath() -> str:

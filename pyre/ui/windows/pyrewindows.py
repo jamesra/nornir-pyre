@@ -1,7 +1,9 @@
-import pyre.ui
+from dependency_injector.wiring import inject, Provide
+from pyre.ui.events.invoke_on_main_thread_event import wxInvokeOnMainThreadEvent, wx_EVT_INVOKE_ON_MAIN_THREAD
 
-from pyre.state.viewtype import ViewType
-from pyre.wxevents import wx_EVT_INVOKE_ON_MAIN_THREAD, wxInvokeOnMainThreadEvent
+from pyre.interfaces.viewtype import ViewType
+from pyre.interfaces.managers.window_manager import IWindowManager
+from pyre.container import IContainer
 
 try:
     import wx
@@ -14,17 +16,18 @@ except ImportError:
 
 class PyreWindowBase(wx.Frame):
     """The window we use for views"""
-    _window_manager: pyre.state.WindowManager
+    _window_manager: IWindowManager
 
     @property
     def ID(self):
         return self._ID
 
+    @inject
     def __init__(self,
                  parent,
                  windowID,
                  title,
-                 window_manager: pyre.state.WindowManager):
+                 window_manager: IWindowManager = Provide[IContainer.window_manager]):
         self._window_manager = window_manager
         wx.Frame.__init__(self, parent, title=title, size=(800, 400))
 

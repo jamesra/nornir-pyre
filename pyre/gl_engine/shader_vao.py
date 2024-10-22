@@ -1,7 +1,8 @@
-from numpy.typing import NDArray
-import numpy as np
-import OpenGL.GL as gl
 import ctypes
+
+import OpenGL.GL as gl
+import numpy as np
+from numpy.typing import NDArray
 
 import pyre.gl_engine.helpers
 from pyre.gl_engine.helpers import check_for_error

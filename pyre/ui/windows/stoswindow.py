@@ -1,19 +1,21 @@
 import os
 
+from dependency_injector.wiring import Provide, inject
 import wx
 
 from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
-from pyre import Space, state
+from pyre.space import Space
+from pyre.container import IContainer
+from pyre.interfaces.managers import ICommandHistory, IImageViewModelManager
 import pyre.state
+from pyre.interfaces.viewtype import ViewType
 import pyre.ui
+from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
-from pyre.ui.windows.textdrop import TextDrop
 from pyre.ui.windows.pyrewindows import PyreWindowBase
-from pyre.ui import ImageTransformViewPanel
-from pyre.state import ViewType
 
 
 class StosWindow(PyreWindowBase):
@@ -23,8 +25,16 @@ class StosWindow(PyreWindowBase):
     imagepanel: ImageTransformViewPanel
     _space: Space
     dirname: str = ''
-    _config: pyre.state.StosWindowConfig
     _view_type: ViewType
+
+    _transform_controller: pyre.state.TransformController
+    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
+    _history_manager: ICommandHistory = Provide[IContainer.history_manager]
+    _config = Provide[IContainer.config]
+
+    @property
+    def transform_controller(self) -> pyre.state.TransformController:
+        return self._transform_controller
 
     @property
     def space(self) -> Space:
@@ -42,19 +52,16 @@ class StosWindow(PyreWindowBase):
     def lookatfixedpoint(self, point, scale):
         self.imagepanel.lookatfixedpoint(point, scale)
 
-    @property
-    def config(self) -> pyre.state.StosWindowConfig:
-        return self._config
-
+    @inject
     def __init__(self, parent,
                  window_id: ViewType,
                  title: str,
                  view_type: ViewType,
-                 config: pyre.state.StosWindowConfig):
+                 transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
 
-        super(StosWindow, self).__init__(parent=parent, windowID=window_id, title=title,
-                                         window_manager=config.window_manager)
-        self._config = config
+        super(StosWindow, self).__init__(parent=parent, windowID=window_id, title=title)
+
+        self._transform_controller = transform_controller
         # self.imagepanel = wx.Panel(self, -1)
         self._space = Space.Source if view_type == ViewType.Source else Space.Target
         self._view_type = view_type
@@ -83,22 +90,11 @@ class StosWindow(PyreWindowBase):
         else:
             raise NotImplementedError("Unknown ViewType")
 
-        # This is the GL Panel, so GL initialization happens after this
-        image_panel_config = pyre.ui.ImageTransformPanelConfig(
-            transform_controller=config.transform_controller,
-            imageviewmodel_manager=config.imageviewmodel_manager,
-            glcontext_manager=config.glcontext_manager,
-            transformglbuffer_manager=config.transformglbuffer_manager,
-            view_type=view_type,
-            imagename_space_mapping=imagename_space_mapping
-        )
-
-        self.imagepanel = pyre.ui.ImageTransformViewPanel(parent=self,
-                                                          space=self._space,
-                                                          config=image_panel_config)
-
-        # pyre.Config._transform_controller,
-        # pyre.Config.FixedTransformView
+        self.imagepanel = ImageTransformViewPanel(parent=self,
+                                                  space=self._space,
+                                                  view_type=view_type,
+                                                  transform_controller=transform_controller,
+                                                  imagename_space_mapping=imagename_space_mapping)
 
         # self.control = wx.StaticText(panel, -1, README_Import(self), size=(800,-1))
 
@@ -247,12 +243,13 @@ class StosWindow(PyreWindowBase):
             print("User cancelled settings, transform conversion aborted")
             return
 
-        pyre.history.SaveState(setattr, pyre.state.currentStosConfig.TransformController, 'TransformModel',
-                               pyre.state.currentStosConfig.TransformController.TransformModel)
-        pyre.state.currentStosConfig.TransformController.TransformModel = \
+        # pyre.history.SaveState(setattr, pyre.state.currentStosConfig.TransformController, 'TransformModel',
+        #                               pyre.state.currentStosConfig.TransformController.TransformModel)
+        source_imageviewmodel = self._imageviewmodel_manager[ViewType.Source]
+        self.transform_controller.TransformModel = \
             nornir_imageregistration.transforms.ConvertTransform(
-                pyre.state.currentStosConfig.Transform, transform_type,
-                source_image_shape=pyre.state.currentStosConfig.WarpedImages.Image.shape,
+                self.transform_controller.TransformModel, transform_type,
+                source_image_shape=source_imageviewmodel.Image.shape,
                 **converter_kwargs)
 
         print(f"Changed transform type to {transform_type}")
@@ -280,7 +277,7 @@ class StosWindow(PyreWindowBase):
 
     def GetGridTransformConfig(self) -> dict[str, any] | None:
         """Show a UI to get the transform configuration"""
-        with pyre.ui.GridTransformSettingsDialog(self) as dlg:
+        with pyre.ui.windows.GridTransformSettingsDialog(self) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 return {'grid_dims': dlg.grid_dims}
             else:
@@ -297,9 +294,8 @@ class StosWindow(PyreWindowBase):
         # menu.UpdateUI()
 
     def UpdateTransformTypeChecks(self, menu: wx.Menu):
-        from pyre.state import currentStosConfig
 
-        current_type = self.config.transform_controller.TransformModel.type
+        current_type = self.transform_controller.TransformModel.type
 
         for m in menu.MenuItems:
             menu_item_transform_type = self.__get_transform_type_from_menuitem(m)
@@ -454,33 +450,32 @@ class StosWindow(PyreWindowBase):
 
     def OnInstructions(self, e):
 
-        readme = pyre.resources.README()
-        dlg = wx.MessageDialog(self, readme, "Keyboard Instructions", wx.OK)
+        dlg = wx.MessageDialog(self, self._config["readme"], "Keyboard Instructions", wx.OK)
         dlg.ShowModal()
         dlg.Destroy()
 
     def OnClearAllPoints(self, e):
-        sourceImageView = self.config.imageviewmodel_manager[ViewType.Source]
-        targetImageView = self.config.imageviewmodel_manager[ViewType.Target]
-        self.config.transform_controller.TransformModel = pyre.viewmodels.transformcontroller.CreateDefaultTransform(
-            state.currentStosConfig.TransformType,
+        sourceImageView = self._imageviewmodel_manager[ViewType.Source]
+        targetImageView = self._imageviewmodel_manager[ViewType.Target]
+        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(
+            pyre.state.currentStosConfig.TransformType,
             sourceImageView.Image.shape,
             targetImageView.Image.shape)
 
     def OnClearMaskedPoints(self, e):
         if not (
-                state.currentStosConfig.FixedImageMaskViewModel is None or state.currentStosConfig.WarpedImageMaskViewModel is None):
-            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController,
-                                          state.currentStosConfig.FixedImageMaskViewModel.Image,
-                                          state.currentStosConfig.WarpedImageMaskViewModel.Image)
+                pyre.state.currentStosConfig.FixedImageMaskViewModel is None or pyre.state.currentStosConfig.WarpedImageMaskViewModel is None):
+            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
+                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image,
+                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
-        elif not state.currentStosConfig.FixedImageMaskViewModel is None:
-            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController,
-                                          state.currentStosConfig.FixedImageMaskViewModel.Image, None)
+        elif not pyre.state.currentStosConfig.FixedImageMaskViewModel is None:
+            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
+                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image, None)
 
-        elif not state.currentStosConfig.WarpedImageMaskViewModel is None:
-            pyre.common.ClearPointsOnMask(state.currentStosConfig.TransformController, None,
-                                          state.currentStosConfig.WarpedImageMaskViewModel.Image)
+        elif not pyre.state.currentStosConfig.WarpedImageMaskViewModel is None:
+            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,
+                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
     def OnRotateTranslate(self, e):
         pyre.common.RotateTranslateWarpedImage()
@@ -500,7 +495,7 @@ class StosWindow(PyreWindowBase):
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
 
-            state.currentStosConfig.LoadFixedImage(os.path.join(StosWindow.imagedirname, filename))
+            pyre.state.currentStosConfig.LoadFixedImage(os.path.join(StosWindow.imagedirname, filename))
 
         dlg.Destroy()
         # if Config.FixedImageFullPath is not None and Config.WarpedImageFullPath is not None:
@@ -512,7 +507,7 @@ class StosWindow(PyreWindowBase):
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
 
-            state.currentStosConfig.LoadWarpedImage(os.path.join(StosWindow.imagedirname, filename))
+            pyre.state.currentStosConfig.LoadWarpedImage(os.path.join(StosWindow.imagedirname, filename))
 
         dlg.Destroy()
 
@@ -522,7 +517,7 @@ class StosWindow(PyreWindowBase):
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
 
-            state.currentStosConfig.FixedImageMaskViewModel = state.currentStosConfig.LoadFixedMaskImage(
+            pyre.state.currentStosConfig.FixedImageMaskViewModel = state.currentStosConfig.LoadFixedMaskImage(
                 os.path.join(StosWindow.imagedirname, filename))
 
         dlg.Destroy()
@@ -535,7 +530,7 @@ class StosWindow(PyreWindowBase):
             filename = str(dlg.GetFilename())
             StosWindow.imagedirname = str(dlg.GetDirectory())
 
-            state.currentStosConfig.WarpedImageMaskViewModel = state.currentStosConfig.LoadWarpedMaskImage(
+            pyre.state.currentStosConfig.WarpedImageMaskViewModel = state.currentStosConfig.LoadWarpedMaskImage(
                 os.path.join(StosWindow.imagedirname, filename))
 
         dlg.Destroy()
@@ -551,8 +546,8 @@ class StosWindow(PyreWindowBase):
             self.dirname = str(dlg.GetDirectory())
             StosWindow.stosfilename = filename
 
-            state.currentStosConfig.LoadStos(os.path.join(self.dirname,
-                                                          filename))
+            pyre.state.currentStosConfig.LoadStos(os.path.join(self.dirname,
+                                                               filename))
 
         dlg.Destroy()
 
@@ -564,33 +559,33 @@ class StosWindow(PyreWindowBase):
             if dlg.ShowModal() == wx.ID_OK:
                 StosWindow.imagedirname = dlg.GetDirectory()
                 self.filename = dlg.GetFilename()
-                state.currentStosConfig.OutputImageFullPath = os.path.join(StosWindow.imagedirname, self.filename)
+                pyre.state.currentStosConfig.OutputImageFullPath = os.path.join(StosWindow.imagedirname, self.filename)
 
                 #                 common.SaveRegisteredWarpedImage(pyre.state.currentStosConfig.OutputImageFullPath,
                 #                                                  pyre.state.currentStosConfig.transform,
                 #                                                  pyre.state.currentStosConfig.WarpedImageViewModel.Image)
                 pool = pools.GetGlobalThreadPool()
                 pool.add_task("Save " + pyre.state.currentStosConfig.OutputImageFullPath,
-                              common.SaveRegisteredWarpedImage,
-                              state.currentStosConfig.OutputImageFullPath,
-                              state.currentStosConfig.Transform,
-                              state.currentStosConfig.WarpedImageViewModel.Image)
+                              pyre.common.SaveRegisteredWarpedImage,
+                              pyre.state.currentStosConfig.OutputImageFullPath,
+                              pyre.state.currentStosConfig.Transform,
+                              pyre.state.currentStosConfig.WarpedImageViewModel.Image)
 
     def OnSaveStos(self, e):
-        if not (state.currentStosConfig.TransformController is None):
+        if not (pyre.state.currentStosConfig.TransformController is None):
             dlg = wx.FileDialog(self, "Choose a Directory",
-                                state.currentStosConfig.stosdirname,
-                                state.currentStosConfig.stosfilename, "*.stos",
+                                pyre.state.currentStosConfig.stosdirname,
+                                pyre.state.currentStosConfig.stosfilename, "*.stos",
                                 wx.FD_SAVE)
             if dlg.ShowModal() == wx.ID_OK:
-                state.currentStosConfig.stosdirname = dlg.GetDirectory()
-                state.currentStosConfig.stosfilename = dlg.GetFilename()
+                pyre.state.currentStosConfig.stosdirname = dlg.GetDirectory()
+                pyre.state.currentStosConfig.stosfilename = dlg.GetFilename()
                 saveFileFullPath = os.path.join(StosWindow.stosdirname, StosWindow.stosfilename)
 
-                stosObj = StosFile.Create(state.currentStosConfig.FixedImageFullPath,
-                                          state.currentStosConfig.WarpedImageFullPath,
-                                          state.currentStosConfig.Transform,
-                                          state.currentStosConfig.FixedImageMaskFullPath,
-                                          state.currentStosConfig.WarpedImageMaskFullPath)
+                stosObj = StosFile.Create(pyre.state.currentStosConfig.FixedImageFullPath,
+                                          pyre.state.currentStosConfig.WarpedImageFullPath,
+                                          pyre.state.currentStosConfig.Transform,
+                                          pyre.state.currentStosConfig.FixedImageMaskFullPath,
+                                          pyre.state.currentStosConfig.WarpedImageMaskFullPath)
                 stosObj.Save(saveFileFullPath)
             dlg.Destroy()

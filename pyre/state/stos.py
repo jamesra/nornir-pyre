@@ -1,25 +1,23 @@
+import concurrent.futures
+from dataclasses import dataclass
 import os
+
 import numpy
 import numpy as np
 from numpy.typing import NDArray
-from dataclasses import dataclass
 import wx
-import concurrent.futures
 
 from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
 import nornir_pools
 import pyre
-from pyre.viewmodels import ImageViewModel, TransformController
-from pyre.state.events import StateEventsImpl, ImageChangedCallback, TransformControllerChangedCallback
-from .interfaces import IImageLoader
-from pyre.state import IMousePositionHistoryManager
-
-from pyre.state.gl_context_manager import IGLContextManager
-from .transformcontroller_glbuffer_manager import ITransformControllerGLBufferManager
-from .window_manager import IWindowManager
-from . import IImageManager, IImageViewModelManager
-from .viewtype import ViewType
+from pyre.interfaces.managers import IImageLoader, IImageManager, IImageViewModelManager, IGLContextManager, \
+    IMousePositionHistoryManager, ITransformControllerGLBufferManager, \
+    IWindowManager
+from pyre.state.events import ImageChangedCallback, StateEventsImpl, TransformControllerChangedCallback
+from pyre.viewmodels import ImageViewModel
+from pyre.controllers.transformcontroller import TransformController
+from pyre.interfaces.viewtype import ViewType
 
 
 @dataclass

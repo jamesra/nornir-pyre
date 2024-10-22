@@ -1,8 +1,8 @@
 import abc
-import nornir_imageregistration
+
 from nornir_imageregistration import ITransform
 import pyre.viewmodels
-from pyre.viewmodels.transformcontroller import TransformController
+from pyre.controllers.transformcontroller import TransformController
 from .events import TransformControllerAddRemoveCallback
 
 
@@ -36,7 +36,7 @@ class ITransformControllerManager(abc.ABC):
 
 class TransformControllerManager(ITransformControllerManager):
     """Tracks the current transform that is being editted"""
-    _transform_controller: pyre.viewmodels.TransformController
+    _transform_controller: pyre.controllers.TransformController
     _OnTransformControllerChangeEventListeners: list[TransformControllerAddRemoveCallback]
 
     def __init__(self):
@@ -53,11 +53,11 @@ class TransformControllerManager(ITransformControllerManager):
             func(self._transform_controller)
 
     @property
-    def transform(self) -> pyre.viewmodels.TransformController | None:
+    def transform(self) -> pyre.controllers.TransformController | None:
         """The current transform that is being editted"""
         return self._transform_controller
 
     @transform.setter
-    def transform(self, value: pyre.viewmodels.TransformController):
+    def transform(self, value: pyre.controllers.TransformController):
         self._transform_controller = value
         self._FireOnTransformControllerChanged()

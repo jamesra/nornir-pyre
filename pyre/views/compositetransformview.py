@@ -6,22 +6,22 @@ Created on Oct 19, 2012
 
 from typing import Callable
 
-import numpy
+import OpenGL.GL as gl
+import numpy as np
+from numpy.typing import NDArray
+from dependency_injector.wiring import Provide, inject
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
-import numpy as np
-from numpy.typing import NDArray
-
-import OpenGL.GL as gl
-import pyre.viewmodels
-from pyre.viewmodels.transformcontroller import TransformController
-from pyre.space import Space
-from pyre.state import Action, IImageViewModelManager
-from pyre.views.interfaces import IImageTransformView
 from pyre.gl_engine import FrameBuffer
 import pyre.gl_engine.shaders as shaders
-from pyre.views import ImageTransformView
+from pyre.interfaces.action import Action
+from pyre.interfaces.managers import IImageViewModelManager
+from pyre.space import Space
+import pyre.viewmodels
+from pyre.controllers.transformcontroller import TransformController
+from pyre.views.interfaces import IImageTransformView
+from pyre.container import IContainer
 
 
 class CompositeTransformView(IImageTransformView):
@@ -105,13 +105,14 @@ class CompositeTransformView(IImageTransformView):
     def transform_controller(self) -> TransformController:
         return self._transform_controller
 
+    @inject
     def __init__(self,
                  display_space: Space,
                  activate_context: Callable[[], None],
-                 image_viewmodel_manager: IImageViewModelManager,
                  source_image_name: str,
                  target_image_name: str,
-                 transform_controller: TransformController):
+                 transform_controller: TransformController,
+                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager], ):
         """
         Constructor
         """
@@ -168,6 +169,8 @@ class CompositeTransformView(IImageTransformView):
             raise NotImplementedError()
 
     def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
+
+        from pyre.views import ImageTransformView
         """Process an add event from the imageviewmodel manager"""
         space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
         view = ImageTransformView(space=space_mapping,

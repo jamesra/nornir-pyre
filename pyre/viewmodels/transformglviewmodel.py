@@ -1,11 +1,11 @@
-import nornir_imageregistration
+from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
-import pyre
-from pyre import Space
-from pyre.viewmodels import TransformController
+
+import nornir_imageregistration
 from pyre.gl_engine import GLBuffer
 from pyre.gl_engine.shaders import controlpointset_shader
+from pyre.controllers.transformcontroller import TransformController
 
 
 class TransformGLViewModel:

@@ -1,8 +1,10 @@
-from abc import abstractmethod, ABC
+from abc import ABC
+
 from OpenGL import GL as gl
 from OpenGL.GL import shaders as glshaders
-from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
+
 from pyre.gl_engine.helpers import check_for_error
+from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
 def bind_texture(texture: int, texture_location: int, gl_texture: int = gl.GL_TEXTURE0):

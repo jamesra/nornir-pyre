@@ -8,9 +8,10 @@ import PIL
 import numpy
 
 from pyre.ui import Camera
+from wx import Window
 
 
-class TileExportWindow(window.Window):
+class TileExportWindow(Window):
     '''
     classdocs
     '''
@@ -75,9 +76,9 @@ class TileExportWindow(window.Window):
 
     def ImageCoordsForMouse(self, x, y):
         ImageX = ((float(x) / self.width) * self.camera.visible_world_width) + (
-                    self.camera.x - (self.camera.visible_world_width / 2))
+                self.camera.x - (self.camera.visible_world_width / 2))
         ImageY = ((float(y) / self.height) * self.camera.visible_world_height) + (
-                    self.camera.y - (self.camera.visible_world_height / 2))
+                self.camera.y - (self.camera.visible_world_height / 2))
         return ImageX, ImageY
 
     def VisibleImageBoundingBox(self):

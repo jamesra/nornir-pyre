@@ -4,9 +4,9 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 from pyre.gl_engine.helpers import check_for_error
 from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
+from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
 class GLBuffer(IBuffer):

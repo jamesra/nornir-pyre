@@ -1,14 +1,13 @@
 """
 A class that stores a set of points and renders a texture centered on each point
 """
-import ctypes
+import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
-import OpenGL.GL as gl
+
 import pyre
-import time
-from pyre.gl_engine import InstancedVAO, GLBuffer
-from pyre.gl_engine.shaders import pointset_shader, PointSetShader
+from pyre.gl_engine import GLBuffer, InstancedVAO
+from pyre.gl_engine.shaders import PointSetShader
 
 
 class PointSetView:

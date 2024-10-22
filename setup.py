@@ -6,8 +6,9 @@ Created on Aug 30, 2013
 
 import sys
 
+from setuptools import find_packages, setup
+
 from ez_setup import use_setuptools
-from setuptools import setup, find_packages
 
 if __name__ == '__main__':
     use_setuptools()

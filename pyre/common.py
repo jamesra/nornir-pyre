@@ -4,20 +4,18 @@ Created on Oct 16, 2012
 @author: u0490822
 '''
 from typing import Iterable
-from numpy.typing import NDArray
-import argparse
-import logging
-import os
-import sys
 
-import nornir_pools
-import nornir_imageregistration
-import nornir_shared.misc
+from dependency_injector.wiring import Provide, inject
 import numpy
+from numpy.typing import NDArray
 
-import pyre
+import nornir_imageregistration
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
+import nornir_pools
+import pyre
+from pyre.container import IContainer
+from pyre.interfaces.managers.command_history import ICommandHistory
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistration.ITransform, warpedImage: NDArray):
@@ -115,14 +113,16 @@ def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefineme
         pass
 
 
-def LinearBlendTransform(blend_factor: float):
+@inject
+def LinearBlendTransform(blend_factor: float,
+                         command_history: ICommandHistory = Provide[IContainer.command_history]):
     if not isinstance(pyre.state.currentStosConfig.Transform, nornir_imageregistration.transforms.IControlPoints):
         print("Linear blend requires control point based transform")
         return
 
-    pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.__setattr__,
-                           'TransformModel',
-                           pyre.state.currentStosConfig.TransformController.TransformModel)
+    command_history.SaveState(pyre.state.currentStosConfig.TransformController.__setattr__,
+                              'TransformModel',
+                              pyre.state.currentStosConfig.TransformController.TransformModel)
 
     updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(
         pyre.state.currentStosConfig.Transform,

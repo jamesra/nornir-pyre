@@ -6,9 +6,10 @@ import wx
 from nornir_imageregistration import Mosaic
 import nornir_imageregistration.tileset
 import nornir_pools
-from pyre.viewmodels import ImageViewModel, TransformController
+from pyre.state.events import StateEventsImpl
+from pyre.viewmodels import ImageViewModel
 from pyre.views import ImageTransformView
-from pyre.state.events import IStateEvents, StateEventsImpl
+from pyre.controllers.transformcontroller import TransformController
 
 
 class MosaicState(StateEventsImpl):

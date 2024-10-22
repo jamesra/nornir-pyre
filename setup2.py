@@ -1,11 +1,7 @@
 # from distutils.core import setup
 
 from distutils.core import setup
-from glob import glob
 import sys
-
-import matplotlib
-import scipy
 
 try:
     import wx
