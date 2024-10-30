@@ -108,8 +108,11 @@ class ImageTransformPanelBase:
 
         self._camera.AddOnChangeEventListener(self.OnCameraChanged)
 
-        # wx.CallAfter(self.on_resize)
-        pass
+        self._glpanel.Bind(wx.EVT_ENTER_WINDOW, handler=self.on_mouse_enter)
+
+    def on_mouse_enter(self, e):
+        self._parent.SetFocus()
+        e.Skip()
 
     def AddStatusBar(self):
         self._statusbar = CameraStatusBar(self._parent,

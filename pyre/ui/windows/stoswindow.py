@@ -177,13 +177,13 @@ class StosWindow(PyreWindowBase):
 
             menu.AppendMenu(wx.ID_ANY, "&Multiple display options", windowSubMenu)
 
-        self.menuShowFixedImage = menu.Append(wx.ID_ANY, "&Fixed Image", kind=wx.ITEM_CHECK)
+        self.menuShowFixedImage = menu.Append(wx.ID_ANY, "&Target Image", kind=wx.ITEM_CHECK)
         menu.Check(self.menuShowFixedImage.GetId(), True)
-        self.Bind(wx.EVT_MENU, self.OnShowFixedWindow, self.menuShowFixedImage)
+        self.Bind(wx.EVT_MENU, self.OnShowTargetWindow, self.menuShowFixedImage)
 
-        self.menuShowWarpedImage = menu.Append(wx.ID_ANY, "&Warped Image", kind=wx.ITEM_CHECK)
+        self.menuShowWarpedImage = menu.Append(wx.ID_ANY, "&Source Image", kind=wx.ITEM_CHECK)
         menu.Check(self.menuShowWarpedImage.GetId(), True)
-        self.Bind(wx.EVT_MENU, self.OnShowWarpedWindow, self.menuShowWarpedImage)
+        self.Bind(wx.EVT_MENU, self.OnShowSourceWindow, self.menuShowWarpedImage)
 
         self.menuShowCompositeImage = menu.Append(wx.ID_ANY, "&Composite Image", kind=wx.ITEM_CHECK)
         menu.Check(self.menuShowCompositeImage.GetId(), True)
@@ -434,14 +434,17 @@ class StosWindow(PyreWindowBase):
     #
     #     self.imagepanel.image_transform_view = imageTransformView
 
-    def OnShowFixedWindow(self, e):
-        pyre.ToggleWindow(ViewType.Source)
+    def OnShowTargetWindow(self, e):
+        window = self._window_manager[ViewType.Target.value]
+        window.Shown = not window.Shown
 
-    def OnShowWarpedWindow(self, e):
-        pyre.ToggleWindow(ViewType.Target)
+    def OnShowSourceWindow(self, e):
+        window = self._window_manager[ViewType.Source.value]
+        window.Shown = not window.Shown
 
     def OnShowCompositeWindow(self, e):
-        pyre.ToggleWindow(ViewType.Composite)
+        window = self._window_manager[ViewType.Composite.value]
+        window.Shown = not window.Shown
 
     def OnRestoreOrientation(self, e):
         pyre.Windows[ViewType.Composite].setPosition()

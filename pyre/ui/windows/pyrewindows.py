@@ -16,7 +16,7 @@ except ImportError:
 
 class PyreWindowBase(wx.Frame):
     """The window we use for views"""
-    _window_manager: IWindowManager
+    _window_manager: IWindowManager = Provide[IContainer.window_manager]
 
     @property
     def ID(self):
@@ -26,9 +26,7 @@ class PyreWindowBase(wx.Frame):
     def __init__(self,
                  parent,
                  windowID,
-                 title,
-                 window_manager: IWindowManager = Provide[IContainer.window_manager]):
-        self._window_manager = window_manager
+                 title):
         wx.Frame.__init__(self, parent, title=title, size=(800, 400))
 
         print("Parent:" + str(self.Parent))

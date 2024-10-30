@@ -11,10 +11,9 @@ from pyre.interfaces.action import ControlPointAction
 from pyre.container import IContainer
 
 
-class ControlPointActionMap(IControlPointActionMap):
+class TriangulationTransformActionMap(IControlPointActionMap):
     """
-    Contains a collection of control points that can be interacted with
-     and assists in mapping input to specific control points
+    Maps inputs to actions based on control points based on a specific type of transform
     """
 
     config = Provide[IContainer.config]
@@ -54,7 +53,7 @@ class ControlPointActionMap(IControlPointActionMap):
 
             elif event.IsShiftPressed and event.IsAltPressed:
                 actions |= ControlPointAction.REGISTER
-            elif event.IsAltPressed:
+            elif event.IsShiftPressed and self.control_point_map.points.shape[0] > 3:
                 actions |= ControlPointAction.DELETE
             else:
                 actions |= ControlPointAction.REGISTER | ControlPointAction.TRANSLATE
@@ -80,7 +79,7 @@ class ControlPointActionMap(IControlPointActionMap):
             elif len(interactions) == 1:
                 if event.IsShiftPressed and event.IsAltPressed and event.IsLeftMousePressed:
                     return ControlPointAction.REGISTER
-                if event.IsRightMousePressed and event.IsShiftPressed:
+                if event.IsRightMousePressed and event.IsShiftPressed and self.control_point_map.points.shape[0] > 3:
                     return ControlPointAction.DELETE
                 # Check for translating a point
                 if event.input == InputEvent.Press and event.IsLeftMousePressed:

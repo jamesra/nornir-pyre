@@ -2,12 +2,7 @@ import logging
 import sys
 from dependency_injector import containers, providers
 
-from pyre.interfaces.managers import (ICommandHistory, IGLContextManager, IImageViewModelManager, IRegionMap,
-                                      ITransformControllerGLBufferManager,
-                                      IMousePositionHistoryManager,
-                                      IImageManager, IRegionMap,
-                                      IImageViewModelManager,
-                                      IGLContextManager, BufferType)
+from pyre.interfaces.managers import (ControlPointManagerKey, BufferType)
 from pyre.state.managers.gl_context_manager import GLContextManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
 from pyre.state.managers.mousepositionhistorymanager import MousePositionHistoryManager
@@ -19,15 +14,11 @@ from pyre.state.managers.window_manager import WindowManager
 from pyre.state.managers.controlpointmapmanager import ControlPointMapManager
 from pyre.state.imageloader import ImageLoader
 from pyre.state import TransformController
-import pyre.gl_engine.shaders.controlpointset_shader
 
-from pyre.container import IContainer, ControlPointActionCommandMapType
-from pyre.interfaces.action import ControlPointAction
-import pyre.commands
+from pyre.container import IContainer
 import pyre.commands.stos
 from nornir_imageregistration.transforms.transform_type import TransformType
-from pyre.commands import DefaultTransformCommand
-from pyre.commands.stos import TranslateControlPointCommand
+from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
 
 
 # from pyre.state.managers import (CommandHistory, GLContextManager, ImageManager, ImageViewModelManager,
@@ -43,6 +34,9 @@ class StosContainer(containers.DeclarativeContainer):
         level=logging.INFO,
         stream=sys.stdout,
     )
+
+    # space = providers.Dependency(instance_of=pyre.Space)
+    # view_type = providers.Dependency(instance_of=pyre.ui.ViewType)
 
     history_manager = providers.ThreadSafeSingleton(CommandHistory)
     region_manager = providers.ThreadSafeSingleton(RegionMap)
@@ -61,6 +55,23 @@ class StosContainer(containers.DeclarativeContainer):
     image_loader = providers.Factory(ImageLoader)
     transform_controller = providers.ThreadSafeSingleton(TransformController)
 
+    control_point_manager_key = providers.Factory(
+        ControlPointManagerKey,
+        transform_controller=transform_controller
+    )
+    # Returns the key for the configured transform controller and space
     controlpointmap_manager = providers.ThreadSafeSingleton(ControlPointMapManager)
 
     action_command_map = pyre.commands.container_overrides.action_command_dp_map
+    # transform_control_point_action_maps: providers.Aggregate[providers.AbstractFactory[
+    #        IControlPointActionMap]] = pyre.commands.container_overrides.transfom_control_point_action_maps
+
+    # Friday PM to Monday Morning self:
+    # You just figured out you could hand out a provider to a factory to get the dictionary provider to work
+    transform_action_map = \
+        providers.Dict({
+            TransformType.GRID: providers.Factory(GridTransformActionMap).provider,
+            TransformType.MESH: providers.Factory(TriangulationTransformActionMap).provider,
+            TransformType.RBF: providers.Factory(TriangulationTransformActionMap).provider,
+            TransformType.RIGID: providers.Factory(TriangulationTransformActionMap).provider,
+        })

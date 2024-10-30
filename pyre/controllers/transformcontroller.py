@@ -66,6 +66,11 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
 
 TransformChangedCallback = Callable[['transform_controller'], None]
 
+# Parameter order is the transform controller, the old transform, the new transform
+TransformModelChangedCallback = Callable[['transform_controller',
+                                          nornir_imageregistration.ITransform,
+                                          nornir_imageregistration.ITransform], None]
+
 
 class TransformController:
     """
@@ -76,11 +81,22 @@ class TransformController:
     _id: int
     _TransformModel: nornir_imageregistration.ITransform = None
     __OnChangeEventListeners: IEventManager[TransformChangedCallback]
+    __OnTransformModelReplacedEventListeners: IEventManager[TransformModelChangedCallback]
     Debug: bool
     ShowWarped: bool
     DefaultToForwardTransform: bool
 
     _selected_points: set[int] = set()
+
+    @staticmethod
+    def swap_columns_to_XY(input: NDArray[np.floating]) -> NDArray[np.floating]:
+        """
+        OpenGL uses X,Y coordinates.  Everything in Nornir uses Y,X coordinates in numpy arrays.
+        For a set of Nx4 control points used by this TransformController this function swaps the
+        columns in pairs to obtain the correct X,Y coordinates for rendering.
+        """
+        output = input[:, [1, 0, 3, 2]]
+        return output
 
     @property
     def selected_points(self) -> set[int]:
@@ -133,12 +149,18 @@ class TransformController:
         return np.empty((0, 2))
 
     @property
-    def WarpedTriangles(self) -> NDArray[np.integer]:
-        return self.TransformModel.WarpedTriangles
+    def WarpedTriangles(self) -> NDArray[np.integer] | None:
+        """:return: The triangulation of the source space, or None if the transform does not support triangulation"""
+        if isinstance(self._TransformModel, nornir_imageregistration.ITriangulatedSourceSpace):
+            return self.TransformModel.source_space_trianglulation
+        return None
 
     @property
-    def FixedTriangles(self) -> NDArray[np.integer]:
-        return self.TransformModel.FixedTriangles
+    def FixedTriangles(self) -> NDArray[np.integer] | None:
+        """:return: The triangulation of the fixed space, or None if the transform does not support triangulation"""
+        if isinstance(self._TransformModel, nornir_imageregistration.ITriangulatedTargetSpace):
+            return self.TransformModel.target_space_trianglulation
+        return None
 
     @property
     def type(self) -> nornir_imageregistration.transforms.TransformType:
@@ -152,16 +174,22 @@ class TransformController:
 
     @TransformModel.setter
     def TransformModel(self, value: nornir_imageregistration.ITransform):
+        if self._TransformModel == value:
+            # No change
+            return
+
         if self._TransformModel is not None:
             self._TransformModel.RemoveOnChangeEventListener(self.OnTransformChanged)
 
+        old_transform = self._TransformModel
         self._TransformModel = value
 
         if self._TransformModel is not None:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
             self._TransformModel.AddOnChangeEventListener(self.OnTransformChanged)
 
-        self.OnTransformChanged()
+        self.FireOnTransformModelChangeEvent(old_transform, self._TransformModel)
+        self.FireOnChangeEvent()
 
     def Transform(self, points: NDArray[float], **kwargs):
         return self.TransformModel.Transform(points, **kwargs)
@@ -170,10 +198,20 @@ class TransformController:
         return self.TransformModel.InverseTransform(points, **kwargs)
 
     def AddOnChangeEventListener(self, func: Callable):
+        """Subscribe to be called when the transform changes in a way that a point may be mapped to a new position"""
         self.__OnChangeEventListeners.add(func)
 
     def RemoveOnChangeEventListener(self, func: Callable):
+        """Unsubscribe to be called when the transform changes in a way that a point may be mapped to a new position"""
         self.__OnChangeEventListeners.remove(func)
+
+    def AddOnModelReplacedEventListener(self, func: Callable):
+        """Unsubscribe to be called when the entire transform model changes, for example the transform type is changed"""
+        self.__OnTransformModelReplacedEventListeners.add(func)
+
+    def RemoveOnModelReplacedEventListener(self, func: Callable):
+        """Unsubscribe to be called when the entire transform model changes, for example the transform type is changed"""
+        self.__OnTransformModelReplacedEventListeners.remove(func)
 
     def OnTransformChanged(self):
         # If the transform is getting complicated then use
@@ -198,10 +236,29 @@ class TransformController:
         # for task in tlist:
         # task.wait()
 
+    def FireOnTransformModelChangeEvent(self, old: nornir_imageregistration.ITransform,
+                                        new: nornir_imageregistration.ITransform):
+        """Calls every function registered to be notified when the transform changes."""
+
+        # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
+        #        Pool = pools.GetGlobalThreadPool()
+        # tlist = list()
+        if wx.App.Get() is None:
+            self.__OnTransformModelReplacedEventListeners.invoke(self, old, new)
+        else:
+            wx.CallAfter(self.__OnTransformModelReplacedEventListeners.invoke, self, old, new)
+        #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
+
+        # for task in tlist:
+        # task.wait()
+
     @property
     def Id(self) -> int:
         """Unique ID of this transform controller"""
         return self._id
+
+    def __str__(self):
+        return f"TransformController {self.Id} {self.type}"
 
     def __init__(self, TransformModel: nornir_imageregistration.ITransform | None = None,
                  DefaultToForwardTransform: bool = True):
@@ -214,6 +271,7 @@ class TransformController:
         TransformController.debug_id += 1
 
         self.__OnChangeEventListeners = pyre.eventmanager.wxEventManager[TransformChangedCallback]()
+        self.__OnTransformModelReplacedEventListeners = pyre.eventmanager.wxEventManager[TransformChangedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 
@@ -339,7 +397,12 @@ class TransformController:
             return
         index = self._ensure_numpy_friendly_index(indicies)
 
-        self.TransformModel.RemovePoint(index)
+        try:
+            self.TransformModel.RemovePoint(index)
+        except ValueError:
+            print(f"Could not remove points {index}, does the transform have enough points remaining?")
+            return False
+
         return True
 
     def RemovePoints(self, indicies: np.ndarray[np.integer]):
@@ -368,7 +431,13 @@ class TransformController:
         return index
 
     @staticmethod
-    def _ensure_numpy_friendly_index(index: set[int] | NDArray[np.integer] | list[int] | Sequence[int]):
+    def _ensure_numpy_friendly_index(index: set[int] | NDArray[np.integer] | list[int] | Sequence[int]) -> NDArray[
+                                                                                                               int] | int:
+        """
+        Ensures that the index is a numpy array of integers or an integer
+        :param index:
+        :return:
+        """
         if isinstance(index, int):
             return index
         elif isinstance(index, set):
@@ -458,11 +527,13 @@ class TransformController:
 
                 FinalPoint = self.TransformModel.SourcePoints[index] + TranslatedPoint
                 index = self.TransformModel.UpdateTargetPointsByIndex(index, FinalPoint)
+            else:
+                index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
                 index = self.TransformModel.UpdateTargetPointsByIndex(index, point)
 
-        print(f'Dragged point {str(index)} {str(point)}')
+        # print(f'Dragged point {str(index)} {str(point)}')
 
         return index
 

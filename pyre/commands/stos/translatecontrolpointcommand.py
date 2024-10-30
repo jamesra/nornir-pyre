@@ -98,7 +98,6 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
         self._selected_points = self._transform_controller.MovePoint(self._selected_points, delta[1], delta[0],
                                                                      space=self.space)
-
         pass
 
     def on_key_down(self, event: wx.KeyEvent):

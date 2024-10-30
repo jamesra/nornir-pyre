@@ -1,9 +1,10 @@
 import wx.glcanvas
 import numpy as np
 from numpy.typing import NDArray
-from typing import Sequence
+from typing import Sequence, Iterable
 from dependency_injector.wiring import Provide
 
+from nornir_imageregistration import ITransform
 import pyre
 from pyre.container import IContainer
 from pyre.controllers import TransformController
@@ -27,12 +28,13 @@ class TransformControllerView:
                  transform_controller: pyre.controllers.TransformController | None):
         """
         :param transform_controller:
-        :param texture_array: The texture array that contains a texture for unselected points at index 0 and
+        :param selected_points: A set indicating which points are selected.  If None, no points are selectable.
         selected points at index 1
         """
         self._controlpoint_view = None
         self._transform_controller = transform_controller
         self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)
+        self._transform_controller.AddOnModelReplacedEventListener(self._OnTransformModelReplaced)
         self._initialized = False
         self._gl_context_manager.add_glcontext_added_event_listener(self.create_objects)
         # pyre.state.currentStosConfig.AddOnTransformControllerChangeEventListener(self._OnTransformControllerChange)
@@ -79,6 +81,14 @@ class TransformControllerView:
         if reset_selection:
             self.selected = None
 
+    def _OnTransformModelReplaced(self, controller: TransformController, old: ITransform, new: ITransform):
+        """The transform model object has changed.  Reset everything"""
+        if self._controlpoint_view is None:
+            return
+
+        self._controlpoint_view.points = self._transform_controller.points
+        self.selected = None
+
     @property
     def selected(self) -> NDArray[bool]:
         return self._control_point_view.texture_index.astype(bool)
@@ -106,10 +116,14 @@ class TransformControllerView:
 
         self._controlpoint_view.texture_index = value.astype(np.uint16)
 
-    def set_selected_by_index(self, index: Sequence[int] | NDArray[int]):
+    def set_selected_by_index(self, index: Iterable[int] | NDArray[int]):
         """Converts passed sequences of integers into a boolean array where values at the index are true"""
         selected = np.zeros(self._controlpoint_view.points.shape[0], dtype=bool)
         index = TransformController._ensure_numpy_friendly_index(index)
+
+        if np.any(index >= self._controlpoint_view.points.shape[0]):
+            raise ValueError("Selected index is out of bounds")
+
         selected[index] = True
         self.selected = selected
 

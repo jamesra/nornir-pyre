@@ -77,7 +77,8 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
                 buffer_collection = self._initialize_buffer_collection()
                 self._transform_controllers[transform_controller] = buffer_collection
                 if buffer_collection is not None:
-                    buffer_collection[BufferType.ControlPoint].data = transform_controller.points
+                    buffer_collection[BufferType.ControlPoint].data = TransformController.swap_columns_to_XY(
+                        transform_controller.points)
                     buffer_collection[BufferType.Selection].data = np.zeros((len(transform_controller.points), 1),
                                                                             dtype=np.uint16)
 

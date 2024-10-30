@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 import pyre
+from pyre.controllers import TransformController
 from pyre.gl_engine import GLBuffer, GLIndexBuffer, InstancedVAO, get_texture_array_length
 from pyre.gl_engine.shaders import ControlPointSetShader
 
@@ -46,7 +47,7 @@ class PointView:
     def points(self, value: NDArray[np.floating]):
         """Change the points to render"""
         value = value.astype(dtype=np.float32, copy=False)
-        gl_value = self.__swap_columns(value)
+        gl_value = TransformController.swap_columns_to_XY(value)
         self._point_buffer.data = gl_value
 
     @property
@@ -104,15 +105,6 @@ class PointView:
         elif min(texture_indicies) < 0:
             raise ValueError("Array of texture indicies contains negative values")
 
-    @staticmethod
-    def __swap_columns(input: NDArray[np.floating]) -> NDArray[np.floating]:
-        """
-        OpenGL uses X,Y coordinates.  Everything else in Nornir uses Y,X coordinates in numpy arrays.
-        This function swaps the columns in pairs to correctly position points on the screen
-        """
-        output = input[:, [1, 0, 3, 2]]
-        return output
-
     def create_open_gl_objects(self,
                                shader: ControlPointSetShader,
                                points: NDArray[np.floating] | GLBuffer | None = None,
@@ -128,6 +120,8 @@ class PointView:
         if points is None:
             points = np.zeros((0, 3), dtype=np.float32)
         if isinstance(points, np.ndarray):
+            # Swap the point order
+            points = TransformController.swap_columns_to_XY(points)
             self._point_buffer = GLBuffer(layout=shader.pointset_layout, data=points, usage=gl.GL_DYNAMIC_DRAW)
         else:
             self._point_buffer = points  # Points is already a GLBuffer

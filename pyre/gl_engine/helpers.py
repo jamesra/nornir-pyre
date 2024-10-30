@@ -1,5 +1,6 @@
 from OpenGL import GL as gl
 import numpy as np
+from numpy.typing import NDArray
 
 
 def check_for_error():

@@ -1,13 +1,15 @@
 from __future__ import annotations
+import abc
 
 from dependency_injector import containers, providers
 from dependency_injector.providers import AbstractFactory, Factory, Dict, AbstractSingleton
 
 import nornir_imageregistration
-from pyre.interfaces.managers import (ICommandHistory, IGLContextManager, IImageLoader, IImageManager,
+from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, IGLContextManager, IImageLoader,
+                                      IImageManager,
                                       IMousePositionHistoryManager,
                                       IRegionMap, ITransformControllerGLBufferManager, IImageViewModelManager,
-                                      IWindowManager, IControlPointMapManager)
+                                      IWindowManager, IControlPointMapManager, ControlPointManagerKey)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
 from pyre.command_interfaces import ICommand
@@ -39,8 +41,20 @@ class IContainer(containers.DeclarativeContainer):
     image_loader: providers.AbstractFactory[IImageLoader] = providers.AbstractFactory()
     transform_controller: providers.AbstractSingleton = providers.AbstractSingleton()
 
+    control_point_manager_key = providers.AbstractFactory(
+        ControlPointManagerKey)  # Returns the key for the configured transform controller and space
     controlpointmap_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
 
+    transform_control_point_action_maps: providers.Dict[
+        TransformType, providers.AbstractFactory[IControlPointActionMap]] = providers.Dict()
+
     # We want a different set of transform commands for each type of transform
-    action_command_map = providers.Dependency(
-        instance_of=providers.Dict[TransformType, ControlPointActionCommandMapType])
+    # action_command_map: providers.Dict[TransformType, ControlPointActionCommandMapType] = providers.Dict({})
+
+    transform_action_map: providers.Dict[TransformType, IControlPointActionMap] = \
+        providers.Dict({
+            TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
+            TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
+            TransformType.RIGID: providers.AbstractFactory(IControlPointActionMap),
+            TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
+        })

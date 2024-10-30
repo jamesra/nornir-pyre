@@ -1,3 +1,5 @@
 from .translatecontrolpointcommand import TranslateControlPointCommand
 from .deletecontrolpointcommand import DeleteControlPointCommand
 from .createcontrolpointcommand import CreateControlPointCommand
+from .gridtransformactionmap import GridTransformActionMap
+from .triangulationtransformactionmap import TriangulationTransformActionMap

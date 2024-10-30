@@ -12,6 +12,9 @@ class ControlPointManagerKey(NamedTuple):
     transform_controller: 'pyre.controllers.transformcontroller.TransformController'
     space: float | Space
 
+    def __str__(self):
+        return f"{self.transform_controller} {self.space}"
+
 
 class IControlPointMapManager(abc.ABC):
     """Tracks ControlPointMaps for a TransformController and a space to prevent rebuilding data structures constantly"""

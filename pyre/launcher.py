@@ -7,6 +7,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import asyncio
+
+import nornir_imageregistration
 
 from dependency_injector.wiring import inject, Provide
 
@@ -129,8 +132,11 @@ def build_container() -> IContainer:
         lambda context: pyre.resources.point_textures.PointTextures.LoadTextures())
 
     # Set the default commands for stos files
-    # container_interface.action_command_map.override(pyre.commands.action_command_map)
-
+    # container_interface.action_command_map = pyre.commands.action_command_map
+    # container_interface.transform_control_point_action_maps.override(pyre.commands.transform_control_point_action_maps)
+    # container_interface.transform_control_point_action_maps = pyre.commands.transfom_control_point_action_maps
+    # f = stos_container.transform_control_point_action_maps()
+    # result = f[nornir_imageregistration.transforms.TransformType.GRID]
     container_interface.check_dependencies()
     container_interface.wire(modules=[__name__], packages=['pyre'])
     # stos_container.check_dependencies()
@@ -161,15 +167,6 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
                                                         imageviewmodel_manager=imageviewmodel_manager)
     pyre.state.currentMosaicConfig = pyre.state.MosaicState()
 
-    #
-    # stos_window_config = pyre.state.StosWindowConfig(glcontext_manager=glcontext_manager,
-    #                                                  transform_controller=stos_transform_controller,
-    #                                                  transformglbuffer_manager=transform_glbuffermanager,
-    #                                                  imageviewmodel_manager=imageviewmodel_manager,
-    #                                                  window_manager=window_manager,
-    #                                                  image_loader=image_loader,
-    #                                                  mouse_position_history_manager=mouse_position_history_manager)
-
     readmetxt = resource_paths.README()
     print(readmetxt)
 
@@ -190,9 +187,10 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     pyre.state.InitializeStateFromArguments(stos_transform_controller, arg_values)
 
-    # Initialize the GL state
+    # app.MainLoop()
 
-    app.MainLoop()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(app.MainLoop())
 
     print("Exiting main loop")
 

@@ -11,6 +11,7 @@ from pyre import Space
 from pyre.command_interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
 
 
@@ -23,6 +24,7 @@ class DeleteControlPointCommand(NavigationCommandBase):
     _original_points: NDArray[[2, ], np.floating]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
+    _set_selection: SetSelectionCallable
 
     @inject
     def __init__(self,
@@ -31,6 +33,7 @@ class DeleteControlPointCommand(NavigationCommandBase):
                  bounds: nornir_imageregistration.Rectangle,
                  selected_points: list[int],  # The indices of the selected points
                  space: Space,  # Space we are moving the points in, source or target side
+                 set_selection: SetSelectionCallable,
                  commandqueue: ICommandQueue,
                  completed_func: StatusChangeCallback = None,
                  transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
@@ -51,6 +54,7 @@ class DeleteControlPointCommand(NavigationCommandBase):
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
         mouse_position = self._mouse_position_history[space]
+        self._set_selection = set_selection
         self._selected_points = selected_points
         if len(selected_points) == 0:
             raise ValueError('No points selected')
@@ -62,17 +66,11 @@ class DeleteControlPointCommand(NavigationCommandBase):
 
     def on_mouse_press(self, event: wx.MouseEvent):
         """Called when the mouse is pressed"""
-        if event.MiddleIsDown() or event.RightIsDown():
-            self.cancel()  # Cancel if the middle mouse button is pressed
-        else:
-            super().on_mouse_press(event)
+        return
 
     def on_mouse_release(self, event: wx.MouseEvent):
         """Called when the mouse is released"""
-        if not event.LeftIsDown():
-            self.execute()
-        else:
-            super().on_mouse_release(event)
+        return
 
     def on_mouse_motion(self, event: wx.MouseEvent):
         """Called when the mouse is dragged"""
@@ -95,7 +93,7 @@ class DeleteControlPointCommand(NavigationCommandBase):
 
     def on_key_up(self, event: wx.KeyEvent):
         """Called when a key is released"""
-        super().on_key_up(event)
+        return
 
     def can_execute(self) -> bool:
         return True
@@ -105,8 +103,13 @@ class DeleteControlPointCommand(NavigationCommandBase):
         return
 
     def execute(self):
+        self._set_selection([])
         self._transform_controller.TryDeletePoints(self._selected_points)
         super().execute()
+
+    def activate(self):
+        super().activate()
+        self.execute()
 
     def subscribe_to_parent(self):
         self._bind_mouse_events()

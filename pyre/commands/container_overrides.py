@@ -1,15 +1,14 @@
-from dependency_injector import providers, containers
-from dependency_injector.providers import Factory, Dict
-from pyre.command_interfaces import ICommand
+from dependency_injector import providers
 from pyre.interfaces.action import ControlPointAction
+from pyre.interfaces.managers import IControlPointActionMap
 from pyre.commands import DefaultTransformCommand
 from pyre.commands.stos import TranslateControlPointCommand, DeleteControlPointCommand, CreateControlPointCommand
 from nornir_imageregistration.transforms.transform_type import TransformType
-from pyre.container import ControlPointActionCommandMapType
+from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
 
 """Maps a transform type to a dictionary that maps the transform type to commands. 
    ControlPointAction.None is the default command."""
-action_command_dp_map = providers.Dict[TransformType, ControlPointActionCommandMapType]({
+action_command_dp_map = providers.Aggregate({
     TransformType.GRID: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand),
         ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand),
@@ -35,8 +34,7 @@ action_command_dp_map = providers.Dict[TransformType, ControlPointActionCommandM
 action_command_map = {
     TransformType.GRID: {
         ControlPointAction.NONE: DefaultTransformCommand,
-        ControlPointAction.TRANSLATE: TranslateControlPointCommand,
-        # ControlPointAction.DELETE: DeleteControlPointCommand, transform does not support DELETE
+        ControlPointAction.TRANSLATE: TranslateControlPointCommand
     },
     TransformType.MESH: {
         ControlPointAction.NONE: DefaultTransformCommand,
@@ -53,6 +51,14 @@ action_command_map = {
     TransformType.RIGID: {
         ControlPointAction.NONE: DefaultTransformCommand,
         ControlPointAction.TRANSLATE: TranslateControlPointCommand,
-        # ControlPointAction.DELETE: DeleteControlPointCommand, transform does not support DELETE
     }
 }
+
+# This map determines which actions can be taken for a mouse position given the current transform type
+# transfom_control_point_action_maps: providers.Aggregate[providers.Factory[IControlPointActionMap]] = \
+#     providers.Aggregate({
+#         TransformType.GRID: providers.Factory(GridTransformActionMap),
+#         TransformType.MESH: providers.Factory(TriangulationTransformActionMap),
+#         TransformType.RBF: providers.Factory(TriangulationTransformActionMap),
+#         TransformType.RIGID: providers.Factory(TriangulationTransformActionMap),
+#     })

@@ -13,6 +13,7 @@ import wx
 from dependency_injector.wiring import Provide, inject
 from dependency_injector.providers import Factory, Dict
 import nornir_imageregistration
+from nornir_imageregistration import ITransform
 from pyre.command_interfaces import ICommand
 from pyre.interfaces import ControlPointAction
 
@@ -33,7 +34,6 @@ from pyre.views import (ClearDrawTextureState, CompositeTransformView, PointView
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
-from pyre.commands.container_overrides import ControlPointActionCommandMapType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import TransformControllerView
 
@@ -157,13 +157,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                  view_type: ViewType,
                  transform_controller: TransformController,
                  imagename_space_mapping: dict[str, Space],
-                 # transform_type_to_command_action_map: dict[TransformType, ControlPointActionCommandMapType] = Provide[
-                 #     IContainer.action_command_map],
+                 transform_type_to_command_action_map: dict[TransformType, ControlPointActionCommandMapType] = Provide[
+                     IContainer.transform_action_map],
                  **kwargs):
         """
         Constructor
         :param space:
         """
+        self._command = None
+        self._transform_controller_view = None
         self._imagename_space_mapping = imagename_space_mapping
         self._view_type = view_type
         self._transform_controller = transform_controller
@@ -175,7 +177,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                          transform_controller=transform_controller,
                          **kwargs)
 
-        # self._config.transform_controller.(self.OnTransformViewModelChanged)
         # self._config.imageviewmodel_manager.add_change_event_listener(self.OnImageViewModelChanged)
 
         # self.schedule = clock.schedule_interval(func = self.update, interval = 1 / 2.)
@@ -208,7 +209,21 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         # wx.CallAfter(self.create_objects)
         wx.CallAfter(self.subscribe_context_activation, self._glcontext_manager)
-        wx.CallAfter(self.activate_command)
+
+        transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
+
+    def _on_transform_model_changed(self,
+                                    controller: TransformController,
+                                    old: ITransform | None,
+                                    new: ITransform):
+        # Cancel the active command
+        if self._command is None:
+            return
+
+        if old != new:
+            self._command.cancel()
+        elif old.type != new.type:
+            self._command.cancel()
 
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):
         glcontext_manager.add_glcontext_added_event_listener(self.create_objects)
@@ -285,7 +300,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if self._image_transform_view is not None:
             self._image_transform_view.create_objects()
 
-        self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
+        if self._transform_controller_view is None:
+            self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
+            wx.CallAfter(self.activate_command)
 
     def on_timer(self, e):
         #        DebugStr = '%d' % self.DebugTickCounter
@@ -295,12 +312,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.DebugTickCounter += 1
         self.glcanvas.Refresh()
         return
-
-    def OnTransformViewModelChanged(self, transform_controller: transform_controller):
-        if self.image_transform_view is not None:
-            self.image_transform_view._transform_controller = transform_controller
-
-        self.glcanvas.Refresh()
 
     def _LabelPreamble(self) -> str:
         return "Fixed: " if self.FixedSpace else "Warping: "

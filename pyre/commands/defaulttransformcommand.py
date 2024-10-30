@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import wx
-from typing import Callable
 from dependency_injector.wiring import Provide, inject
-from dependency_injector.providers import Dict, Factory
 
 import nornir_imageregistration
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
-from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
+from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair
 from pyre.commands.commandbase import ICommand
 from pyre.command_interfaces import StatusChangeCallback
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IControlPointMapManager, \
@@ -16,7 +14,6 @@ from pyre.controllers import TransformController
 import pyre.views.pointview
 from pyre.space import Space
 from pyre.commands.navigationcommandbase import NavigationCommandBase
-from pyre.state.managers.controlpointcommandmanager import ControlPointActionMap
 from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
@@ -75,8 +72,21 @@ class DefaultTransformCommand(NavigationCommandBase):
                  # Used to update interested parties of which control points are selected
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
-                 mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
+                 mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history],
+                 transform_control_point_action_maps=Provide[IContainer.transform_action_map].provider
                  ):
+        """
+
+        :param parent:
+        :param camera:
+        :param bounds:
+        :param space:
+        :param commandqueue: Queue of commands that will execute after this command.
+        :param setselection:  Function we call to specify which control points are selected
+        :param completed_func: Function to call when the command changes state
+        :param transform_controller:  The controller for the transform we are manipulating
+        :param mouse_position_history: The history of mouse positions
+        """
         super().__init__(parent, transform_controller=transform_controller, camera=camera, bounds=bounds,
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
@@ -98,9 +108,12 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._space = space
         self._mouse_position_history = mouse_position_history
         controlpointmapkey = ControlPointManagerKey(transform_controller, space)
+        print(f'Key: {controlpointmapkey} Space: {space}')
 
         self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
-        self._controlpointactionmap = ControlPointActionMap(self._controlpointmap)
+        transform_action_map_factory = transform_control_point_action_maps()[
+            transform_controller.type]
+        self._controlpointactionmap = transform_action_map_factory(self._controlpointmap)
 
         self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
 
@@ -181,10 +194,11 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   position=point)
 
         if event.LeftIsDown():
-            self.update_selection(selection_event_data)
+            self.update_selection_by_point(selection_event_data)
 
         new_command = self._controlpointactionmap.get_action(selection_event_data)
         if new_command is not ControlPointAction.NONE and new_command in self._action_command_map:
+            self.ensure_mouse_point_is_in_selection(selection_event_data)
             if (self._selected_points is None or len(
                     self._selected_points) == 0) and new_command != ControlPointAction.CREATE:
                 raise ValueError("No control points selected")
@@ -194,7 +208,8 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                                 bounds=self._bounds,
                                                                 space=self.space,
                                                                 commandqueue=self._commandqueue,
-                                                                selected_points=self._selected_points)
+                                                                selected_points=self._selected_points,
+                                                                set_selection=self._setselection)
             self._commandqueue.put(new_command)
             self.execute()
             return
@@ -202,7 +217,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         # Do we create a new control point?
         return
 
-    def update_selection(self, selection_event_data: SelectionEventData):
+    def update_selection_by_point(self, selection_event_data: SelectionEventData):
         # Update the selection based on the current mouse position
         new_selections = self._controlpointactionmap.find_interactions(selection_event_data.position,
                                                                        1 / self.camera.scale)
@@ -215,6 +230,14 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         if self._setselection is not None:
             self._setselection(self._selected_points)
+
+    def ensure_mouse_point_is_in_selection(self, selection_event_data: SelectionEventData):
+        """For a command we want to make sure that the point under the mouse is passed with the selected points.
+        This was needed for commands triggered by the right-mouse button that did not cause the selection check"""
+        new_selections = self._controlpointactionmap.find_interactions(selection_event_data.position,
+                                                                       1 / self.camera.scale)
+        self._selected_points = self._selected_points.union(new_selections)
+        self._setselection(self._selected_points)
 
     def on_mouse_motion(self, event: wx.MouseEvent):
         point_pair = self.get_world_positions(event)
