@@ -1,17 +1,47 @@
 import wx.glcanvas
 import numpy as np
 from numpy.typing import NDArray
-from typing import Sequence, Iterable
+from typing import AbstractSet, Sequence, Iterable, Callable
 from dependency_injector.wiring import Provide
 
 from nornir_imageregistration import ITransform
 import pyre
+from pyre.observable import ObservableSet, ObservedAction
 from pyre.container import IContainer
 from pyre.controllers import TransformController
 from pyre.space import Space
 from pyre.views.pointview import PointView
 import pyre.controllers
 from pyre.interfaces.managers.buffertype import BufferType
+
+
+class BinarySelectionMapper:
+    """Maps an observable set of integers to a binary ndarray"""
+    _selection: ObservableSet[int]
+    _setter: Callable[[NDArray[bool]], None]
+
+    def __init__(self, selection: ObservableSet[int],
+                 getter: Callable[[], NDArray[bool]],
+                 setter: Callable[[NDArray[bool]], None]):
+        self._selection = selection
+        self._getter = getter
+        self._setter = setter
+        self._selection.add_observer(self._OnSelectionChanged)
+
+    def _OnSelectionChanged(self, obj: ObservableSet[int], action: ObservedAction, indicies: AbstractSet[int]):
+        """Converts the set of integers to a binary array with the integer values set to true"""
+
+        # Determine the length of the array we are writing to.
+        length = len(self._getter())
+        selected = np.zeros(length, dtype=bool)
+        index = TransformController._ensure_numpy_friendly_index(obj)
+
+        if np.any(index >= length):
+            raise ValueError("index is out of bounds")
+
+        # Set the values at the indicies to true
+        selected[index] = True
+        self._setter(selected)
 
 
 class TransformControllerView:
@@ -91,7 +121,7 @@ class TransformControllerView:
 
     @property
     def selected(self) -> NDArray[bool]:
-        return self._control_point_view.texture_index.astype(bool)
+        return self._controlpoint_view.texture_index.astype(bool)
 
     @selected.setter
     def selected(self, value: NDArray[bool] | NDArray[np.integer] | None):

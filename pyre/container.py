@@ -12,7 +12,7 @@ from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, I
                                       IWindowManager, IControlPointMapManager, ControlPointManagerKey)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
-from pyre.command_interfaces import ICommand
+from pyre.command_interfaces import ICommand, IInstantCommand
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
 from pyre.space import Space
 from nornir_imageregistration.transforms.transform_type import TransformType
@@ -47,6 +47,12 @@ class IContainer(containers.DeclarativeContainer):
 
     transform_control_point_action_maps: providers.Dict[
         TransformType, providers.AbstractFactory[IControlPointActionMap]] = providers.Dict()
+
+    action_command_map: providers.Dict[TransformType, providers.Dict[ControlPointAction, AbstractFactory[ICommand]]] = \
+        providers.Dict({t: \
+                            {action: providers.AbstractFactory(ICommand) for action in iter(ControlPointAction)} \
+                        for t in iter(TransformType)}
+                       )
 
     # We want a different set of transform commands for each type of transform
     # action_command_map: providers.Dict[TransformType, ControlPointActionCommandMapType] = providers.Dict({})

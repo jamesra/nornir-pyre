@@ -6,7 +6,7 @@ from nornir_imageregistration import PointLike
 from pyre.command_interfaces import ICommand
 from pyre.selection_event_data import SelectionEventData
 from pyre.interfaces.managers import IRegion
-from pyre.interfaces.action import ControlPointAction
+from pyre.interfaces.action import ControlPointActionResult
 
 
 class IControlPointActionMap(abc.ABC):
@@ -28,13 +28,13 @@ class IControlPointActionMap(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def get_possible_actions(self, event: SelectionEventData) -> ControlPointAction:
+    def get_possible_actions(self, event: SelectionEventData) -> ControlPointActionResult:
         """Return the flagged actions that might be taken based on the current position and possible further inputs.
             For example: If hovering over a control point, TRANSLATE and DELETE might be returned as they would be triggered
             by a left click or SHIFT+right click respectively."""
 
     @abc.abstractmethod
-    def get_action(self, event: SelectionEventData) -> ControlPointAction:
+    def get_action(self, event: SelectionEventData) -> ControlPointActionResult:
         """
         :return: The action that can be taken for the input.  Only one flag should be set.
         """

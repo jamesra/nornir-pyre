@@ -16,14 +16,14 @@ import pyre
 from pyre.selection_event_data import PointPair
 import pyre.ui
 from pyre.command_interfaces import StatusChangeCallback
-from pyre.commands.commandbase import CommandBase
+from pyre.commands.uicommandbase import UICommandBase, InstantCommandBase
 from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
 from pyre.container import IContainer
 
 
-class NavigationCommandBase(CommandBase, abc.ABC):
+class NavigationCommandBase(UICommandBase, abc.ABC):
     """
     A command that needs to handle the mouse position in volume coordinates
     """

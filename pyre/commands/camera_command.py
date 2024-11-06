@@ -5,10 +5,10 @@ try:
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
-import pyre.commands.commandbase as command_base
+import pyre.commands.uicommandbase as uicommand_base
 
 
-class CameraCommand(command_base.CommandBase):
+class CameraCommand(uicommand_base.UICommandBase):
     '''
     The user interface to adjust the camera
     '''

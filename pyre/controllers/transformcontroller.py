@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import copy
 import math
-from typing import Callable, Sequence
+from typing import Callable, Sequence, Iterable
 
 import numpy
 import numpy as np
@@ -497,17 +497,11 @@ class TransformController:
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPoints):
             return index
 
-        index = self._ensure_numpy_friendly_index(index)
+        np_index = self._ensure_numpy_friendly_index(index)
 
-        if isinstance(index, list):
-            if len(index) > 1:
-                raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
-            else:
-                index = index[0]
-
-        original_point = self.GetPoints(index, space)
+        original_point = self.GetPoints(np_index, space)
         if original_point is None:
-            print(f"No point found for index {index}")
+            print(f"No point found for index {np_index}")
             return index
 
         point = original_point + numpy.array((ImageDY, ImageDX))
@@ -517,25 +511,32 @@ class TransformController:
             # target points in this case.
             if not isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 # if not self.ShowWarped:
-                #     index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
+                #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
                 # else:
+                if isinstance(index, Iterable):
+                    if len(index) > 1:
+                        raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
+
                 OldWarpedPoint = \
                     self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
                 NewWarpedPoint = self.TransformModel.InverseTransform([point])[0]
 
                 TranslatedPoint = NewWarpedPoint - OldWarpedPoint
 
-                FinalPoint = self.TransformModel.SourcePoints[index] + TranslatedPoint
-                index = self.TransformModel.UpdateTargetPointsByIndex(index, FinalPoint)
+                FinalPoint = self.TransformModel.SourcePoints[np_index] + TranslatedPoint
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, FinalPoint)
             else:
-                index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                index = self.TransformModel.UpdateTargetPointsByIndex(index, point)
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)
 
-        # print(f'Dragged point {str(index)} {str(point)}')
+        # print(f'Dragged point {str(np_index)} {str(point)}')
 
-        return index
+        if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
+            return np.array([np_index], dtype=int)
+        else:
+            return np_index
 
     def AutoAlignPoints(self, i_points: Sequence[int]) -> None:
         """Attemps to align the specified point indicies"""

@@ -124,6 +124,7 @@ def build_container() -> IContainer:
     stos_container.config.readme.from_value(readme(readme_path))
     stos_container.init_resources()
     container_interface.override(stos_container)
+    container_interface.action_command_map.override(stos_container.action_command_map)
 
     # Ensure we intialize the shaders and textures before anyone can subscribe to context creation events
     glcontext_manager = stos_container.glcontext_manager()

@@ -20,17 +20,12 @@ class CommandStatus(enum.IntEnum):
     Completed = 2  # The command has completed
 
 
-class ICommand(abc.ABC):
-    """Interface to a UI command"""
+class IInstantCommand(abc.ABC):
+    """Interface to a UI command that executes immediately without user input"""
 
     @abc.abstractmethod
     def execute(self):
         """Called when the command should execute.  The command can invoke this itself."""
-        raise NotImplementedError()
-
-    @abc.abstractmethod
-    def can_execute(self) -> bool:
-        """Return True if the command can execute"""
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -51,6 +46,11 @@ class ICommand(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
+    def add_completed_callback(self, callback: StatusChangeCallback):
+        """Add a callback to be called when the command completes"""
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     def activate(self):
         """Activate the command, this should prompt it to subscribe to any required events and respond to input"""
         raise NotImplementedError()
@@ -61,9 +61,13 @@ class ICommand(abc.ABC):
         remain in progress if it is waiting for a child command to complete"""
         raise NotImplementedError()
 
+
+class ICommand(IInstantCommand):
+    """Interface to a UI command the requires interaction with the user"""
+
     @abc.abstractmethod
-    def add_completed_callback(self, callback: StatusChangeCallback):
-        """Add a callback to be called when the command completes"""
+    def can_execute(self) -> bool:
+        """Return True if the command can execute in its current state"""
         raise NotImplementedError()
 
 

@@ -1,5 +1,5 @@
 from .extensions import *
-from .commandbase import CommandBase
+from .uicommandbase import UICommandBase, InstantCommandBase
 from .navigationcommandbase import NavigationCommandBase
 from .defaulttransformcommand import DefaultTransformCommand
 import pyre.commands.container_overrides as container_overrides

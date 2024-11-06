@@ -7,6 +7,7 @@ import wx
 
 import nornir_imageregistration
 import pyre
+from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
 from pyre.command_interfaces import StatusChangeCallback, ICommand
 from pyre.commands import NavigationCommandBase
@@ -20,6 +21,7 @@ class CreateControlPointCommand(NavigationCommandBase):
 
     _space: Space
     _new_point_position: PointPair
+    _selected_points: ObservableSet[int]  # The indices of the selected points
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _original_points: NDArray[np.floating]
@@ -32,6 +34,7 @@ class CreateControlPointCommand(NavigationCommandBase):
                  bounds: nornir_imageregistration.Rectangle,
                  space: Space,  # Space we are moving the points in, source or target side
                  commandqueue: ICommandQueue,
+                 selected_points: ObservableSet[int],  # The indices of the selected points
                  completed_func: StatusChangeCallback = None,
                  transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
                  **kwargs):
@@ -48,10 +51,13 @@ class CreateControlPointCommand(NavigationCommandBase):
         """
         super().__init__(parent, transform_controller=transform_controller,
                          camera=camera, bounds=bounds,
-                         space=space, commandqueue=commandqueue,
+
+                         space=space,
+                         commandqueue=commandqueue,
                          completed_func=completed_func)
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
+        self._selected_points = selected_points
         self._left_mouse_down = True
         self._new_point_position = PointPair(source=source_position, target=target_position)
         self._original_points = transform_controller.points
@@ -117,7 +123,8 @@ class CreateControlPointCommand(NavigationCommandBase):
                                                                                 bounds=self._bounds,
                                                                                 space=self.space,
                                                                                 commandqueue=self._commandqueue,
-                                                                                selected_points=[index],
+                                                                                selected_points=self._selected_points,
+                                                                                command_points={index},
                                                                                 completed_func=self.check_for_cancel)
             self._commandqueue.put(translate_command)
             self.deactivate()

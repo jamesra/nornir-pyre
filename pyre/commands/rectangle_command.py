@@ -8,11 +8,11 @@ import numpy
 import wx
 
 import nornir_imageregistration.spatial
-from pyre.commands.commandbase import CommandBase
+from pyre.commands.uicommandbase import UICommandBase
 import pyre.views
 
 
-class RectangleCommand(CommandBase):
+class RectangleCommand(UICommandBase):
     '''
     The user interface to draw and size a rectangle
     '''

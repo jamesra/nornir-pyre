@@ -7,7 +7,7 @@ from pyre.command_interfaces import ICommand
 from pyre.selection_event_data import InputModifiers, SelectionEventData, InputEvent
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.interfaces.managers.command_manager import IControlPointActionMap
-from pyre.interfaces.action import ControlPointAction
+from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
 
 
@@ -35,7 +35,7 @@ class GridTransformActionMap(IControlPointActionMap):
     def find_interactions(self, world_position: PointLike, scale: float) -> set[int]:
         return self.control_point_map.find_nearest_within(world_position, self.search_radius * scale)
 
-    def get_possible_actions(self, event: SelectionEventData) -> ControlPointAction:
+    def get_possible_actions(self, event: SelectionEventData) -> ControlPointActionResult:
         """
         :return: The set of flags representing actions that may be taken based on the current position and further inputs.
         For example: If hovering over a control point, TRANSLATE and DELETE might be returned as they would be triggered
@@ -46,37 +46,47 @@ class GridTransformActionMap(IControlPointActionMap):
         # Check for creating a point
         if event.IsMouseInput | event.IsKeyboardInput:
             if len(interactions) == 0:
-                return ControlPointAction.NONE
+                actions = ControlPointAction.NONE
 
             elif event.IsShiftPressed and event.IsAltPressed:
                 actions |= ControlPointAction.REGISTER
             elif event.IsShiftPressed:
-                return ControlPointAction.NONE
+                actions = ControlPointAction.NONE
             else:
                 actions |= ControlPointAction.REGISTER | ControlPointAction.TRANSLATE
 
             # Check for translating points
-            return actions
+            return ControlPointActionResult(actions, interactions)
 
-        return ControlPointAction.NONE
+        return ControlPointActionResult(ControlPointAction.NONE, interactions)
 
-    def get_action(self, event: SelectionEventData) -> ControlPointAction:
+    def get_action(self, event: SelectionEventData) -> ControlPointActionResult:
         """
         :return: The action that can be taken for the input.  Only one flag should be set.
         """
         interactions = self.find_interactions(event.position, 1 / event.camera.scale)
 
+        action = ControlPointAction.NONE
         # Check for creating a point
         if event.IsMouseInput or event.IsKeyboardInput:
-            if len(interactions) == 0:
-                return ControlPointAction.NONE
-
-            # Check for deleting a point
-            elif len(interactions) == 1:
-                if event.IsShiftPressed and event.IsAltPressed and event.IsLeftMousePressed:
-                    return ControlPointAction.REGISTER
-                if event.input == InputEvent.Press and event.IsLeftMousePressed:
-                    return ControlPointAction.TRANSLATE
+            if event.input == InputEvent.Press:
+                if len(interactions) == 0:
+                    if event.IsLeftMousePressed:
+                        action = ControlPointAction.REPLACE_SELECTION
+                # Check for deleting a point
+                elif len(interactions) == 1:
+                    if event.IsShiftPressed and event.IsAltPressed and event.IsLeftMousePressed:
+                        action = ControlPointAction.REGISTER
+                    elif event.IsShiftPressed and event.IsLeftMousePressed:
+                        action = ControlPointAction.TOGGLE_SELECTION
+                    # We only translate when mouse movement occurs, a press can be a selection of a control point
+            elif event.input == InputEvent.Drag:
+                if event.IsLeftMousePressed:
+                    action = ControlPointAction.TRANSLATE
                 # Check for translating a point
+            elif event.input == InputEvent.Release:
+                if len(interactions) > 0:
+                    if event.IsLeftMouseChanged:
+                        action = ControlPointAction.REPLACE_SELECTION
 
-        return ControlPointAction.NONE
+        return ControlPointActionResult(action, interactions)

@@ -17,6 +17,7 @@ from nornir_imageregistration import ITransform
 from pyre.command_interfaces import ICommand
 from pyre.interfaces import ControlPointAction
 
+from pyre.observable import ObservableSet
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import ICommandQueue, IGLContextManager
 from pyre.interfaces.managers.image_viewmodel_manager import IImageViewModelManager
@@ -35,7 +36,7 @@ from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
-from pyre.views.transformcontrollerview import TransformControllerView
+from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
 
 
 @dataclass
@@ -70,11 +71,16 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_glbuffermanager]
 
     _view_type: ViewType
-    _transform_type_to_command_action_map: Dict[TransformType, ControlPointActionCommandMapType]
+    _transform_type_to_command_action_map: Dict[TransformType, Dict[ControlPointAction, Factory]] = Provide[
+        IContainer.action_command_map]
+
+    _action_command_map: Dict[ControlPointAction, Factory] = Provide[IContainer.action_command_map]
 
     _imagename_space_mapping: dict[str, Space]  # Maps an image name to a space
 
     _transform_controller_view: TransformControllerView
+
+    _selected_points: ObservableSet[int]  # The indices of the selected points
 
     @property
     def control_point_scale(self) -> float:
@@ -157,13 +163,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                  view_type: ViewType,
                  transform_controller: TransformController,
                  imagename_space_mapping: dict[str, Space],
-                 transform_type_to_command_action_map: dict[TransformType, ControlPointActionCommandMapType] = Provide[
-                     IContainer.transform_action_map],
                  **kwargs):
         """
         Constructor
         :param space:
         """
+        self._selected_points = ObservableSet[int]()
         self._command = None
         self._transform_controller_view = None
         self._imagename_space_mapping = imagename_space_mapping
@@ -171,8 +176,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._transform_controller = transform_controller
         self._space = space
         self._command_queue: ICommandQueue = CommandQueue()
-        self._transform_type_to_command_action_map = pyre.commands.container_overrides.action_command_map
-
+        # self._transform_type_to_command_action_map = pyre.commands.container_overrides.action_command_map
         super().__init__(parent=parent,
                          transform_controller=transform_controller,
                          **kwargs)
@@ -239,7 +243,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                      camera=self.camera,
                                                                      bounds=bounds,
                                                                      space=self.space,
-                                                                     setselection=self._transform_controller_view.set_selected_by_index)
+                                                                     selected_points=self._selected_points)
 
         # Ensure we load the next command when this command finishes
         self._command.add_completed_callback(self.activate_command)
@@ -302,6 +306,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if self._transform_controller_view is None:
             self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
+            BinarySelectionMapper(self._selected_points,
+                                  lambda: getattr(self._transform_controller_view, 'selected'),
+                                  lambda value: setattr(self._transform_controller_view, 'selected', value))
             wx.CallAfter(self.activate_command)
 
     def on_timer(self, e):

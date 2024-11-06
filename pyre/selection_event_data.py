@@ -16,6 +16,12 @@ class PointPair(NamedTuple):
     source: NDArray[[2, ], np.floating]
 
 
+class SelectionEventKey(NamedTuple):
+    """A key for storing historical event information by source and input type"""
+    source: InputSource
+    input: InputEvent
+
+
 @dataclasses.dataclass
 class SelectionEventData:
     """Describes an input event that triggers a selection"""
@@ -25,6 +31,11 @@ class SelectionEventData:
     input: InputEvent
     modifiers: InputModifiers
     position: NDArray[np.floating]  # The position of the event
+
+    @property
+    def key(self) -> SelectionEventKey:
+        """:return: A key for this event based on source and input type"""
+        return SelectionEventKey(self.source, self.input)
 
     @property
     def IsMouseInput(self) -> bool:
@@ -46,22 +57,47 @@ class SelectionEventData:
     @property
     def IsMiddleMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.MiddleMouseButton in self.modifiers
+            InputModifiers.MiddleMouseButton & self.modifiers
 
     @property
     def IsRightMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.RightMouseButton in self.modifiers
+            InputModifiers.RightMouseButton & self.modifiers
 
     @property
     def IsBackMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.BackMouseButton in self.modifiers
+            InputModifiers.BackMouseButton & self.modifiers
 
     @property
     def IsForwardMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.ForwardMouseButton in self.modifiers
+            InputModifiers.ForwardMouseButton & self.modifiers
+
+    @property
+    def IsLeftMouseChanged(self) -> bool:
+        return self.source == InputSource.Mouse and \
+            self.modifiers & InputModifiers.LeftMouseButtonChanged
+
+    @property
+    def IsMiddleMouseChanged(self) -> bool:
+        return self.source == InputSource.Mouse and \
+            InputModifiers.MiddleMouseButtonChanged & self.modifiers
+
+    @property
+    def IsRightMouseChanged(self) -> bool:
+        return self.source == InputSource.Mouse and \
+            InputModifiers.RightMouseButtonChanged & self.modifiers
+
+    @property
+    def IsBackMouseChanged(self) -> bool:
+        return self.source == InputSource.Mouse and \
+            InputModifiers.BackMouseButtonChanged & self.modifiers
+
+    @property
+    def IsForwardMouseChanged(self) -> bool:
+        return self.source == InputSource.Mouse and \
+            InputModifiers.ForwardMouseButtonChanged & self.modifiers
 
     @property
     def IsShiftPressed(self) -> bool:
@@ -93,14 +129,19 @@ class InputModifiers(enum.Flag):
     """Modifiers that are active during the event"""
     NoModifiers = 0
     ShiftKey = 1
-    ControlKey = 2
-    AltKey = 4
-    MetaKey = 8
-    LeftMouseButton = 16
-    MiddleMouseButton = 32
-    RightMouseButton = 64
-    BackMouseButton = 128
-    ForwardMouseButton = 256
+    ControlKey = 1 << 1
+    AltKey = 1 << 2
+    MetaKey = 1 << 3
+    LeftMouseButton = 1 << 4  # True if the button is pressed
+    MiddleMouseButton = 1 << 5
+    RightMouseButton = 1 << 6
+    BackMouseButton = 1 << 7
+    ForwardMouseButton = 1 << 8
+    LeftMouseButtonChanged = 1 << 9  # True if the button state changed from the last press/release event
+    MiddleMouseButtonChanged = 1 << 10
+    RightMouseButtonChanged = 1 << 11
+    BackMouseButtonChanged = 1 << 12
+    ForwardMouseButtonChanged = 1 << 13
 
 
 class InputSource(enum.Enum):
