@@ -5,13 +5,17 @@ Created on Sep 12, 2013
 """
 from __future__ import annotations
 import argparse
+import atexit
 import logging
 import os
 import asyncio
 
+import yaml
+
 import nornir_imageregistration
 
 from dependency_injector.wiring import inject, Provide
+from dependency_injector.providers import Provider
 
 import wx
 
@@ -27,6 +31,7 @@ from . import resource_paths
 from pyre.container import IContainer
 from pyre.stos_container import StosContainer
 import pyre.commands.stos
+from pyre.settings import AppSettings
 
 app = None
 
@@ -40,8 +45,8 @@ def ProcessArgs():
                         required=False,
                         type=str,
                         default=None,
-                        help='Path to the fixed image',
-                        dest='FixedImageFullPath'
+                        help='Path to the target image',
+                        dest='TargetImageFullPath'
                         )
 
     parser.add_argument('-Warped',
@@ -50,7 +55,7 @@ def ProcessArgs():
                         type=str,
                         default=None,
                         help='Path to the image to be warped',
-                        dest='WarpedImageFullPath'
+                        dest='SourceImageFullPath'
                         )
 
     parser.add_argument('-stos',
@@ -118,9 +123,10 @@ def build_container() -> IContainer:
     module_dir = os.path.dirname(__file__)
     container_interface = IContainer()
 
+    settings = container_interface.settings()  # type: AppSettings
+
     stos_container = StosContainer()
-    stos_container.config.from_yaml(os.path.join(module_dir, 'config.yaml'))
-    readme_path = stos_container.config()['readme_file']
+    readme_path = settings.readme
     stos_container.config.readme.from_value(readme(readme_path))
     stos_container.init_resources()
     container_interface.override(stos_container)
@@ -138,16 +144,33 @@ def build_container() -> IContainer:
     # container_interface.transform_control_point_action_maps = pyre.commands.transfom_control_point_action_maps
     # f = stos_container.transform_control_point_action_maps()
     # result = f[nornir_imageregistration.transforms.TransformType.GRID]
+
+    # stos_container.selected_points = pyre.observable.oset.ObservableSet[int](initial_set=None,
+    #                                                                         call_wrapper=wx.CallAfter)
+
     container_interface.check_dependencies()
     container_interface.wire(modules=[__name__], packages=['pyre'])
-    # stos_container.check_dependencies()
-    # stos_container.wire(modules=[__name__], packages=['pyre'])
+    stos_container.check_dependencies()
+    stos_container.wire(modules=[__name__], packages=['pyre'])
 
     stos_transform_controller = container_interface.transform_controller()
     transform_glbuffermanager = container_interface.transform_glbuffermanager()
     transform_glbuffermanager.add(stos_transform_controller)
 
+    atexit.register(SaveSettings, settings_provider=container_interface.settings)
+
     return container_interface
+
+
+@atexit.register
+def SaveSettings(settings_provider: Provider[AppSettings] = Provide[IContainer.settings].provider):
+    settings = settings_provider()
+    json = settings.model_dump_json(indent=4)
+    output_file = os.path.join(os.path.dirname(__file__), 'settings.json')
+    with open(output_file, 'w') as file:
+        file.write(json)
+
+    print(f"Saved settings to {output_file}")
 
 
 @inject
@@ -186,7 +209,8 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
                        pyre.ui.windows.StosWindow(None, ViewType.Composite, 'Composite Image',
                                                   view_type=ViewType.Composite))
 
-    pyre.state.InitializeStateFromArguments(stos_transform_controller, arg_values)
+    wx.CallAfter(pyre.state.UpdateSettingsFromArguments, arg_values)
+    wx.CallAfter(pyre.state.InitializeStateFromSettings, stos_transform_controller)
 
     # app.MainLoop()
 

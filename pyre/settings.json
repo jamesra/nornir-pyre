@@ -1,0 +1,31 @@
+{
+    "debug": false,
+    "readme": "README.txt",
+    "ui": {
+        "zoom_limits": {
+            "max": 16.0,
+            "min": 0.00390625
+        },
+        "control_point_search_radius": 10.0,
+        "image_search_paths": []
+    },
+    "stos": {
+        "stos_dirname": null,
+        "stos_filename": "D:\\Data\\RC3\\TEM\\Grid32\\1095-1096_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
+        "registration": {
+            "alignment_area": 128,
+            "angles_to_search": {
+                "max_search_angle": 7.5,
+                "search_angle_step_size": 3.0
+            }
+        },
+        "source_image": {
+            "image_fullpath": "D:\\Data\\RC3\\TEM\\1096\\TEM\\Leveled\\Images\\032\\1096_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Data\\RC3\\TEM\\1096\\TEM\\Leveled\\Images\\032\\1096_TEM_Leveled.png"
+        },
+        "target_image": {
+            "image_fullpath": "D:\\Data\\RC3\\TEM\\1095\\TEM\\Leveled\\Images\\032\\1095_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Data\\RC3\\TEM\\1095\\TEM\\Leveled\\Images\\032\\1095_TEM_Leveled.png"
+        }
+    }
+}

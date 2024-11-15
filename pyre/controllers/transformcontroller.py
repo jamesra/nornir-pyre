@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 import wx
 
 import nornir_imageregistration
+from nornir_imageregistration import ImagePermutationHelper
 from nornir_imageregistration.transforms.base import IControlPoints
 import nornir_pools as pools
 import pyre.eventmanager
@@ -85,7 +86,6 @@ class TransformController:
     Debug: bool
     ShowWarped: bool
     DefaultToForwardTransform: bool
-
     _selected_points: set[int] = set()
 
     @staticmethod
@@ -471,21 +471,32 @@ class TransformController:
             return self.TransformModel.TargetPoints[index]
 
     def SetPoint(self, index: int, X: float, Y: float, space: Space = Space.Source) -> int:
+        """Sets the specified point to the new location.  If the transform does not support editing the specied space,
+        the point is changed in the opposite space if possible.  Raises ValueError if the transform does not support
+        editing any space"""
         original_point = np.array((Y, X))
         point = original_point
 
         index = self._ensure_numpy_friendly_index(index)
 
         if space == Space.Target:
-            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                if not self.ShowWarped:
-                    index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
-                else:
-                    NewWarpedPoint = self.TransformModel.InverseTransform([point])[0]
-                    index = self.TransformModel.UpdateSourcePointsByIndex(index, NewWarpedPoint)
-        else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
                 index = self.TransformModel.UpdateTargetPointsByIndex(index, point)
+            elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+                new_source_point = self.TransformModel.InverseTransform([point])[0]
+                index = self.TransformModel.UpdateSourcePointsByIndex(index, new_source_point)
+            else:
+                raise ValueError("Transform does not support editing target points in either source or target space")
+        elif space == Space.Source:
+            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+                index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
+            elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
+                new_target_point = self.TransformModel.Transform([point])[0]
+                index = self.TransformModel.UpdateTargetPointsByIndex(index, new_target_point)
+            else:
+                raise ValueError("Transform does not support editing target points in either source or target space")
+        else:
+            raise ValueError(f"Unexpected value for space: {space}")
 
         print(f"Set point {str(index)} {str(point)}")
 
@@ -537,124 +548,3 @@ class TransformController:
             return np.array([np_index], dtype=int)
         else:
             return np_index
-
-    def AutoAlignPoints(self, i_points: Sequence[int]) -> None:
-        """Attemps to align the specified point indicies"""
-        from pyre.state import currentStosConfig
-
-        if (currentStosConfig.FixedImageViewModel is None or
-                currentStosConfig.WarpedImageViewModel is None):
-            return
-
-        if isinstance(i_points, range):
-            i_points = list(i_points)
-
-        if not isinstance(i_points, list):
-            i_points = [i_points]
-
-        offsets = np.zeros((self.NumPoints, 2))
-
-        indextotask = {}
-        invalid_points = []
-        if len(i_points) > 1:
-            pool = pools.GetGlobalLocalMachinePool()
-
-            for i_point in i_points:
-                fixed = self.GetFixedPoint(i_point)
-                warped = self.GetWarpedPoint(i_point)
-
-                task = pyre.common.StartAttemptAlignPoint(pool=pool,
-                                                          task_description=f"Align Pyre Point {i_point}",
-                                                          transform=self.TransformModel,
-                                                          target_image=currentStosConfig.FixedImages.ImageWithMaskAsNoise,
-                                                          source_image=currentStosConfig.WarpedImages.ImageWithMaskAsNoise,
-                                                          target_mask=currentStosConfig.FixedImages.BlendedMask,
-                                                          source_mask=currentStosConfig.WarpedImages.BlendedMask,
-                                                          target_image_stats=currentStosConfig.FixedImageViewModel.Stats,
-                                                          source_image_stats=currentStosConfig.WarpedImageViewModel.Stats,
-                                                          target_controlpoint=fixed,
-                                                          alignmentArea=currentStosConfig.AlignmentTileSize,
-                                                          anglesToSearch=currentStosConfig.AnglesToSearch)
-
-                if task is not None:
-                    indextotask[i_point] = task
-                else:
-                    invalid_points.append(i_point)
-
-            for i_point in sorted(indextotask.keys()):
-                task = indextotask[i_point]
-
-                record = None
-                try:
-                    record = task.wait_return()
-                except Exception as e:
-                    print(f"Exception aligning point {i_point}:\n{e}")
-                    return
-
-                if record is None:
-                    print("point #" + str(i_point) + " returned None for alignment")
-                    continue
-
-                if record.weight == 0:
-                    print("point #" + str(i_point) + " returned weight 0 for alignment, ignoring")
-                    continue
-
-                (dy, dx) = record.peak
-
-                if math.isnan(dx) or math.isnan(dy):
-                    continue
-
-                offsets[i_point, :] = np.array([dy, dx])
-                del indextotask[i_point]
-
-        else:
-            i_point = i_points[0]
-            fixed = self.GetFixedPoint(i_point)
-            warped = self.GetWarpedPoint(i_point)
-            task = pyre.common.StartAttemptAlignPoint(pool=pools.GetGlobalLocalMachinePool(),
-                                                      task_description=f"Align Pyre Point {i_point}",
-                                                      transform=self.TransformModel,
-                                                      target_image=currentStosConfig.FixedImages.ImageWithMaskAsNoise,
-                                                      source_image=currentStosConfig.WarpedImages.ImageWithMaskAsNoise,
-                                                      target_mask=currentStosConfig.FixedImages.BlendedMask,
-                                                      source_mask=currentStosConfig.WarpedImages.BlendedMask,
-                                                      target_image_stats=currentStosConfig.FixedImageViewModel.Stats,
-                                                      source_image_stats=currentStosConfig.WarpedImageViewModel.Stats,
-                                                      target_controlpoint=fixed,
-                                                      alignmentArea=currentStosConfig.AlignmentTileSize,
-                                                      anglesToSearch=currentStosConfig.AnglesToSearch)
-
-            if task is None:
-                print("point #" + str(i_point) + " had no texture for alignment")
-                return
-
-            record = None
-            try:
-                record = task.wait_return()
-            except Exception as e:
-                print(f"Exception aligning point {i_point}:\n{e}")
-                return
-
-            if record is None:
-                print("point #" + str(i_point) + " returned None for alignment")
-                return
-
-            if record.weight == 0:
-                print("point #" + str(i_point) + " returned weight 0 for alignment, ignoring")
-                return
-
-            (dy, dx) = record.peak
-
-            if math.isnan(dx) or math.isnan(dy):
-                return
-
-            print(f"Adjusting point {i_point} by x: {dx} y: {dy}")
-            offsets[i_point, :] = np.array([dy, dx])
-
-        # Translate all points
-        self.TranslateFixed(offsets)
-
-        # If we aligned all points, remove the ones we couldn't register
-        self.RemovePoints(invalid_points)
-
-        # return self._transform_controller.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)

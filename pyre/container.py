@@ -1,5 +1,9 @@
 from __future__ import annotations
 import abc
+import os
+import sys
+import pydantic
+from typing import Generator
 
 from dependency_injector import containers, providers
 from dependency_injector.providers import AbstractFactory, Factory, Dict, AbstractSingleton
@@ -14,10 +18,56 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
 from pyre.command_interfaces import ICommand, IInstantCommand
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
+from pyre.settings import AppSettings
 from pyre.space import Space
 from nornir_imageregistration.transforms.transform_type import TransformType
 
 ControlPointActionCommandMapType = Dict[ControlPointAction, AbstractFactory[ICommand]]
+
+
+def find_file_in_syspath(filename) -> Generator[str, None, None]:
+    for directory in sys.path:
+        potential_path = os.path.join(directory, filename)
+        if os.path.isfile(potential_path):
+            yield potential_path
+    return None
+
+
+def load_yaml_settings() -> object:
+    try:
+        current_directory = os.path.dirname(__file__)
+        cwd_config = os.path.join(current_directory, 'config.yaml')
+        with open(cwd_config, 'r') as file:
+            return yaml.load(file, Loader=yaml.FullLoader)
+    except:
+        print("Failed to load configuration file: " + cwd_config)
+
+    for configuration in find_file_in_syspath('config.yaml'):
+        try:
+            with open(configuration, 'r') as file:
+                return yaml.load(file, Loader=yaml.FullLoader)
+        except:
+            print("Failed to load configuration file: " + configuration)
+
+    raise ValueError(f"Failed to find config.yaml configuration file in {sys.path}")
+
+
+def load_json_settings() -> AppSettings:
+    try:
+        current_directory = os.path.dirname(__file__)
+        cwd_config = os.path.join(current_directory, 'settings.json')
+        return AppSettings.parse_file(cwd_config)
+
+    except:
+        print("Failed to load configuration file: " + cwd_config)
+
+    for configuration in find_file_in_syspath('settings.json'):
+        try:
+            return AppSettings.parse_file(cwd_config)
+        except:
+            print("Failed to load configuration file: " + configuration)
+
+    raise ValueError(f"Failed to find config.yaml configuration file in {sys.path}")
 
 
 class IContainer(containers.DeclarativeContainer):
@@ -64,3 +114,5 @@ class IContainer(containers.DeclarativeContainer):
             TransformType.RIGID: providers.AbstractFactory(IControlPointActionMap),
             TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
         })
+
+    settings = providers.Resource(load_json_settings)

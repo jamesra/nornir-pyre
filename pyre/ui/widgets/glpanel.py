@@ -52,7 +52,7 @@ class GLPanel(wx.glcanvas.GLCanvas):
                  **kwargs):
         self._draw_method = draw_method
         # Forcing a no full repaint to stop flickering
-        style = style | wx.NO_FULL_REPAINT_ON_RESIZE
+        style = style | wx.NO_FULL_REPAINT_ON_RESIZE | wx.WANTS_CHARS
         # call super function
         disp_attrs = wx.glcanvas.GLAttributes()
         disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()

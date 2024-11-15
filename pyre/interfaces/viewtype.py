@@ -15,6 +15,6 @@ def convert_to_key(key: str | enum.Enum) -> str:
     if isinstance(key, str):
         return key
     elif isinstance(key, enum.Enum):
-        return key.value
+        return key.name
     else:
         raise TypeError(f"key must be a string or ViewType, not {type(key)}")

@@ -280,103 +280,104 @@ class StosState(StateEventsImpl):
         else:
             return nornir_imageregistration.ImagePermutationHelper(img.Image, mask.Image)
 
-    @staticmethod
-    def LoadStos2(stosFullPath: str | None,
-                  transform_controller: TransformController,
-                  image_loader: IImageLoader,
-                  image_manager: IImageManager,
-                  search_dirs: list[str]):
-
-        success = True
-
-        dirname = os.path.dirname(stosFullPath)
-        filename = os.path.basename(stosFullPath)
-
-        obj = StosFile.Load(os.path.join(dirname, filename))
-        transform_controller.TransformModel = nornir_imageregistration.transforms.LoadTransform(obj.Transform)
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            source_task = pool.submit(image_loader.load_image_into_manager_task,
-                                      key=ViewType.Source,
-                                      image_path=obj.ControlImageFullPath,
-                                      mask_path=obj.ControlMaskFullPath,
-                                      image_manager=image_manager,
-                                      search_dirs=search_dirs)
-
-            source_task.on_complete(
-                lambda task: image_loader.create_image_viewmodel('source', task.result(), imageviewmodel_manager))
-
-            target_task = pool.submit(image_loader.load_image_into_manager_task,
-                                      key=ViewType.Target,
-                                      image_path=obj.MappedImageFullPath,
-                                      mask_path=obj.MappedMaskFullPath,
-                                      image_manager=image_manager,
-                                      search_dirs=search_dirs)
-
-    def LoadStos(self, stosFullPath: str | None):
-
-        if stosFullPath is None:
-            return False
-
-        success = True
-
-        dirname = os.path.dirname(stosFullPath)
-        filename = os.path.basename(stosFullPath)
-
-        obj = StosFile.Load(os.path.join(dirname, filename))
-        self.LoadTransform(stosFullPath)
-
-        pool = nornir_pools.GetGlobalThreadPool()
-        ControlImageTask = None
-        WarpedImageTask = None
-        ControlImageMaskTask = None
-        WarpedImageMaskTask = None
-
-        # First check the absolute path in the .stos file for images, then
-        # check relative to the .stos file's directory
-        ControlImagePath = self._try_locate_file(obj.ControlImageFullPath, [dirname])
-        if ControlImagePath is not None:
-            ControlImageTask = pool.add_task('load fixed %s' % ControlImagePath, LoadImage, ControlImagePath)
-        else:
-            print("Could not find fixed image: " + obj.ControlImageFullPath)
-            success = False
-
-        WarpedImagePath = self._try_locate_file(obj.MappedImageFullPath, [dirname])
-        if WarpedImagePath is not None:
-            WarpedImageTask = pool.add_task('load warped %s' % WarpedImagePath, LoadImage, WarpedImagePath)
-        else:
-            print("Could not find warped image: " + obj.MappedImageFullPath)
-            success = False
-
-        if obj.HasMasks and success:
-            ControlMaskImagePath = self._try_locate_file(obj.ControlMaskFullPath, [dirname])
-            if ControlMaskImagePath:
-                ControlImageMaskTask = pool.add_task('load fixed mask %s' % ControlMaskImagePath, LoadImage,
-                                                     ControlMaskImagePath)
-
-            WarpedMaskImagePath = self._try_locate_file(obj.MappedMaskFullPath, [dirname])
-            if WarpedMaskImagePath:
-                WarpedImageMaskTask = pool.add_task('load warped mask %s' % WarpedMaskImagePath, LoadImage,
-                                                    WarpedMaskImagePath)
-
-        if ControlImageTask is not None:
-            self.FixedImageViewModel = ControlImageTask.wait_return()
-
-        if WarpedImageTask is not None:
-            self.WarpedImageViewModel = WarpedImageTask.wait_return()
-
-        if ControlImageMaskTask is not None:
-            self.FixedImageMaskViewModel = ControlImageMaskTask.wait_return()
-
-        if WarpedImageMaskTask is not None:
-            self.WarpedImageMaskViewModel = WarpedImageMaskTask.wait_return()
-
-        self._fixed_image_permutations = self._update_image_permutations(self.FixedImageViewModel,
-                                                                         self.FixedImageMaskViewModel)
-
-        self._warped_image_permutations = self._update_image_permutations(self.WarpedImageViewModel,
-                                                                          self.WarpedImageMaskViewModel)
-        return success
+    #
+    # @staticmethod
+    # def LoadStos2(stosFullPath: str | None,
+    #               transform_controller: TransformController,
+    #               image_loader: IImageLoader,
+    #               image_manager: IImageManager,
+    #               search_dirs: list[str]):
+    #
+    #     success = True
+    #
+    #     dirname = os.path.dirname(stosFullPath)
+    #     filename = os.path.basename(stosFullPath)
+    #
+    #     obj = StosFile.Load(os.path.join(dirname, filename))
+    #     transform_controller.TransformModel = nornir_imageregistration.transforms.LoadTransform(obj.Transform)
+    #
+    #     with concurrent.futures.ThreadPoolExecutor() as pool:
+    #         source_task = pool.submit(image_loader.load_image_into_manager_task,
+    #                                   key=ViewType.Source,
+    #                                   image_path=obj.ControlImageFullPath,
+    #                                   mask_path=obj.ControlMaskFullPath,
+    #                                   image_manager=image_manager,
+    #                                   search_dirs=search_dirs)
+    #
+    #         source_task.on_complete(
+    #             lambda task: image_loader.create_image_viewmodel('source', task.result(), imageviewmodel_manager))
+    #
+    #         target_task = pool.submit(image_loader.load_image_into_manager_task,
+    #                                   key=ViewType.Target,
+    #                                   image_path=obj.MappedImageFullPath,
+    #                                   mask_path=obj.MappedMaskFullPath,
+    #                                   image_manager=image_manager,
+    #                                   search_dirs=search_dirs)
+    #
+    # def LoadStos(self, stosFullPath: str | None):
+    #
+    #     if stosFullPath is None:
+    #         return False
+    #
+    #     success = True
+    #
+    #     dirname = os.path.dirname(stosFullPath)
+    #     filename = os.path.basename(stosFullPath)
+    #
+    #     obj = StosFile.Load(os.path.join(dirname, filename))
+    #     self.LoadTransform(stosFullPath)
+    #
+    #     pool = nornir_pools.GetGlobalThreadPool()
+    #     ControlImageTask = None
+    #     WarpedImageTask = None
+    #     ControlImageMaskTask = None
+    #     WarpedImageMaskTask = None
+    #
+    #     # First check the absolute path in the .stos file for images, then
+    #     # check relative to the .stos file's directory
+    #     ControlImagePath = self._try_locate_file(obj.ControlImageFullPath, [dirname])
+    #     if ControlImagePath is not None:
+    #         ControlImageTask = pool.add_task('load fixed %s' % ControlImagePath, LoadImage, ControlImagePath)
+    #     else:
+    #         print("Could not find fixed image: " + obj.ControlImageFullPath)
+    #         success = False
+    #
+    #     WarpedImagePath = self._try_locate_file(obj.MappedImageFullPath, [dirname])
+    #     if WarpedImagePath is not None:
+    #         WarpedImageTask = pool.add_task('load warped %s' % WarpedImagePath, LoadImage, WarpedImagePath)
+    #     else:
+    #         print("Could not find warped image: " + obj.MappedImageFullPath)
+    #         success = False
+    #
+    #     if obj.HasMasks and success:
+    #         ControlMaskImagePath = self._try_locate_file(obj.ControlMaskFullPath, [dirname])
+    #         if ControlMaskImagePath:
+    #             ControlImageMaskTask = pool.add_task('load fixed mask %s' % ControlMaskImagePath, LoadImage,
+    #                                                  ControlMaskImagePath)
+    #
+    #         WarpedMaskImagePath = self._try_locate_file(obj.MappedMaskFullPath, [dirname])
+    #         if WarpedMaskImagePath:
+    #             WarpedImageMaskTask = pool.add_task('load warped mask %s' % WarpedMaskImagePath, LoadImage,
+    #                                                 WarpedMaskImagePath)
+    #
+    #     if ControlImageTask is not None:
+    #         self.FixedImageViewModel = ControlImageTask.wait_return()
+    #
+    #     if WarpedImageTask is not None:
+    #         self.WarpedImageViewModel = WarpedImageTask.wait_return()
+    #
+    #     if ControlImageMaskTask is not None:
+    #         self.FixedImageMaskViewModel = ControlImageMaskTask.wait_return()
+    #
+    #     if WarpedImageMaskTask is not None:
+    #         self.WarpedImageMaskViewModel = WarpedImageMaskTask.wait_return()
+    #
+    #     self._fixed_image_permutations = self._update_image_permutations(self.FixedImageViewModel,
+    #                                                                      self.FixedImageMaskViewModel)
+    #
+    #     self._warped_image_permutations = self._update_image_permutations(self.WarpedImageViewModel,
+    #                                                                       self.WarpedImageMaskViewModel)
+    #     return success
 
     def WindowsLookAtFixedPoint(self, fixed_point, scale):
         """Force all open windows to look at this point"""

@@ -1,12 +1,12 @@
 import threading
 import abc
-from pyre.command_interfaces import ICommand
+from pyre.command_interfaces import ICommand, IInstantCommand
 
 
 class ICommandQueue(abc.ABC):
 
     @abc.abstractmethod
-    def put(self, command: ICommand):
+    def put(self, command: IInstantCommand):
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -14,7 +14,7 @@ class ICommandQueue(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def get(self) -> ICommand | None:
+    def get(self) -> IInstantCommand | None:
         raise NotImplementedError()
 
     @abc.abstractmethod

@@ -24,6 +24,7 @@ from pyre.interfaces.managers.image_viewmodel_manager import IImageViewModelMana
 from pyre.interfaces.managers.transformcontroller_glbuffer_manager import ITransformControllerGLBufferManager, \
     BufferType
 import pyre.interfaces.managers.gl_context_manager
+from pyre.settings import AppSettings
 from pyre.space import Space
 from pyre.state import ViewType
 from pyre.state.managers.command_queue import CommandQueue
@@ -53,7 +54,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     """
     The main editing control for a transform.
     """
-    config = Provide[IContainer.config]
+    _settings: AppSettings = Provide[IContainer.settings]
 
     _CurrentDragPoint: int | None = None
     _HighlightedPointIndex: int | None = 0
@@ -74,7 +75,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _transform_type_to_command_action_map: Dict[TransformType, Dict[ControlPointAction, Factory]] = Provide[
         IContainer.action_command_map]
 
-    _action_command_map: Dict[ControlPointAction, Factory] = Provide[IContainer.action_command_map]
+    # _action_command_map: Dict[ControlPointAction, Factory] = Provide[IContainer.action_command_map]
 
     _imagename_space_mapping: dict[str, Space]  # Maps an image name to a space
 
@@ -85,7 +86,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     @property
     def control_point_scale(self) -> float:
         """Determines how large control points are rendered"""
-        return self.config['control_point_search_radius']
+        return self._settings.ui.control_point_search_radius
 
     @property
     def imagename_space_mapping(self) -> dict[str, Space]:
@@ -163,12 +164,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                  view_type: ViewType,
                  transform_controller: TransformController,
                  imagename_space_mapping: dict[str, Space],
+                 selected_points: ObservableSet[int],
                  **kwargs):
         """
         Constructor
         :param space:
         """
-        self._selected_points = ObservableSet[int]()
+        self._selected_points = selected_points
         self._command = None
         self._transform_controller_view = None
         self._imagename_space_mapping = imagename_space_mapping

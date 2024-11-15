@@ -1,14 +1,38 @@
 from __future__ import annotations
+import os
 
 import abc
 from enum import Enum
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 
 import nornir_imageregistration
 from pyre.interfaces.action import Action
+
+
+class ImageLoadResult(NamedTuple):
+    key: str  # key to store the image under in the image manager
+    permutations: nornir_imageregistration.ImagePermutationHelper  # Image data loaded
+    image_fullpath: str  # Path to the image file
+    mask_fullpath: str | None  # Path to the mask file
+
+    @property
+    def image_dirname(self) -> str:
+        return os.path.dirname(self.image_fullpath)
+
+    @property
+    def mask_dirname(self) -> str | None:
+        return os.path.dirname(self.mask_fullpath)
+
+    @property
+    def image_basename(self) -> str:
+        return os.path.basename(self.image_fullpath)
+
+    @property
+    def mask_basename(self) -> str | None:
+        return os.path.basename(self.mask_fullpath) if self.mask_fullpath is not None else None
 
 
 class IImageLoader(abc.ABC):
@@ -21,7 +45,7 @@ class IImageLoader(abc.ABC):
     def load_image_into_manager(self, key: str | Enum | None,
                                 image_path: str,
                                 mask_path: str | None,
-                                search_dirs: list[str]) -> tuple[str, nornir_imageregistration.ImagePermutationHelper]:
+                                search_dirs: list[str]) -> ImageLoadResult:
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -45,7 +69,7 @@ class IImageManager(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def __getitem__(self, key: str) -> NDArray[np.floating]:
+    def __getitem__(self, key: str) -> nornir_imageregistration.ImagePermutationHelper:
         raise NotImplementedError()
 
     @abc.abstractmethod

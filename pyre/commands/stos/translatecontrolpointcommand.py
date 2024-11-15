@@ -11,6 +11,7 @@ from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
 from pyre.command_interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
+from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 
@@ -60,12 +61,12 @@ class TranslateControlPointCommand(NavigationCommandBase):
         mouse_position = self._mouse_position_history[space]
         self._translate_origin = mouse_position
         self._selected_point_set = selected_points
-        selected_points.update(command_points)
-        self._command_points = selected_points
+        combined_command_points = set(selected_points)
+        combined_command_points.update(command_points)
+        self._command_points = combined_command_points
 
-        if (len(selected_points) == 0 or selected_points is None) and \
-                (command_points is None or len(command_points) == 0):
-            raise ValueError('No points selected')
+        if len(self._command_points) == 0:
+            raise RequiresSelectionError()
 
         self._original_points = transform_controller.points
 

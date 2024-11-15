@@ -10,16 +10,19 @@ class Action(enum.IntEnum):
 class ControlPointAction(enum.Flag):
     """Possible interactions for control point(s)"""
     NONE = 0
-    CREATE = 1
-    DELETE = 2
-    TRANSLATE = 4
-    REGISTER = 8
-    SELECT = 16  # Select the control points under the mouse
-    ROTATE = 32  # Rotate the selected control points
-    RECALL = 64  # Call the selected control points to the mouse cursor
-    REPLACE_SELECTION = 128  # Set the selection to the control points under the mouse
-    APPEND_SELECTION = 256  # Add the control points to the selection
-    TOGGLE_SELECTION = 512  # Toggle the selection of the control points
+    CREATE = 1  # Create a control point
+    CREATE_REGISTER = 1 << 1  # Create a control point and auto-register it
+    DELETE = 1 << 2
+    TRANSLATE = 1 << 3
+    REGISTER = 1 << 4  # Register the selected control points
+    REGISTER_ALL = 1 << 5  # Register all points
+    SELECT = 1 << 6  # Select the control points under the mouse
+    ROTATE = 1 << 7  # Rotate the selected control points
+    RECALL = 1 << 8  # Call the selected control points to the mouse cursor
+    REPLACE_SELECTION = 1 << 9  # Set the selection to the control points under the mouse
+    APPEND_SELECTION = 1 << 10  # Add the control points to the selection
+    TOGGLE_SELECTION = 1 << 11  # Toggle the selection of the control points
+    CALL_TO_MOUSE = 1 << 12  # Call the selected control point to the mouse cursor
 
 
 class ControlPointActionResult(NamedTuple):

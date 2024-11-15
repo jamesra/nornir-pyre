@@ -97,6 +97,9 @@ class PointView:
             return
 
         if isinstance(texture_indicies, GLBuffer):
+            if texture_indicies.capacity == 0:  # If we are not setting any texture indicies there is nothing to check
+                return
+
             texture_indicies = texture_indicies.data
 
         if max(texture_indicies) >= self._num_textures:

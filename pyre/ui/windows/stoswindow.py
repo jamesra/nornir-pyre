@@ -7,15 +7,18 @@ from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
+from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
-from pyre.interfaces.managers import ICommandHistory, IImageViewModelManager
+from pyre.interfaces.managers import ICommandHistory, IImageViewModelManager, IImageLoader
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
 import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
 from pyre.ui.windows.pyrewindows import PyreWindowBase
+from pyre.stos_container import StosContainer
+from pyre.observable import ObservableSet
 
 
 class StosWindow(PyreWindowBase):
@@ -26,11 +29,12 @@ class StosWindow(PyreWindowBase):
     _space: Space
     dirname: str = ''
     _view_type: ViewType
-
+    _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
     _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
     _history_manager: ICommandHistory = Provide[IContainer.history_manager]
     _config = Provide[IContainer.config]
+    _settings: AppSettings = Provide[IContainer.settings]
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -94,7 +98,8 @@ class StosWindow(PyreWindowBase):
                                                   space=self._space,
                                                   view_type=view_type,
                                                   transform_controller=transform_controller,
-                                                  imagename_space_mapping=imagename_space_mapping)
+                                                  imagename_space_mapping=imagename_space_mapping,
+                                                  selected_points=self._selected_points)
 
         # self.control = wx.StaticText(panel, -1, README_Import(self), size=(800,-1))
 
@@ -549,10 +554,31 @@ class StosWindow(PyreWindowBase):
             self.dirname = str(dlg.GetDirectory())
             StosWindow.stosfilename = filename
 
-            pyre.state.currentStosConfig.LoadStos(os.path.join(self.dirname,
-                                                               filename))
+            self.LoadStos(os.path.join(self.dirname, filename))
+            # pyre.state.currentStosConfig.LoadStos(os.path.join(self.dirname,
+            #                                                   filename))
 
         dlg.Destroy()
+
+    @staticmethod
+    def LoadStos(filename: str,
+                 image_loader: IImageLoader = Provide[IContainer.image_loader],
+                 stos_transform_controller: pyre.state.TransformController = Provide[
+                     StosContainer.transform_controller],
+                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+        try:
+            load_result = image_loader.load_stos(filename)
+            settings.stos.stos_filename = filename
+            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
+            stos_transform_controller.TransformModel = transform
+
+            settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
+                                                          mask_fullpath=load_result.source.mask_fullpath)
+            settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
+                                                          mask_fullpath=load_result.target.mask_fullpath)
+        except Exception as e:
+            print("Error loading stos file: {e}")
+            pass
 
     def OnSaveWarpedImage(self, e):
         # Set the path for the output directory.
@@ -575,20 +601,26 @@ class StosWindow(PyreWindowBase):
                               pyre.state.currentStosConfig.WarpedImageViewModel.Image)
 
     def OnSaveStos(self, e):
-        if not (pyre.state.currentStosConfig.TransformController is None):
+        if not (self._transform_controller is None):
+            if self._settings.stos.stos_filename is not None:
+                dirname = os.path.dirname(self._settings.stos.stos_filename)
+                filename = os.path.basename(self._settings.stos.stos_filename)
+            else:
+                dirname = os.getcwd()
+                filename = None
+
             dlg = wx.FileDialog(self, "Choose a Directory",
-                                pyre.state.currentStosConfig.stosdirname,
-                                pyre.state.currentStosConfig.stosfilename, "*.stos",
+                                dirname,
+                                filename, "*.stos",
                                 wx.FD_SAVE)
             if dlg.ShowModal() == wx.ID_OK:
-                pyre.state.currentStosConfig.stosdirname = dlg.GetDirectory()
-                pyre.state.currentStosConfig.stosfilename = dlg.GetFilename()
-                saveFileFullPath = os.path.join(StosWindow.stosdirname, StosWindow.stosfilename)
+                fullpath = os.path.join(dlg.GetDirectory(), dlg.GetFilename())
+                self._settings.stos.stos_filename = fullpath
 
-                stosObj = StosFile.Create(pyre.state.currentStosConfig.FixedImageFullPath,
-                                          pyre.state.currentStosConfig.WarpedImageFullPath,
-                                          pyre.state.currentStosConfig.Transform,
-                                          pyre.state.currentStosConfig.FixedImageMaskFullPath,
-                                          pyre.state.currentStosConfig.WarpedImageMaskFullPath)
-                stosObj.Save(saveFileFullPath)
+                stosObj = StosFile.Create(self._settings.stos.source_image.image_fullpath,
+                                          self._settings.stos.target_image.image_fullpath,
+                                          self._transform_controller.TransformModel,
+                                          self._settings.stos.source_image.mask_fullpath,
+                                          self._settings.stos.target_image.mask_fullpath, )
+                stosObj.Save(fullpath)
             dlg.Destroy()

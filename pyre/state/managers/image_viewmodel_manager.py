@@ -38,6 +38,16 @@ class ImageViewModelManager(IImageViewModelManager):
         key = convert_to_key(item)
         return key in self._models
 
+    def __delitem__(self, key: str | Enum):
+        print(f"Removing image viewmodel {key}")
+        key = convert_to_key(key)
+        if key not in self._models:
+            raise KeyError(f"Image {key} does not exist in the manager")
+
+        value = self._models[key]
+        del self._models[key]
+        self._fire_change_event(key, Action.REMOVE, value)
+
     def add(self, name: str | Enum, image: NDArray[np.floating] | None) -> ImageViewModel:
         """Create GL ImageViewModel for the image and store them in the manager"""
         key = convert_to_key(name)
@@ -55,6 +65,10 @@ class ImageViewModelManager(IImageViewModelManager):
             self._models[key] = new_model
             self._fire_change_event(key, Action.ADD, new_model)
             return new_model
+
+    def setdefault(self, name: str | Enum, image: NDArray[np.floating] | None) -> ImageViewModel:
+        """Get the GL ImageViewModel for the image, creating one if it does not exist."""
+        return self.getoradd(name, image)
 
     def getoradd(self, name: str | Enum, image: NDArray[np.floating] | None) -> ImageViewModel:
         """Get the GL ImageViewModel for the image, creating one if it does not exist"""

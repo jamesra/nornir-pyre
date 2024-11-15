@@ -21,10 +21,17 @@ class SetOperation(enum.IntEnum):
 
 class ObservableSet(set, Generic[T]):
     """A python set that notifies observers when it is modified"""
+    _call_wrapper: Callable = None
 
-    def __init__(self, initial_set: Iterable[T] | None = None):
+    def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable = None):
+        """
+        :param initial_set:
+        :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+        """
+
         super(ObservableSet, self).__init__(initial_set if initial_set is not None else [])
         self._observers: list[SetObserverCallable[T]] = []
+        self._call_wrapper = call_wrapper
 
     def add_observer(self, observer: SetObserverCallable[T]):
         self._observers.append(observer)
@@ -34,7 +41,10 @@ class ObservableSet(set, Generic[T]):
 
     def _notify_observers(self, action: ObservedAction, items: AbstractSet[T] | None = None):
         for observer in self._observers:
-            observer(self, action, items)
+            if self._call_wrapper is not None:
+                self._call_wrapper(observer, self, action, items)
+            else:
+                observer(self, action, items)
 
     def add(self, item: T):
         """Add element elem to the set."""
@@ -74,17 +84,19 @@ class ObservableSet(set, Generic[T]):
 
     def intersection_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, keeping only elements found in it and all others."""
+
         in_value = frozenset(s)
         not_removing = self.intersection(in_value)  # Figure out which items are not being removed
         removing = self - not_removing
-        super().intersection_update(*s)
+        super().intersection_update(in_value)
         self._notify_observers(ObservedAction.REMOVE, removing)
 
     def difference_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, removing elements found in others."""
-        not_removing = self & frozenset(*s)
+        in_value = frozenset(*s)
+        not_removing = self & in_value
         removing = self - not_removing
-        self.difference_update(*s)
+        self.difference_update(in_value)
         if len(removing) > 0:
             self._notify_observers(ObservedAction.REMOVE, removing)
 
@@ -93,7 +105,7 @@ class ObservableSet(set, Generic[T]):
         # You left off here
         others = frozenset(*s)
         original = frozenset(self)
-        super().symmetric_difference_update(*s)
+        super().symmetric_difference_update(others)
         adding = others - original
         removed = original - self
 

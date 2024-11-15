@@ -14,6 +14,7 @@ import nornir_imageregistration
 from dependency_injector.wiring import Provide
 from pyre.container import IContainer
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
+from pyre.settings import AppSettings, UISettings
 
 
 def screen_to_volume(camera, point):
@@ -25,7 +26,7 @@ class Camera(IReadOnlyCamera):
     classdocs
     """
 
-    config = Provide[IContainer.config]
+    _config: UISettings
 
     _projection: NDArray[np.floating]
     _view: NDArray[np.floating]
@@ -40,11 +41,11 @@ class Camera(IReadOnlyCamera):
 
     @property
     def max_zoom(self) -> float:
-        return self.config['max_zoom']
+        return self._config.zoom_limits.max
 
     @property
     def min_zoom(self) -> float:
-        return self.config['min_zoom']
+        return self._config.zoom_limits.min
 
     @property
     def x(self) -> float:
@@ -154,12 +155,18 @@ class Camera(IReadOnlyCamera):
 
         return nornir_imageregistration.Rectangle.CreateFromBounds(np.array((bottom, left, top, right)))
 
-    def __init__(self, position: nornir_imageregistration.PointLike, scale=1, angle=0, size=None,
-                 log: logging.Logger = logging.getLogger("camera")):
+    def __init__(self,
+                 position: nornir_imageregistration.PointLike,
+                 scale: float = 1,
+                 angle: float = 0,
+                 size=None,
+                 log: logging.Logger = logging.getLogger("camera"),
+                 settings: AppSettings = Provide[IContainer.settings]):
         """
         :param tuple size: Size of the window the camera is within
 
         """
+        self._config = settings.ui
         self._log = log
         self._lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)  # centered on
         self._angle = 0  # tilt

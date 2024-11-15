@@ -169,7 +169,7 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            target_image_stats: nornir_imageregistration.ImageStats,
                            source_image_stats: nornir_imageregistration.ImageStats,
                            target_controlpoint,
-                           alignmentArea,
+                           alignmentArea: NDArray | tuple[float, float],
                            anglesToSearch: Iterable[float]):
     if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
         return None

@@ -6,3 +6,6 @@ max_zoom: 16
 min_zoom: 0.00390625
 debug: True
 readme_file: README.txt
+alignment_tile_size: 128
+alignment_max_search_angle: 15
+alignment_search_angle_step: 3

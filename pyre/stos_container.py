@@ -1,6 +1,10 @@
 import logging
 import sys
 from dependency_injector import containers, providers
+import wx
+import yaml
+import os
+from typing import Generator
 
 from pyre.interfaces.managers import (ControlPointManagerKey, BufferType)
 from pyre.state.managers.gl_context_manager import GLContextManager
@@ -14,7 +18,7 @@ from pyre.state.managers.window_manager import WindowManager
 from pyre.state.managers.controlpointmapmanager import ControlPointMapManager
 from pyre.state.imageloader import ImageLoader
 from pyre.state import TransformController
-
+from pyre.observable.oset import ObservableSet
 from pyre.container import IContainer
 import pyre.commands.stos
 from nornir_imageregistration.transforms.transform_type import TransformType
@@ -75,3 +79,7 @@ class StosContainer(containers.DeclarativeContainer):
             TransformType.RBF: providers.Factory(TriangulationTransformActionMap).provider,
             TransformType.RIGID: providers.Factory(TriangulationTransformActionMap).provider,
         })
+
+    selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=wx.CallAfter))
+
+    # stos_settings: providers.Resource = providers.Resource(load_settings)

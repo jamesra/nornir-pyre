@@ -10,8 +10,13 @@ ListObserverCallable = Callable[['ObservableList[T]', ObservedAction, Iterable[i
 
 class ObservableList(list, Generic[T]):
     """A python list that notifies observers when it is modified"""
+    _call_wrapper: Callable = None
 
-    def __init__(self, initial_list: Sequence[T] | None = None):
+    def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable = None):
+        """
+                :param initial_list: Populates the list with initial values
+                :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+                """
         super().__init__(initial_list if initial_list is not None else [])
         self._observers: list[ListObserverCallable[T]] = []
 
@@ -21,9 +26,12 @@ class ObservableList(list, Generic[T]):
     def remove_observer(self, observer: ListObserverCallable[T]):
         self._observers.remove(observer)
 
-    def _notify_observers(self, action: ObservedAction, indicies: list[int] | None = None):
+    def _notify_observers(self, action: ObservedAction, items: list[int] | None = None):
         for observer in self._observers:
-            observer(self, action, indicies)
+            if self._call_wrapper is not None:
+                self._call_wrapper(observer, self, action, items)
+            else:
+                observer(self, action, items)
 
     def append(self, item: T):
         super().append(item)

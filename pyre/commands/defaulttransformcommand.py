@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 import wx
 from dependency_injector.wiring import Provide, inject
+from dependency_injector.providers import Dict, Factory
+from logging import Logger
 
 import nornir_imageregistration
+from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet
 from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair, SelectionEventKey
@@ -36,12 +41,15 @@ class DefaultTransformCommand(NavigationCommandBase):
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
     _commandqueue: ICommandQueue
-    _action_command_map: dict[ControlPointAction, ICommand]
+    # _action_command_map: dict[ControlPointAction, ICommand]
     _selected_points: ObservableSet[int]
     cursor_action_map: dict[ControlPointAction, wx.Cursor]
     _setselection: SetSelectionCallable | None
     _last_mouse_press_event_args: wx.MouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
+    _action_to_command: Dict[ControlPointAction, Factory]
+
+    log: Logger = logging.Logger("DefaultTransformCommand")
 
     @property
     def selected_points(self) -> ObservableSet[int]:
@@ -81,7 +89,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
                  transform_control_point_action_maps=Provide[IContainer.transform_action_map].provider,
-                 action_command_map=Provide[IContainer.action_command_map]
+                 transform_type_to_action_command_map=Provide[IContainer.action_command_map]
                  ):
         """
 
@@ -108,9 +116,11 @@ class DefaultTransformCommand(NavigationCommandBase):
             ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(
                 wx.CURSOR_HAND),
         }
+
+        self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
         # self._action_command_map = pyre.commands.container_overrides.action_command_map[transform_controller.type]
         self._selection_event_history = {}
-        self._action_command_map = action_command_map[transform_controller.type]
+        # self._action_command_map = action_command_map[transform_controller.type]
         self._commandqueue = commandqueue
         self._executed = False
         self._space = space
@@ -123,13 +133,13 @@ class DefaultTransformCommand(NavigationCommandBase):
             transform_controller.type]
         self._controlpointactionmap = transform_action_map_factory(self._controlpointmap)
 
-        self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
+        # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
 
-    def _on_transform_controller_changed(self, *args, **kwargs):
-        self._action_command_map = pyre.commands.container_overrides.action_command_map[self._transform_controller.type]
+    # def _on_transform_controller_changed(self, *args, **kwargs):
+    #     self._action_command_map = pyre.commands.container_overrides.action_command_map[self._transform_controller.type]
 
     def execute(self):
-        self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
+        #        self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
         super().execute()
 
     @property
@@ -172,12 +182,16 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   source=InputSource.Keyboard,
                                                   input=InputEvent.Press,
                                                   modifiers=GetKeyModifiers(event),
-                                                  position=point)
-        self._update_cursor_for_possible_actions(selection_event_data)
+                                                  position=point,
+                                                  keycode=event.GetKeyCode(),
+                                                  existing_selections=self._selected_points)
+        new_command = self.check_for_new_command(selection_event_data)
+        if not new_command:
+            self._update_cursor_for_possible_actions(selection_event_data)
 
         super().on_key_down(event)
 
-        self._selection_event_history[selection_event_data.key] = selection_event_data
+        self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return
 
     def on_key_up(self, event):
@@ -190,14 +204,20 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   source=InputSource.Keyboard,
                                                   input=InputEvent.Release,
                                                   modifiers=GetKeyModifiers(event),
-                                                  position=point)
-        self._update_cursor_for_possible_actions(selection_event_data)
+                                                  position=point,
+                                                  keycode=event.GetKeyCode(),
+                                                  existing_selections=self._selected_points)
+        new_command = self.check_for_new_command(selection_event_data)
+        if not new_command:
+            self._update_cursor_for_possible_actions(selection_event_data)
+
         super().on_key_up(event)
-        self._selection_event_history[selection_event_data.key] = selection_event_data
+        self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return
 
     def on_mouse_press(self, event: wx.MouseEvent):
         """Determine the command for the mouse action, if any"""
+        self.parent.SetFocus()
         point_pair = self.get_world_positions(event)
 
         # Update the mouse position history
@@ -211,55 +231,60 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   source=InputSource.Mouse,
                                                   input=InputEvent.Press,
                                                   modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
-                                                  position=point)
+                                                  position=point,
+                                                  existing_selections=self._selected_points)
 
-        self._selection_event_history[selection_event_data.key] = selection_event_data
+        self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         new_command = self.check_for_new_command(selection_event_data)
+        if not new_command:
+            self._update_cursor_for_possible_actions(selection_event_data)
 
         self._last_mouse_press_event_args = event.Clone()
-        # if not new_command:
-        #     if event.LeftIsDown():
-        #         self.update_selection_by_point(selection_event_data)
 
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
-        new_command = self._controlpointactionmap.get_action(selection_event_data)
-        if new_command.action is not ControlPointAction.NONE and new_command.action in self._action_command_map:
+        new_action = self._controlpointactionmap.get_action(selection_event_data)
+        if new_action.action not in self._action_to_command:
+            self.log.error(
+                f'Action {new_action.action} not in action to command map for {self._transform_controller.type} transforms')
+            return False
+
+            # raise ValueError(
+            #     f'Action {new_action.action} not in action to command map for {self._transform_controller.type} transforms')
+        if new_action.action is not ControlPointAction.NONE:
             # self.ensure_mouse_point_is_in_selection(selection_event_data)
+            # command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]
+
             try:
-                if ((new_command.point_indicies is None or len(
-                        new_command.point_indicies) == 0) and
-                        (
-                                new_command.action != ControlPointAction.CREATE and new_command.action != ControlPointAction.REPLACE_SELECTION)):
+                if ((new_action.point_indicies is None or len(
+                        new_action.point_indicies) == 0) and
+                        (new_action.action != ControlPointAction.CREATE and
+                         new_action.action != ControlPointAction.REPLACE_SELECTION and
+                         new_action.action != ControlPointAction.REGISTER and
+                         new_action.action != ControlPointAction.REGISTER_ALL and
+                         new_action.action != ControlPointAction.CREATE_REGISTER and
+                         new_action.action != ControlPointAction.CALL_TO_MOUSE)):
                     raise ValueError("No control points selected")
             except:
                 return False
 
-            new_command = self._action_command_map[new_command.action](parent=self.parent,
-                                                                       camera=self.camera,
-                                                                       bounds=self._bounds,
-                                                                       space=self.space,
-                                                                       commandqueue=self._commandqueue,
-                                                                       selected_points=self._selected_points,
-                                                                       command_points=new_command.point_indicies)
-            self._commandqueue.put(new_command)
-            self.execute()
-            return True
+            try:
+                new_command = self._action_to_command[new_action.action](parent=self.parent,
+                                                                         camera=self.camera,
+                                                                         bounds=self._bounds,
+                                                                         space=self.space,
+                                                                         commandqueue=self._commandqueue,
+                                                                         selected_points=self._selected_points,
+                                                                         command_points=new_action.point_indicies)
+                self._commandqueue.put(new_command)
+                self.execute()
+                return True
+            except RequiresSelectionError:
+                self.log.error(
+                    f"No control points selected for {new_action.action} command {self._action_to_command[new_action.action]}")
+                pass
 
         return False
-
-    def update_selection_by_point(self, selection_event_data: SelectionEventData):
-        # Update the selection based on the current mouse position
-        new_selections = self._controlpointactionmap.find_interactions(selection_event_data.position,
-                                                                       1 / self.camera.scale)
-
-        # Check if shift is pressed to add to a selection
-        if selection_event_data.IsShiftPressed:
-            self.selected_points ^= new_selections
-        else:
-            # Clear the existing selection and set the new selection
-            self.selected_points.clear()
-            self.selected_points.update(new_selections)
 
     def ensure_mouse_point_is_in_selection(self, selection_event_data: SelectionEventData):
         """For a command we want to make sure that the point under the mouse is passed with the selected points.
@@ -278,9 +303,10 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                       input=InputEvent.Drag,
                                                       modifiers=GetMouseModifiers(event,
                                                                                   self._last_mouse_press_event_args),
-                                                      position=point)
+                                                      position=point,
+                                                      existing_selections=self._selected_points)
 
-            self._selection_event_history[selection_event_data.key] = selection_event_data
+            self._selection_event_history[selection_event_data.eventkey] = selection_event_data
             # Check for command, if there is no command, scroll the camera
             new_command = self.check_for_new_command(selection_event_data)
             if new_command:
@@ -327,11 +353,12 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   source=InputSource.Mouse,
                                                   input=InputEvent.Release,
                                                   position=point,
-                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args))
+                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
+                                                  existing_selections=self._selected_points)
         new_command = self.check_for_new_command(selection_event_data)
         if not new_command:
             self._update_cursor_for_possible_actions(selection_event_data)
 
         self._last_mouse_press_event_args = event.Clone()
-        self._selection_event_history[selection_event_data.key] = selection_event_data
+        self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return

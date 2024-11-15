@@ -5,3 +5,4 @@ from .defaulttransformcommand import DefaultTransformCommand
 import pyre.commands.container_overrides as container_overrides
 
 import pyre.commands.stos as stos
+from .commandexceptions import RequiresSelectionError

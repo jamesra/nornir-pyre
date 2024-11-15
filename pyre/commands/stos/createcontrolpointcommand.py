@@ -50,8 +50,8 @@ class CreateControlPointCommand(NavigationCommandBase):
         :param completed_func:
         """
         super().__init__(parent, transform_controller=transform_controller,
-                         camera=camera, bounds=bounds,
-
+                         camera=camera,
+                         bounds=bounds,
                          space=space,
                          commandqueue=commandqueue,
                          completed_func=completed_func)
@@ -115,7 +115,12 @@ class CreateControlPointCommand(NavigationCommandBase):
         newpoint = np.array([point.target[0], point.target[1], point.source[0], point.source[1]], dtype=np.float32)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)
 
+        # Ensure only the new point is selected
+        self._selected_points.clear()
+        self._selected_points.add(index)
+
         # Queue up a translate command to move the point to the new position if the LMB is still down
+        # TODO: Check if shift is held down, and run auto-align if it is
         if self._left_mouse_down:
             translate_command = pyre.commands.stos.TranslateControlPointCommand(parent=self.parent,
                                                                                 transform_controller=self._transform_controller,
@@ -130,6 +135,7 @@ class CreateControlPointCommand(NavigationCommandBase):
             self.deactivate()
             return
         else:
+
             self.execute()
 
     def check_for_cancel(self, translate_command: ICommand):

@@ -220,7 +220,10 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 #                                                1] / 2.0))
 
             else:
-                zdelta = (1 + (scroll_y / 20))
+                zdelta = (1 + (scroll_y / 40))
+
+                mouse_position = self.get_world_positions(e)
+                screen_center = self.get_world_positions((self.height / 2, self.width / 2))
 
                 new_scale = self.camera.scale * zdelta
                 max_image_dimension_value = max(self._bounds.Width, self._bounds.Height)
@@ -233,12 +236,15 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                 self.camera.scale = new_scale
 
-                width, height = self.parent.GetSize()
-                mouse_y, mouse_x = self.GetCorrectedMousePosition(e, height)
-                world_coordinates = np.array(self.camera.ImageCoordsForMouse(x=mouse_x, y=mouse_y))
+                mouse_position_after_scale = self.get_world_positions(e)
+                delta = mouse_position_after_scale[self.space] - mouse_position[self.space]
 
-                # self.camera.lookat = scrolling_at_position[:2]
-                print(f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {world_coordinates[:2]} world')
+                self.camera.lookat -= delta
+
+                mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
+
+                print(
+                    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
                 self._last_mouse_position = mouse_y, mouse_x
         finally:
             e.Skip()
@@ -263,30 +269,22 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         #         pass
 
         if symbol == 'a':  # "A" Character
-            ImageDX = 0.1 * self.camera.visible_world_width
-            self._camera.translate((-ImageDX, 0.0, float))
+            ImageDX = -0.05 * self.camera.visible_world_width
+            self._camera.translate((0.0, ImageDX))
         elif symbol == 'd':  # "D" Character
-            ImageDX = -0.1 * self.camera.visible_world_width
-            self._camera.translate((ImageDX, 0.0, float))
+            ImageDX = 0.05 * self.camera.visible_world_width
+            self._camera.translate((0, ImageDX))
         elif symbol == 'w':  # "W" Character
-            ImageDY = -0.1 * self.camera.visible_world_height
-            self._camera.translate((0, -ImageDY, float))
+            ImageDY = 0.05 * self.camera.visible_world_height
+            self._camera.translate((ImageDY, 0))
         elif symbol == 's':  # "S" Character
-            ImageDY = 0.1 * self.camera.visible_world_height
-            self._camera.translate((0, ImageDY, float))
+            ImageDY = -0.05 * self.camera.visible_world_height
+            self._camera.translate((ImageDY, 0))
 
         elif keycode == wx.WXK_PAGEUP:
             self.camera.scale *= 0.9
         elif keycode == wx.WXK_PAGEDOWN:
             self.camera.scale *= 1.1
-        elif keycode == wx.WXK_SPACE:
-
-            # If SHIFT is held down, align everything.  Otherwise align the selected point
-            if not e.ShiftDown() and not self.HighlightedPointIndex is None:
-                self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.HighlightedPointIndex)
-
-            elif e.ShiftDown():
-                self._transform_controller.AutoAlignPoints(range(0, self._transform_controller.NumPoints))
 
             self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         # elif symbol == 'l':
