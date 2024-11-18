@@ -12,4 +12,4 @@ from .window_manager import IWindowManager, WindowManagerChangeCallback
 from .image_viewmodel_manager import IImageViewModelManager, ImageViewModelManagerChangeCallback
 from .controlpointmapmanager import IControlPointMapManager, ControlPointManagerKey
 from .command_queue import ICommandQueue
-from .command_manager import IControlPointActionMap
+from .command_manager import IControlPointActionMap, IActionMap

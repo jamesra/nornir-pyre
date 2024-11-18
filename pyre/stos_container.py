@@ -6,6 +6,7 @@ import yaml
 import os
 from typing import Generator
 
+from pyre.commands.stos.rigidtransformactionmap import RigidTransformActionMap
 from pyre.interfaces.managers import (ControlPointManagerKey, BufferType)
 from pyre.state.managers.gl_context_manager import GLContextManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
@@ -77,7 +78,7 @@ class StosContainer(containers.DeclarativeContainer):
             TransformType.GRID: providers.Factory(GridTransformActionMap).provider,
             TransformType.MESH: providers.Factory(TriangulationTransformActionMap).provider,
             TransformType.RBF: providers.Factory(TriangulationTransformActionMap).provider,
-            TransformType.RIGID: providers.Factory(TriangulationTransformActionMap).provider,
+            TransformType.RIGID: providers.Factory(RigidTransformActionMap).provider,
         })
 
     selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=wx.CallAfter))

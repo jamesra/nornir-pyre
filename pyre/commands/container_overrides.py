@@ -6,7 +6,8 @@ from pyre.commands.togglecontrolpointselectioncommand import ToggleControlPointS
 from pyre.interfaces.action import ControlPointAction
 from pyre.interfaces.managers import IControlPointActionMap
 from pyre.commands import DefaultTransformCommand
-from pyre.commands.stos import RegisterControlPointCommand, TranslateControlPointCommand, DeleteControlPointCommand, \
+from pyre.commands.stos import ManipulateRigidTransformCommand, RegisterControlPointCommand, \
+    TranslateControlPointCommand, DeleteControlPointCommand, \
     CreateControlPointCommand, CreateRegisterControlPointCommand
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
@@ -83,7 +84,7 @@ action_command_dp_map = providers.Dict({
     }),
     TransformType.RIGID: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
-        ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand).provider,
+        ControlPointAction.TRANSLATE: providers.Factory(ManipulateRigidTransformCommand).provider,
         ControlPointAction.REGISTER: providers.Factory(RegisterControlPointCommand,
                                                        source_image=Space.Source,
                                                        target_image=Space.Target).provider

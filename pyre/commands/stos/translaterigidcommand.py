@@ -6,6 +6,7 @@ from numpy._typing import NDArray
 import wx
 
 import nornir_imageregistration
+from nornir_imageregistration import IRigidTransform
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
@@ -16,14 +17,16 @@ from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 
 
-class TranslateControlPointCommand(NavigationCommandBase):
+class ManipulateRigidTransformCommand(NavigationCommandBase):
     """This command takes a selection of control points and adjusts the position"""
 
-    _selected_point_set: ObservableSet[int]  # The indices of the selected points
-    _command_points: set[int]  # Points under mouse when command was triggered
     _space: Space
     _translate_origin: NDArray[float, float]
     _original_points: NDArray[[2, ], np.floating]
+
+    @property
+    def transform(self) -> IRigidTransform:
+        return self._transform_controller.transform
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
 
@@ -63,17 +66,10 @@ class TranslateControlPointCommand(NavigationCommandBase):
         self._translate_origin = mouse_position
         self._selected_point_set = selected_points
 
-        if translate_all:
-            self._command_points.update(range(transform_controller.NumPoints))
-        else:
-            combined_command_points = set(selected_points)
-            combined_command_points.update(command_points)
-            self._command_points = combined_command_points
+        if not isinstance(self._transform_controller.TransformModel, IRigidTransform):
+            raise ValueError("Transform controller must have a rigid transform model")
 
-        if len(self._command_points) == 0:
-            raise RequiresSelectionError()
-
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.TransformModel
 
     def __str__(self):
         return "TranslateControlPointCommand"
@@ -85,7 +81,6 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def on_mouse_release(self, event: wx.MouseEvent):
         """Called when the mouse is released"""
-
         if not event.LeftIsDown():
             self.execute()
 
@@ -101,22 +96,35 @@ class TranslateControlPointCommand(NavigationCommandBase):
             return
 
         point_pair = self.get_world_positions(event)
-
         world_point = point_pair.source if self.space == Space.Source else point_pair.target
 
         delta = world_point - self._translate_origin
-        print(
-            f'space: {self.space} x:{world_point[1]} y:{world_point[0]} hx:{self._translate_origin[1]} hy:{self._translate_origin[0]} dx:{delta[1]} dy:{delta[0]}')
+        camera_delta = delta
+        if self.space == Space.Source:
+            delta = delta
+            camera_delta = -delta
+        else:
+            camera_delta = delta
+            delta = -delta
+
+        # if self.view
+        # self.camera.translate(camera_delta)  # Balance out translation with camera movement so the correct layer appears to move
+
+        # print(
+        #    f'space: {self.space} x:{world_point[1]} y:{world_point[0]} hx:{self._translate_origin[1]} hy:{self._translate_origin[0]} dx:{delta[1]} dy:{delta[0]}')
+
+        self._transform_controller.Translate(delta, space=self.space)
+
+        # Update the last position with the new mouse position
+        point_pair = self.get_world_positions(event)
+        world_point = point_pair.source if self.space == Space.Source else point_pair.target
         self._translate_origin = world_point
 
-        new_selected_indicies = self._transform_controller.MovePoint(self._selected_point_set, delta[1], delta[0],
-                                                                     space=self.space)
+        pass
 
-        # Update selected points in the UI if indicies have changed
-        if len(set(new_selected_indicies) - self._selected_point_set) > 0:
-            self._selected_point_set.clear()
-            self._selected_point_set.update(new_selected_indicies)
-
+    def on_mouse_wheel(self, event: wx.MouseEvent):
+        """Called when the mouse wheel is scrolled"""
+        
         pass
 
     def on_key_down(self, event: wx.KeyEvent):
@@ -124,9 +132,9 @@ class TranslateControlPointCommand(NavigationCommandBase):
         keycode = event.GetKeyCode()
 
         if (keycode == wx.WXK_LEFT or
-            keycode == wx.WXK_RIGHT or
-            keycode == wx.WXK_UP or
-            keycode == wx.WXK_DOWN) and self.HighlightedPointIndex is not None:
+                keycode == wx.WXK_RIGHT or
+                keycode == wx.WXK_UP or
+                keycode == wx.WXK_DOWN):
 
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
@@ -151,14 +159,13 @@ class TranslateControlPointCommand(NavigationCommandBase):
             delta[0] *= multiplier
             delta[1] *= multiplier
 
-            self._transform_controller.MovePoint(self._selected_point_set, delta[1], delta[0],
+            self._transform_controller.Translate(delta,
                                                  space=self._space)
+
         return
 
     def activate(self):
         super().activate()
-        self._selected_point_set.update(
-            self._command_points)  # Ensure the command points are included in the selected points
 
     def on_mouse_scroll(self, event: wx.MouseEvent):
         """Called when the mouse wheel is scrolled"""
@@ -172,7 +179,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
         return True
 
     def cancel(self):
-        self._transform_controller.SetPoints(self._original_points)
+        self._transform_controller.TransformModel = self._original_points
         super().cancel()
         return
 

@@ -3,16 +3,35 @@ import os
 from fontTools.qu2cu.qu2cu import Point
 from pydantic import BaseModel
 from dataclasses import dataclass, field
+import numpy as np
+from numpy.typing import NDArray
 
 
 class AngleSearchRange(BaseModel):
-    max_search_angle: float = 7.5  # Maximum +/- deflection angle to rotate images when searching for the best control point alignment
-    search_angle_step_size: float = 3  # Number of degrees to step between search angles
+    max_angle: float = 7.5  # Maximum +/- deflection angle to rotate images when searching for the best control point alignment
+    angle_step_size: float = 3  # Number of degrees to step between search angles
+
+    @property
+    def angle_range(self) -> NDArray[float]:
+        angles = np.arange(start=-self.max_angle,
+                           stop=self.max_angle + self.angle_step_size,
+                           step=self.angle_step_size)  # numpy.linspace(-7.5, 7.5, 11)
+        angles = np.union1d(angles, [0])
+        return angles
 
 
 class PointRegistrationSettings(BaseModel):
     alignment_area: int = 128
-    angles_to_search: AngleSearchRange = AngleSearchRange()  # field(default_factory=AngleSearchRange)
+    angle_search_range: AngleSearchRange = AngleSearchRange()  # field(default_factory=AngleSearchRange)
+
+    @property
+    def alignment_area_shape(self) -> NDArray[int]:
+        side = self.alignment_area
+        return np.array([side, side], dtype=np.int32)
+
+    @property
+    def angles_to_search(self) -> NDArray[float]:
+        return self.angle_search_range.angle_range
 
 
 class ImageAndMaskPath(BaseModel):

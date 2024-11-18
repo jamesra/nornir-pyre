@@ -13,7 +13,7 @@ from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, I
                                       IImageManager,
                                       IMousePositionHistoryManager,
                                       IRegionMap, ITransformControllerGLBufferManager, IImageViewModelManager,
-                                      IWindowManager, IControlPointMapManager, ControlPointManagerKey)
+                                      IWindowManager, IControlPointMapManager, ControlPointManagerKey, IActionMap)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
 from pyre.command_interfaces import ICommand, IInstantCommand
@@ -111,7 +111,7 @@ class IContainer(containers.DeclarativeContainer):
         providers.Dict({
             TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
             TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
-            TransformType.RIGID: providers.AbstractFactory(IControlPointActionMap),
+            TransformType.RIGID: providers.AbstractFactory(IActionMap),
             TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
         })
 

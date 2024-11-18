@@ -19,6 +19,7 @@ from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
 from pyre.commands.commandexceptions import RequiresSelectionError
+from pyre.settings import AppSettings, UISettings, PointRegistrationSettings
 
 
 class RegisterControlPointCommand(InstantCommandBase):
@@ -30,21 +31,15 @@ class RegisterControlPointCommand(InstantCommandBase):
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _source_image: str
     _target_image: str
+    _settings: PointRegistrationSettings
 
     @property
     def alignment_area(self) -> NDArray[int]:
-        side = self._config['alignment_tile_size']
-        return np.array([side, side], dtype=np.int32)
+        return self._settings.alignment_area_shape
 
     @property
     def angles_to_search(self) -> NDArray[float]:
-        max_angle = self._config['alignment_max_search_angle']
-        angle_step = self._config['alignment_search_angle_step']
-
-        angles = np.arange(start=-max_angle,
-                           stop=max_angle + angle_step,
-                           step=angle_step)  # numpy.linspace(-7.5, 7.5, 11)
-        return angles
+        return self._settings.angles_to_search
 
     @inject
     def __init__(self,
@@ -56,6 +51,7 @@ class RegisterControlPointCommand(InstantCommandBase):
                  register_all: bool = False,  # If True, register all points in the transform
                  transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
                  config: Configuration = Provide[IContainer.config],
+                 settings: AppSettings = Provide[IContainer.settings],
                  **kwargs):
 
         """
@@ -75,6 +71,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._source_image = source_image
         self._target_image = target_image
         self._selected_points = selected_points
+        self._settings = settings.stos.registration
 
         if register_all:
             self._selected_points.update(range(transform_controller.NumPoints))
@@ -233,6 +230,10 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._transform_controller.TranslateFixed(offsets)
 
         # If we aligned all points, remove the ones we couldn't register
-        self._transform_controller.RemovePoints(invalid_points)
+        try:
+            self._transform_controller.RemovePoints(invalid_points)
+        except ValueError:
+            print("Unable to remove unmappable points from the transform")
+            pass
 
         # return self._transform_controller.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)

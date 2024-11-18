@@ -8,6 +8,7 @@ from dependency_injector.providers import Dict, Factory
 from logging import Logger
 
 import nornir_imageregistration
+from nornir_imageregistration.transforms import IControlPointEdit, IControlPoints
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet
@@ -36,7 +37,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     config = Provide[IContainer.config]
 
     _controlpointmap: pyre.viewmodels.ControlPointMap
-    _controlpointactionmap: IControlPointActionMap
+    _actionmap: IControlPointActionMap
     _space: Space
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
@@ -125,13 +126,17 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._executed = False
         self._space = space
         self._selected_points = selected_points
-        controlpointmapkey = ControlPointManagerKey(transform_controller, space)
-        print(f'Key: {controlpointmapkey} Space: {space}')
-
-        self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
         transform_action_map_factory = transform_control_point_action_maps()[
             transform_controller.type]
-        self._controlpointactionmap = transform_action_map_factory(self._controlpointmap)
+
+        if isinstance(transform_controller.TransformModel, IControlPoints):
+            controlpointmapkey = ControlPointManagerKey(transform_controller, space)
+            print(f'Key: {controlpointmapkey} Space: {space}')
+
+            self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
+            self._actionmap = transform_action_map_factory(self._controlpointmap)
+        else:
+            self._actionmap = transform_action_map_factory()
 
         # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
 
@@ -243,7 +248,7 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
-        new_action = self._controlpointactionmap.get_action(selection_event_data)
+        new_action = self._actionmap.get_action(selection_event_data)
         if new_action.action not in self._action_to_command:
             self.log.error(
                 f'Action {new_action.action} not in action to command map for {self._transform_controller.type} transforms')
@@ -254,19 +259,6 @@ class DefaultTransformCommand(NavigationCommandBase):
         if new_action.action is not ControlPointAction.NONE:
             # self.ensure_mouse_point_is_in_selection(selection_event_data)
             # command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]
-
-            try:
-                if ((new_action.point_indicies is None or len(
-                        new_action.point_indicies) == 0) and
-                        (new_action.action != ControlPointAction.CREATE and
-                         new_action.action != ControlPointAction.REPLACE_SELECTION and
-                         new_action.action != ControlPointAction.REGISTER and
-                         new_action.action != ControlPointAction.REGISTER_ALL and
-                         new_action.action != ControlPointAction.CREATE_REGISTER and
-                         new_action.action != ControlPointAction.CALL_TO_MOUSE)):
-                    raise ValueError("No control points selected")
-            except:
-                return False
 
             try:
                 new_command = self._action_to_command[new_action.action](parent=self.parent,
@@ -289,8 +281,8 @@ class DefaultTransformCommand(NavigationCommandBase):
     def ensure_mouse_point_is_in_selection(self, selection_event_data: SelectionEventData):
         """For a command we want to make sure that the point under the mouse is passed with the selected points.
         This was needed for commands triggered by the right-mouse button that did not cause the selection check"""
-        new_selections = self._controlpointactionmap.find_interactions(selection_event_data.position,
-                                                                       1 / self.camera.scale)
+        new_selections = self._actionmap.find_interactions(selection_event_data.position,
+                                                           1 / self.camera.scale)
         self.selected_points.update(new_selections)
 
     def on_mouse_motion(self, event: wx.MouseEvent):
@@ -337,7 +329,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     def _update_cursor_for_possible_actions(self, selection_event_data: SelectionEventData):
         # No button is down,
         # TODO: Update help strings based on the possible actions
-        possible_actions = self._controlpointactionmap.get_possible_actions(selection_event_data)
+        possible_actions = self._actionmap.get_possible_actions(selection_event_data)
         # print(f'possible actions: {possible_actions}')
         if possible_actions.action in self.cursor_action_map:
             cursor = self.cursor_action_map[possible_actions.action]

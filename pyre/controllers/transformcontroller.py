@@ -333,6 +333,12 @@ class TransformController:
     def TranslateWarped(self, offset: nornir_imageregistration.VectorLike):
         self.TransformModel.TranslateWarped(offset)
 
+    def Translate(self, offset: nornir_imageregistration.VectorLike, space: Space):
+        if space == Space.Target:
+            self.TransformModel.TranslateWarped(offset)
+        else:
+            self.TransformModel.TranslateFixed(offset)
+
     def Rotate(self, rangle: float, center: NDArray[float] | None = None):
         if isinstance(self._TransformModel, nornir_imageregistration.ITransformTargetRotation):
             self.TransformModel.RotateTargetPoints(-rangle, center)
@@ -520,7 +526,9 @@ class TransformController:
         if space == Space.Source:
             # This code is to manipulate transforms where source space points are fixed.  Instead we move the
             # target points in this case.
-            if not isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)
+            else:
                 # if not self.ShowWarped:
                 #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
                 # else:
@@ -528,21 +536,34 @@ class TransformController:
                     if len(index) > 1:
                         raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
 
-                OldWarpedPoint = \
-                    self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
-                NewWarpedPoint = self.TransformModel.InverseTransform([point])[0]
+                OldTargetPoint = \
+                    self.TransformModel.Transform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
+                NewTargetPoint = self.TransformModel.Transform([point])[0]
 
-                TranslatedPoint = NewWarpedPoint - OldWarpedPoint
-
-                FinalPoint = self.TransformModel.SourcePoints[np_index] + TranslatedPoint
+                Delta = OldTargetPoint - NewTargetPoint
+                FinalPoint = self.TransformModel.TargetPoints[np_index] + Delta
                 np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, FinalPoint)
-            else:
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)
+
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
                 np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)
+            else:
+                # if not self.ShowWarped:
+                #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
+                # else:
+                if isinstance(index, Iterable):
+                    if len(index) > 1:
+                        raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
 
-        # print(f'Dragged point {str(np_index)} {str(point)}')
+                OldSourcePoint = \
+                    self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
+                NewSourcePoint = self.TransformModel.InverseTransform([point])[0]
+
+                Delta = OldSourcePoint - NewSourcePoint
+                FinalPoint = self.TransformModel.SourcePoints[np_index] + Delta
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, FinalPoint)
+
+                # print(f'Dragged point {str(np_index)} {str(point)}')
 
         if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
             return np.array([np_index], dtype=int)

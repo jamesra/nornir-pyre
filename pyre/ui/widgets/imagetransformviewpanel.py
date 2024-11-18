@@ -222,6 +222,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                     controller: TransformController,
                                     old: ITransform | None,
                                     new: ITransform):
+        """Called when the model in the transform controller changes.  This is not called when the
+        transform is modified, only when the model is replaced"""
         # Cancel the active command
         if self._command is None:
             return
