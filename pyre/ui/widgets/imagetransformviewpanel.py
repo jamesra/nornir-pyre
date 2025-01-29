@@ -6,6 +6,7 @@ Created on Oct 16, 2012
 from __future__ import annotations
 from dataclasses import dataclass
 import warnings
+import numpy as np
 
 import OpenGL.GL as gl
 import wx
@@ -294,7 +295,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                             transform_controller=self.transform_controller)
             print(f'Added image view model {name} to {self.view_type.value} view')
 
-        self.center_camera()
+        wx.CallAfter(self.center_camera)
 
     def _handle_remove_imageviewmodel_event(self, name: str):
         """Process a remove event from the imageviewmodel manager"""
@@ -323,6 +324,24 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.DebugTickCounter += 1
         self.glcanvas.Refresh()
         return
+
+    def center_camera(self):
+        """
+        Center the camera at whatever interesting thing this class displays
+        """
+
+        if self._image_transform_view is None or self._image_transform_view.width is None:
+            self.camera.lookat = (0, 0)
+            self.camera.scale = 1.0
+            return
+
+        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)
+        self.camera.lookat = center
+
+        width_scale = self.width / self._image_transform_view.width
+        height_scale = self.height / self._image_transform_view.height
+
+        self.camera.scale = min(width_scale, height_scale)
 
     def _LabelPreamble(self) -> str:
         return "Fixed: " if self.FixedSpace else "Warping: "

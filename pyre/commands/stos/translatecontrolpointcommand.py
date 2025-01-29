@@ -64,7 +64,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
         self._selected_point_set = selected_points
 
         if translate_all:
-            self._command_points.update(range(transform_controller.NumPoints))
+            self._command_points = set(range(transform_controller.NumPoints))
         else:
             combined_command_points = set(selected_points)
             combined_command_points.update(command_points)

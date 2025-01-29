@@ -19,6 +19,7 @@ action_command_dp_map = providers.Dict({
     TransformType.GRID: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
         ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand).provider,
+        ControlPointAction.TRANSLATE_ALL: providers.Factory(TranslateControlPointCommand, translate_all=True).provider,
         ControlPointAction.REPLACE_SELECTION: providers.Factory(ToggleControlPointSelectionCommand,
                                                                 set_operation=SetOperation.Replace).provider,
         ControlPointAction.APPEND_SELECTION: providers.Factory(ToggleControlPointSelectionCommand,
@@ -39,6 +40,7 @@ action_command_dp_map = providers.Dict({
     TransformType.MESH: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
         ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand).provider,
+        ControlPointAction.TRANSLATE_ALL: providers.Factory(TranslateControlPointCommand, translate_all=True).provider,
         ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand).provider,
         ControlPointAction.REPLACE_SELECTION: providers.Factory(ToggleControlPointSelectionCommand,
                                                                 set_operation=SetOperation.Replace).provider,
@@ -62,6 +64,7 @@ action_command_dp_map = providers.Dict({
     TransformType.RBF: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
         ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand).provider,
+        ControlPointAction.TRANSLATE_ALL: providers.Factory(TranslateControlPointCommand, translate_all=True).provider,
         ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand).provider,
         ControlPointAction.REPLACE_SELECTION: providers.Factory(ToggleControlPointSelectionCommand,
                                                                 set_operation=SetOperation.Replace).provider,

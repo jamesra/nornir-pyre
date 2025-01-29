@@ -3,14 +3,16 @@ import os
 from dependency_injector.wiring import Provide, inject
 import wx
 
+import nornir_imageregistration
 from nornir_imageregistration import StosFile
+from nornir_imageregistration.settings import GridRefinement
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
-from pyre.interfaces.managers import ICommandHistory, IImageViewModelManager, IImageLoader
+from pyre.interfaces.managers import ICommandHistory, IImageManager, IImageViewModelManager, IImageLoader
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
 import pyre.ui
@@ -35,6 +37,7 @@ class StosWindow(PyreWindowBase):
     _history_manager: ICommandHistory = Provide[IContainer.history_manager]
     _config = Provide[IContainer.config]
     _settings: AppSettings = Provide[IContainer.settings]
+    _image_manager: IImageManager = Provide[IContainer.image_manager]
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -486,16 +489,32 @@ class StosWindow(PyreWindowBase):
                                           pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
     def OnRotateTranslate(self, e):
-        pyre.common.RotateTranslateWarpedImage()
+        settings = self._settings.stos.brute_registration
+        resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,
+                                                                     target_image_key=Space.Target,
+                                                                     settings=settings,
+                                                                     LimitImageSize=True
+                                                                     )
+
+        if resulting_transform is not None:
+            self._transform_controller.TransformModel = resulting_transform
 
     def OnRefineGrid(self, e):
-        if pyre.state.currentStosConfig.FixedImageViewModel is None or \
-                pyre.state.currentStosConfig.WarpedImageViewModel is None:
+        if self._settings.stos.source_image is None or \
+                self._settings.stos.target_image is None:
             print("Need both images loaded with a transform to run refine grid")
             return None
 
-        with pyre.ui.RefineGridSettingsDialog.GetGridRefineSettings(self) as settings:
-            pyre.common.GridRefineTransform(settings)
+        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(self)
+        if user_settings is not None:
+            with nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
+                    source_img_data=self._image_manager[ViewType.Source],
+                    target_img_data=self._image_manager[ViewType.Target],
+                    num_iterations=user_settings.num_iterations,
+                    grid_spacing=user_settings.grid_spacing,
+                    cell_size=user_settings.cell_size,
+                    angles_to_search=user_settings.angle_range) as grid_refinement_settings:
+                pyre.common.GridRefineTransform(grid_refinement_settings)
 
     def OnOpenFixedImage(self, e):
         dlg = wx.FileDialog(self, "Choose a fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)

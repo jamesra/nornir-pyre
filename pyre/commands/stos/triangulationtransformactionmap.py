@@ -1,4 +1,5 @@
 import enum
+
 from pyre.settings import AppSettings, UISettings
 from dependency_injector.wiring import Provide, providers, inject
 from dependency_injector import containers
@@ -64,6 +65,8 @@ class TriangulationTransformActionMap(IControlPointActionMap):
                     actions = ControlPointAction.CALL_TO_MOUSE
                 elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
                     actions = ControlPointAction.CREATE_REGISTER
+                elif event.IsChordPressed(InputModifiers.ControlKey):
+                    actions |= ControlPointAction.TRANSLATE_ALL
                 else:
                     actions = ControlPointAction.NONE
 
@@ -72,6 +75,8 @@ class TriangulationTransformActionMap(IControlPointActionMap):
                 if event.IsLeftMousePressed:
                     if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
                         actions |= ControlPointAction.REGISTER
+                    elif event.IsOnlyCtrlPressed:
+                        actions |= ControlPointAction.TRANSLATE_ALL
                     else:
                         actions |= ControlPointAction.TRANSLATE
                 elif event.IsRightMousePressed:
@@ -125,7 +130,9 @@ class TriangulationTransformActionMap(IControlPointActionMap):
                     # Check for translating a point
                     # We only translate when mouse movement occurs, a press can be a selection of a control point
             elif event.input == InputEvent.Drag:
-                if len(interactions) > 0:
+                if event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton):
+                    return ControlPointActionResult(ControlPointAction.TRANSLATE_ALL, interactions)
+                elif len(interactions) > 0:
                     if event.IsLeftMousePressed and event.NoModifierKeys:
                         return ControlPointActionResult(ControlPointAction.TRANSLATE, interactions)
             # elif event.input == InputEvent.Release:

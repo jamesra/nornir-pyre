@@ -1,20 +1,18 @@
 import logging
 import os
-
-from pkg_resources import resource_filename
+import pyre
 
 
 def ResourcePath() -> str:
     Logger = logging.getLogger("resources")
-    rpath = resource_filename(__name__, "resources")
-    # rpath = os.path.join(PackagePath(), 'resources')
+    rpath = os.path.join(pyre.__path__[0], 'resources')
     Logger.info('Resources path: ' + rpath)
     return rpath
 
 
 def README() -> str:
     """Returns README.txt file as a string"""
-    readmePath = resource_filename(__name__, 'README.txt')
+    readmePath = os.path.join(pyre.__path__[0], 'README.txt')
     if not os.path.exists(readmePath):
         return "No readme.txt was found in " + readmePath
 

@@ -83,19 +83,19 @@ class CompositeTransformView(IImageTransformView):
 
     @property
     def width(self) -> int:
-        return None if self._source_image_array is None else self._source_image_array.width
+        return None if self._source_image_view is None else self._source_image_view.width
 
     @property
     def height(self) -> int:
-        return None if self._source_image_array is None else self._source_image_array.height
+        return None if self._source_image_view is None else self._source_image_view.height
 
     @property
     def fixedwidth(self) -> int | None:
-        return None if self._source_image_array is None else self._source_image_array.width
+        return None if self._source_image_view is None else self._source_image_view.width
 
     @property
     def fixedheight(self) -> int | None:
-        return None if self._source_image_array is None else self._source_image_array.height
+        return None if self._source_image_view is None else self._source_image_view.height
 
     @property
     def transform(self) -> nornir_imageregistration.ITransform:

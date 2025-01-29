@@ -4,9 +4,9 @@ import enum
 class ObservedAction(enum.IntEnum):
     """The actions that can be observed"""
     NONE = 0,
-    ADD = enum.auto()  # New items appended to end of the list
-    INSERT = enum.auto()  # New items inserted into the list
-    REMOVE = enum.auto()  # Items removed from the list
-    CLEAR = enum.auto()  # List was cleared
-    UPDATE = enum.auto()  # Items in the list were updated
-    MOVE = enum.auto()  # Items in the list were moved
+    ADD = 1  # New items appended to end of the list
+    INSERT = 2  # New items inserted into the list
+    REMOVE = 3  # Items removed from the list
+    CLEAR = 4  # List was cleared
+    UPDATE = 5  # Items in the list were updated
+    MOVE = 6  # Items in the list were moved

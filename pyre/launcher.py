@@ -17,6 +17,11 @@ import nornir_imageregistration
 from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Provider
 
+# Set the backend to WXAgg before importing pyplot
+import matplotlib
+
+matplotlib.use('wxAgg')
+
 import wx
 
 import nornir_shared.misc

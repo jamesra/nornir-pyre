@@ -10,12 +10,15 @@ import numpy
 from numpy.typing import NDArray
 
 import nornir_imageregistration
+from nornir_imageregistration import ITransform
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
 import nornir_pools
 import pyre
 from pyre.container import IContainer
+from pyre.interfaces.managers import IImageManager
 from pyre.interfaces.managers.command_history import ICommandHistory
+from pyre.controllers.transformcontroller import TransformController
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistration.ITransform, warpedImage: NDArray):
@@ -68,29 +71,41 @@ def SyncWindows(LookAt, scale: float):
     pyre.Windows['Warped'].imagepanel.camera.scale = scale
 
 
-def RotateTranslateWarpedImage(LimitImageSize: bool = False):
+@inject
+def RotateTranslateWarpedImage(source_image_key: str,
+                               target_image_key: str,
+                               settings: nornir_imageregistration.settings.StosBruteSettings,
+                               LimitImageSize: bool = False,
+                               image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
 
-    if not (pyre.state.currentStosConfig.FixedImageViewModel is None or
-            pyre.state.currentStosConfig.WarpedImageViewModel is None):
-        alignRecord = stos.SliceToSliceBruteForce(pyre.state.currentStosConfig.FixedImages.Image,
-                                                  pyre.state.currentStosConfig.WarpedImages.Image,
-                                                  pyre.state.currentStosConfig.FixedImages.Mask,
-                                                  pyre.state.currentStosConfig.WarpedImages.Mask,
-                                                  LargestDimension=largestdimension,
-                                                  TestFlip=False,
-                                                  Cluster=False)
-        # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
-        print("Alignment found: " + str(alignRecord))
-        transform = alignRecord.ToImageTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
-                                                 pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
-        pyre.state.currentStosConfig.TransformController.TransformModel = transform
-        # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
+    if source_image_key not in image_manager:
+        print("Source image not loaded")
+        return
 
-        # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.transform,
-        # pyre.state.currentStosConfig._transform_controller.transform)
+    if target_image_key not in image_manager:
+        print("Target image not loaded")
+        return
+
+    source_image = image_manager[source_image_key]
+    target_image = image_manager[target_image_key]
+
+    alignRecord = stos.SliceToSliceBruteForceWithPreprocessedImages(source_image,
+                                                                    target_image,
+                                                                    settings,
+                                                                    SingleThread=False,
+                                                                    Cluster=False)
+    # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
+    print("Alignment found: " + str(alignRecord))
+    transform = alignRecord.ToImageTransform(source_image.shape,
+                                             target_image.shape)
+    return transform
+    # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
+
+    # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.transform,
+    # pyre.state.currentStosConfig._transform_controller.transform)
 
 
 def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefinement | None):
@@ -102,8 +117,8 @@ def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefineme
             pyre.state.currentStosConfig.TransformController.TransformModel,
             settings=settings,
             SaveImages=False,
-            SavePlots=False,
-            outputDir=None)
+            SavePlots=True,
+            outputDir="C:\\Temp")
 
         pyre.state.currentStosConfig.TransformController.TransformModel = updatedTransform
         # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,

@@ -11,13 +11,20 @@
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "D:\\Data\\RC3\\TEM\\Grid32\\1095-1096_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
-        "registration": {
+        "stos_filename": "D:\\Data\\RC3\\TEM\\Grid32\\1095-1096_ctrl-TEM_Leveled_map-TEM_Leveled_ready_to_refine.stos",
+        "grid_registration": {
             "alignment_area": 128,
             "angle_search_range": {
                 "max_angle": 7.5,
                 "angle_step_size": 3.0
             }
+        },
+        "brute_registration": {
+            "angles": null,
+            "min_overlap": 0.75,
+            "source_image_scale_factors": null,
+            "larget_dimension": 1024,
+            "try_flipped": false
         },
         "source_image": {
             "image_fullpath": "D:\\Data\\RC3\\TEM\\1096\\TEM\\Leveled\\Images\\032\\1096_TEM_Leveled.png",

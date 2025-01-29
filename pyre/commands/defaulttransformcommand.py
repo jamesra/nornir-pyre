@@ -116,6 +116,8 @@ class DefaultTransformCommand(NavigationCommandBase):
             ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(wx.CURSOR_HAND),
             ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(
                 wx.CURSOR_HAND),
+            ControlPointAction.TRANSLATE_ALL: wx.Cursor(wx.CURSOR_CROSS),
+            ControlPointAction.CALL_TO_MOUSE: wx.Cursor(wx.CURSOR_BULLSEYE),
         }
 
         self._action_to_command = transform_type_to_action_command_map[transform_controller.type]

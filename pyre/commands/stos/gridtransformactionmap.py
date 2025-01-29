@@ -1,7 +1,6 @@
 import enum
 from dependency_injector.wiring import Provide, providers, inject
 from dependency_injector import containers
-from pygame.pypm import Input
 
 from nornir_imageregistration import PointLike
 from typing import Callable
@@ -53,7 +52,10 @@ class GridTransformActionMap(IControlPointActionMap):
         actions = ControlPointAction.NONE
         # Check for creating a point
         if event.IsMouseInput | event.IsKeyboardInput:
-            if len(interactions) == 0:
+            if event.IsOnlyCtrlPressed:
+                actions |= ControlPointAction.TRANSLATE_ALL
+
+            elif len(interactions) == 0:
                 if len(event.existing_selections) == 1:
                     if event.IsOnlyAltPressed:
                         actions = ControlPointAction.CALL_TO_MOUSE
@@ -109,7 +111,9 @@ class GridTransformActionMap(IControlPointActionMap):
                             action = ControlPointAction.REPLACE_SELECTION
 
             elif event.input == InputEvent.Drag:
-                if len(interactions) > 0:
+                if event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton):
+                    action = ControlPointAction.TRANSLATE_ALL
+                elif len(interactions) > 0:
                     if event.IsLeftMousePressed and event.NoModifierKeys:
                         action = ControlPointAction.TRANSLATE
                 # Check for translating a point

@@ -163,22 +163,32 @@ class ImageTransformPanelBase:
         self.camera.lookat = point
         self.camera.scale = scale
 
+    @abstractmethod
     def center_camera(self):
-        """Center the camera at whatever interesting thing this class displays
         """
+        Center the camera at whatever interesting thing this class displays
+        """
+        raise NotImplementedError()
 
-        if isinstance(self.transform_controller.TransformModel, nornir_imageregistration.IDiscreteTransform):
-            fixed_bounding_box = self.transform_controller.TransformModel.FixedBoundingBox
-        elif self.width is not None:
-            fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (
-                self.height, self.width))
-        else:
-            return
-            # raise NotImplementedError("Not done")
-
-        self.camera.lookat = fixed_bounding_box.Center
-        self.camera.scale = fixed_bounding_box.Width / self.transform_controller.width
-        return
+    # def center_camera(self):
+    #     """Center the camera at whatever interesting thing this class displays
+    #     """
+    #
+    #     if isinstance(self.transform_controller.TransformModel, nornir_imageregistration.IDiscreteTransform):
+    #         fixed_bounding_box = self.transform_controller.TransformModel.FixedBoundingBox
+    #     elif self.width is not None:
+    #         fixed_bounding_box = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (
+    #             self.height, self.width))
+    #     else:
+    #         return
+    #         # raise NotImplementedError("Not done")
+    #
+    #     self.camera.lookat = fixed_bounding_box.Center
+    #     if self.transform_controller.width is None and self.transform_controller.width != 0:
+    #         self.camera.scale = fixed_bounding_box.Width / self.transform_controller.width
+    #
+    #
+    #     return
 
     @abstractmethod
     def draw(self):

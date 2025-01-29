@@ -243,8 +243,8 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
 
-                print(
-                    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
+                # print(
+                #    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
                 self._last_mouse_position = mouse_y, mouse_x
         finally:
             e.Skip()

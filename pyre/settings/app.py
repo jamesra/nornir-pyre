@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import os
 # import yaml
 from fontTools.qu2cu.qu2cu import Point
@@ -5,6 +6,7 @@ from pydantic import BaseModel
 from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import NDArray
+from nornir_imageregistration.settings.stos_brute import StosBruteSettings
 
 
 class AngleSearchRange(BaseModel):
@@ -18,6 +20,9 @@ class AngleSearchRange(BaseModel):
                            step=self.angle_step_size)  # numpy.linspace(-7.5, 7.5, 11)
         angles = np.union1d(angles, [0])
         return angles
+
+    def __iter__(self):
+        return iter(self.angle_range)
 
 
 class PointRegistrationSettings(BaseModel):
@@ -42,7 +47,8 @@ class ImageAndMaskPath(BaseModel):
 class StosSettings(BaseModel):
     stos_dirname: str | None = None  # The last directory loaded or saved by the user
     stos_filename: str | None = None  # The last filename loaded or saved by the user
-    registration: PointRegistrationSettings = PointRegistrationSettings()  # field(default_factory=PointRegistrationSettings)
+    grid_registration: PointRegistrationSettings = PointRegistrationSettings()  # field(default_factory=PointRegistrationSettings)
+    brute_registration: StosBruteSettings = StosBruteSettings()  # field(default_factory=StosBruteSettings)
     source_image: ImageAndMaskPath | None = None  # The last source image loaded by the user
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
 

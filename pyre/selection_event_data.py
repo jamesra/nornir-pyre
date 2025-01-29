@@ -7,7 +7,6 @@ from pyre.space import Space
 
 import numpy as np
 from numpy._typing import NDArray
-from pygame.pypm import Input
 
 from pyre.observable import ObservableSet
 

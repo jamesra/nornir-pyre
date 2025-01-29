@@ -25,13 +25,13 @@ class IImageTransformView(ABC):
 
     @property
     @abstractmethod
-    def width(self) -> int:
+    def width(self) -> int | None:
         """Width of the image in pixels"""
         raise NotImplementedError()
 
     @property
     @abstractmethod
-    def height(self) -> int:
+    def height(self) -> int | None:
         """Height of the image in pixels"""
         raise NotImplementedError()
 

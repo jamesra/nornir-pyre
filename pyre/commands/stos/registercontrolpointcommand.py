@@ -71,7 +71,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._source_image = source_image
         self._target_image = target_image
         self._selected_points = selected_points
-        self._settings = settings.stos.registration
+        self._settings = settings.stos.grid_registration
 
         if register_all:
             self._selected_points.update(range(transform_controller.NumPoints))

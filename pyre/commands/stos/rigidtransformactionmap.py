@@ -1,7 +1,6 @@
 import enum
 from dependency_injector.wiring import Provide, providers, inject
 from dependency_injector import containers
-from pygame.pypm import Input
 
 from nornir_imageregistration import PointLike
 from typing import Callable
