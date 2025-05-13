@@ -1,44 +1,20 @@
 from __future__ import annotations
-import os
 
 import abc
 from enum import Enum
-from typing import Callable, NamedTuple
+from typing import Callable
 
-import numpy as np
 from numpy.typing import NDArray
 
 import nornir_imageregistration
 from pyre.interfaces.action import Action
-
-
-class ImageLoadResult(NamedTuple):
-    key: str  # key to store the image under in the image manager
-    permutations: nornir_imageregistration.ImagePermutationHelper  # Image data loaded
-    image_fullpath: str  # Path to the image file
-    mask_fullpath: str | None  # Path to the mask file
-
-    @property
-    def image_dirname(self) -> str:
-        return os.path.dirname(self.image_fullpath)
-
-    @property
-    def mask_dirname(self) -> str | None:
-        return os.path.dirname(self.mask_fullpath)
-
-    @property
-    def image_basename(self) -> str:
-        return os.path.basename(self.image_fullpath)
-
-    @property
-    def mask_basename(self) -> str | None:
-        return os.path.basename(self.mask_fullpath) if self.mask_fullpath is not None else None
+from pyre.interfaces.named_tuples import ImageLoadResult, LoadStosResult
 
 
 class IImageLoader(abc.ABC):
 
     @abc.abstractmethod
-    def load_stos(self, stos_path: str) -> nornir_imageregistration.ITransform:
+    def load_stos(self, stos_path: str) -> LoadStosResult:
         raise NotImplementedError()
 
     @abc.abstractmethod

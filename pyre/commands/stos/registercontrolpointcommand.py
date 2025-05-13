@@ -71,7 +71,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._source_image = source_image
         self._target_image = target_image
         self._selected_points = selected_points
-        self._settings = settings.stos.grid_registration
+        self._settings = settings.stos.point_registration
 
         if register_all:
             self._selected_points.update(range(transform_controller.NumPoints))
@@ -102,7 +102,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         # self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.indicies_to_register)
         self.align_points(source, target, self._selected_points)
 
-        self._selected_points.clear()
+        # Do not clear the selected indicies in case we want to re-run
         super().execute()
 
     def activate(self):
@@ -186,7 +186,7 @@ class RegisterControlPointCommand(InstantCommandBase):
             i_point = i_points
             fixed = self._transform_controller.GetFixedPoint(i_point)
             warped = self._transform_controller.GetWarpedPoint(i_point)
-            task = pyre.common.StartAttemptAlignPoint(pool=pools.GetGlobalLocalMachinePool(),
+            task = pyre.common.StartAttemptAlignPoint(pool=None,
                                                       task_description=f"Align Pyre Point {i_point}",
                                                       transform=self._transform_controller.TransformModel,
                                                       target_image=targetimage.ImageWithMaskAsNoise,

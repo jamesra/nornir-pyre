@@ -91,16 +91,17 @@ def RotateTranslateWarpedImage(source_image_key: str,
 
     source_image = image_manager[source_image_key]
     target_image = image_manager[target_image_key]
-
-    alignRecord = stos.SliceToSliceBruteForceWithPreprocessedImages(source_image,
-                                                                    target_image,
-                                                                    settings,
-                                                                    SingleThread=False,
-                                                                    Cluster=False)
+    settings._method = nornir_imageregistration.settings.SliceToSliceMethod.LogPolar
+    alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=source_image,
+                                                                           target_image_data=target_image,
+                                                                           settings=settings,
+                                                                           SingleThread=False,
+                                                                           Cluster=False,
+                                                                           )
     # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
     print("Alignment found: " + str(alignRecord))
-    transform = alignRecord.ToImageTransform(source_image.shape,
-                                             target_image.shape)
+    transform = alignRecord.ToImageTransform(source_image_shape=source_image.shape,
+                                             target_image_shape=target_image.shape)
     return transform
     # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 
@@ -125,7 +126,7 @@ def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefineme
     #                               pyre.state.currentStosConfig._transform_controller.points)
     except Exception as e:
         print(f"Exception running grid refinement:\n{e}")
-        pass
+        raise
 
 
 @inject
@@ -190,7 +191,10 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
         return None
 
     if pool is None:
-        pool = nornir_pools.GetGlobalLocalMachinePool()
+        if nornir_imageregistration.in_debug_mode():
+            pool = nornir_pools.GetGlobalSerialPool()
+        else:
+            pool = nornir_pools.GetGlobalLocalMachinePool()
 
     '''Try to use the Composite view to render the two tiles we need for alignment'''
     task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,
@@ -205,38 +209,6 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                                                                                        anglesToSearch=anglesToSearch)
 
     return task
-
-
-#
-#     FixedRectangle = nornir_imageregistration.Rectangle.CreateFromPointAndArea(point=[controlpoint[0] - (alignmentArea[0] / 2.0),
-#                                                                                    controlpoint[1] - (alignmentArea[1] / 2.0)],
-#                                                                              area=alignmentA rea)
-# 
-#     FixedRectangle = nornir_imageregistration.Rectangle.SafeRound(FixedRectangle)
-#     FixedRectangle = nornir_imageregistration.Rectangle.change_area(FixedRectangle, alignmentArea)
-#     
-#     # Pull image subregions 
-#     rigid_transforms = nornir_imageregistration.local_distortion_correction.ApproximateRigidTransform(input_transform=transform,
-#                                                                                                       target_points=controlpoint)
-#     
-#     warpedImageROI = assemble.WarpedImageToFixedSpace(rigid_transforms[0],
-#                             fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
-# 
-#     fixedImageROI = nornir_imageregistration.CropImage(fixedImage, FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
-# 
-#     nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI])
-# 
-#     # pool = Pools.GetGlobalMultithreadingPool()
-# 
-#     # task = pool.add_task("AttemptAlignPoint", core.FindOffset, fixedImageROI, warpedImageROI, MinOverlap = 0.2)
-#     # apoint = task.wait_return()
-#     # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
-#     #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
-#  
-#     apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False, TestFlip=False)
-# 
-#     print("Auto-translate result: " + str(apoint))
-#     return apoint
 
 
 def FindIndiciesOutsideImage(points: NDArray, image: NDArray):

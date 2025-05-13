@@ -3,6 +3,7 @@ import os
 from dependency_injector.wiring import Provide, inject
 import wx
 
+from nornir_shared import prettyoutput
 import nornir_imageregistration
 from nornir_imageregistration import StosFile
 from nornir_imageregistration.settings import GridRefinement
@@ -15,6 +16,7 @@ from pyre.container import IContainer
 from pyre.interfaces.managers import ICommandHistory, IImageManager, IImageViewModelManager, IImageLoader
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
+from pyre.interfaces.named_tuples import LoadStosResult
 import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
@@ -340,6 +342,9 @@ class StosWindow(PyreWindowBase):
     def __CreateOpsMenu(self):
         menu = wx.Menu()
 
+        menuFlip = menu.Append(wx.ID_ANY, "&Flip Image")
+        self.Bind(wx.EVT_MENU, self.OnFlipImage, menuFlip)
+
         menuRotationTranslation = menu.Append(wx.ID_ANY, "&Rotate translate estimate")
         self.Bind(wx.EVT_MENU, self.OnRotateTranslate, menuRotationTranslation)
 
@@ -488,6 +493,9 @@ class StosWindow(PyreWindowBase):
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,
                                           pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
 
+    def OnFlipImage(self, e):
+        self.transform_controller.FlipWarped()
+
     def OnRotateTranslate(self, e):
         settings = self._settings.stos.brute_registration
         resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,
@@ -584,7 +592,7 @@ class StosWindow(PyreWindowBase):
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
                      StosContainer.transform_controller],
-                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]) -> LoadStosResult | None:
         try:
             load_result = image_loader.load_stos(filename)
             settings.stos.stos_filename = filename
@@ -595,6 +603,9 @@ class StosWindow(PyreWindowBase):
                                                           mask_fullpath=load_result.source.mask_fullpath)
             settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                           mask_fullpath=load_result.target.mask_fullpath)
+
+            return load_result
+
         except Exception as e:
             print("Error loading stos file: {e}")
             pass
@@ -633,13 +644,17 @@ class StosWindow(PyreWindowBase):
                                 filename, "*.stos",
                                 wx.FD_SAVE)
             if dlg.ShowModal() == wx.ID_OK:
-                fullpath = os.path.join(dlg.GetDirectory(), dlg.GetFilename())
-                self._settings.stos.stos_filename = fullpath
+                try:
+                    fullpath = os.path.join(dlg.GetDirectory(), dlg.GetFilename())
+                    self._settings.stos.stos_filename = fullpath
 
-                stosObj = StosFile.Create(self._settings.stos.source_image.image_fullpath,
-                                          self._settings.stos.target_image.image_fullpath,
-                                          self._transform_controller.TransformModel,
-                                          self._settings.stos.source_image.mask_fullpath,
-                                          self._settings.stos.target_image.mask_fullpath, )
-                stosObj.Save(fullpath)
+                    stosObj = StosFile.Create(
+                        self._settings.stos.target_image.image_fullpath,
+                        self._settings.stos.source_image.image_fullpath,
+                        self._transform_controller.TransformModel,
+                        self._settings.stos.target_image.mask_fullpath,
+                        self._settings.stos.source_image.mask_fullpath, )
+                    stosObj.Save(fullpath)
+                except ValueError:
+                    prettyoutput.LogErr(f"Error saving stos file {fullpath}")
             dlg.Destroy()

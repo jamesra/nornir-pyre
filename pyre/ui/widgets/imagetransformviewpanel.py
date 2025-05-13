@@ -219,6 +219,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
 
+    def __del__(self):
+        try:
+            self._imageviewmodel_manager.remove_change_event_listener(self.on_imageviewmodelmanager_change)
+        except ValueError:
+            pass
+
+        try:
+            self._transform_controller.RemoveOnModelReplacedEventListener(self._on_transform_model_changed)
+        except ValueError:
+            pass
+
     def _on_transform_model_changed(self,
                                     controller: TransformController,
                                     old: ITransform | None,
@@ -299,6 +310,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _handle_remove_imageviewmodel_event(self, name: str):
         """Process a remove event from the imageviewmodel manager"""
+        # if not self._image_transform_view is None:
+        #    self._image_transform_view.
         self._image_transform_view = None
 
     def create_objects(self, context):

@@ -353,7 +353,10 @@ class TransformController:
         """
         Flip the target points
         """
-        self.TransformModel.FlipWarped()
+        if isinstance(self.TransformModel, nornir_imageregistration.ITransfomFlip):
+            self.TransformModel.Flip()
+        else:
+            print("Transform does not support flipping")
 
     def TryAddPoint(self, ImageX: float, ImageY: float, space: Space = Space.Source):
 

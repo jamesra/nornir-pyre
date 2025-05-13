@@ -58,8 +58,8 @@ def load_json_settings() -> AppSettings:
         cwd_config = os.path.join(current_directory, 'settings.json')
         return AppSettings.parse_file(cwd_config)
 
-    except:
-        print("Failed to load configuration file: " + cwd_config)
+    except Exception as e:
+        print(f"Failed to load configuration file: {cwd_config}\n{e}")
 
     for configuration in find_file_in_syspath('settings.json'):
         try:

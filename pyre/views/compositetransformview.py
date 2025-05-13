@@ -3,13 +3,15 @@ Created on Oct 19, 2012
 
 @author: u0490822
 """
-
+from multiprocessing.managers import Value
 from typing import Callable
 
 import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
 from dependency_injector.wiring import Provide, inject
+
+import wx
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
@@ -149,6 +151,21 @@ class CompositeTransformView(IImageTransformView):
         # self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
         # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
+
+        if self._imageviewmodel_manager.__contains__(self._source_viewmodel_name):
+            wx.CallAfter(self._handle_add_imageviewmodel_event, self._source_viewmodel_name,
+                         self._imageviewmodel_manager[self._source_viewmodel_name])
+
+        if self._imageviewmodel_manager.__contains__(self._target_viewmodel_name):
+            wx.CallAfter(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
+                         self._imageviewmodel_manager[
+                             self._target_viewmodel_name])
+
+    def __del__(self):
+        try:
+            self._imageviewmodel_manager.remove_change_event_listener(self.on_imageviewmodelmanager_change)
+        except ValueError:  # Ignore if we've already been removed from the subscription list
+            pass
 
     def on_imageviewmodelmanager_change(self,
                                         name: str,
@@ -317,8 +334,8 @@ class CompositeTransformView(IImageTransformView):
                                         source_texture=self._source_frame_buffer.fbo_texture,
                                         target_texture=self._target_frame_buffer.fbo_texture,
                                         overlay_type=None,
-                                        source_channel_mix=np.array([1.0, 0.0, 0.5, 1.0]),
-                                        target_channel_mix=np.array([0.0, 1.0, 0.5, 1.0]))
+                                        source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0]),
+                                        target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0]))
 
         elif self._source_image_view is not None:
             self._source_image_view.draw(view_proj, space, client_size, bounding_box)

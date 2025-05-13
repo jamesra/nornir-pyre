@@ -1,25 +1,19 @@
 import concurrent.futures
 from enum import Enum
 import os
-from typing import NamedTuple
 
 from dependency_injector.wiring import inject, Provide
 from pyre.settings import AppSettings
 
-from nornir_imageregistration import ITransform, StosFile
+from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
-from pyre.interfaces.managers import IImageManager, IImageViewModelManager, IImageLoader, ImageLoadResult
+from pyre.interfaces.managers import IImageManager, IImageViewModelManager, IImageLoader
+from pyre.interfaces.named_tuples import ImageLoadResult, LoadStosResult
 from pyre.resources import try_locate_file
 from pyre.interfaces.viewtype import ViewType
 from pyre.viewmodels import ImageViewModel
 from pyre.controllers.transformcontroller import TransformController
 from pyre.container import IContainer
-
-
-class LoadStosResult(NamedTuple):
-    stos: StosFile
-    source: ImageLoadResult
-    target: ImageLoadResult
 
 
 class ImageLoader(IImageLoader):
@@ -28,6 +22,7 @@ class ImageLoader(IImageLoader):
     _image_manager: IImageManager
     _image_viewmodel_manager: IImageViewModelManager
     _search_dirs: list[str] | None
+    _replacement_paths: dict[str, str] | None
 
     @inject
     def __init__(self,
@@ -37,9 +32,10 @@ class ImageLoader(IImageLoader):
         self._image_manager = image_manager
         self._image_viewmodel_manager = imageviewmodel_manager
         self._search_dirs = settings.ui.image_search_paths
+        self._replacement_paths = settings.ui.replacement_paths
 
     def load_stos(self,
-                  stos_path: str) -> StosFile | None:
+                  stos_path: str) -> LoadStosResult | None:
         """Loads a stos file, images are loaded into the image manager and the transform is returned"""
         obj = StosFile.Load(stos_path)
 
@@ -61,9 +57,10 @@ class ImageLoader(IImageLoader):
         with concurrent.futures.ThreadPoolExecutor() as pool:
             source_task = pool.submit(self.load_image_into_manager,
                                       key=ViewType.Source.value,
-                                      image_fullpath=obj.ControlImageFullPath,
-                                      mask_fullpath=obj.ControlMaskFullPath,
-                                      search_dirs=search_paths)
+                                      image_fullpath=obj.MappedImageFullPath,
+                                      mask_fullpath=obj.MappedMaskFullPath,
+                                      search_dirs=search_paths,
+                                      replacement_paths=self._replacement_paths)
 
             source_task.add_done_callback(
                 lambda task: self.create_image_viewmodel(name=task.result().key,
@@ -71,10 +68,10 @@ class ImageLoader(IImageLoader):
 
             target_task = pool.submit(self.load_image_into_manager,
                                       key=ViewType.Target.value,
-                                      image_fullpath=obj.MappedImageFullPath,
-                                      mask_fullpath=obj.MappedMaskFullPath,
-                                      search_dirs=search_paths)
-
+                                      image_fullpath=obj.ControlImageFullPath,
+                                      mask_fullpath=obj.ControlMaskFullPath,
+                                      search_dirs=search_paths,
+                                      replacement_paths=self._replacement_paths)
             target_task.add_done_callback(
                 lambda task: self.create_image_viewmodel(name=task.result().key,
                                                          permutations=task.result().permutations))
@@ -89,18 +86,23 @@ class ImageLoader(IImageLoader):
             key: str | Enum | None,
             image_fullpath: str,
             mask_fullpath: str | None,
-            search_dirs: list[str]) -> ImageLoadResult:
+            search_dirs: list[str] | None = None,
+            replacement_paths: dict[str, str] | None = None) -> ImageLoadResult:
         """Loads an image and optionally a mask from disk.
         :param key: The key to store the image under in the image manager. If None the key will be the base name of the image file.
         :return: A tuple with the key and the permutations object."""
         key = key if key is not None else os.path.basename(image_fullpath)
-        image_fullpath = try_locate_file(image_fullpath, search_dirs)
-        image = nornir_imageregistration.LoadImage(image_fullpath)
+        found_image_fullpath = try_locate_file(image_fullpath, search_dirs, replacement_paths)
+        if found_image_fullpath is None:
+            raise ValueError("Image file not found: " + image_fullpath + "\n\tin" + str(search_dirs))
+
+        image = nornir_imageregistration.LoadImage(found_image_fullpath)
         image_mask = None
+        found_mask_fullpath = None
         if mask_fullpath is not None:
-            mask_fullpath = try_locate_file(mask_fullpath, search_dirs)
-            if mask_fullpath is not None:
-                image_mask = nornir_imageregistration.LoadImage(mask_fullpath)
+            found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs, replacement_paths)
+            if found_mask_fullpath is not None:
+                image_mask = nornir_imageregistration.LoadImage(found_mask_fullpath)
 
         if key in self._image_manager:
             del self._image_manager[key]
@@ -110,12 +112,14 @@ class ImageLoader(IImageLoader):
                                                mask=image_mask)
         return ImageLoadResult(key=key,
                                permutations=permutations,
-                               image_fullpath=image_fullpath,
-                               mask_fullpath=mask_fullpath)
+                               image_fullpath=found_image_fullpath,
+                               mask_fullpath=found_mask_fullpath,
+                               image_original_fullpath=image_fullpath,
+                               mask_original_fullpath=mask_fullpath)
 
     def create_image_viewmodel(self,
                                name: str | Enum,
                                permutations: nornir_imageregistration.ImagePermutationHelper) -> ImageViewModel:
         if name in self._image_viewmodel_manager:
             del self._image_viewmodel_manager[name]
-        self._image_viewmodel_manager.add(name, permutations.Image)
+        return self._image_viewmodel_manager.add(name, permutations.Image)
