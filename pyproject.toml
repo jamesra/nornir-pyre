@@ -8,14 +8,14 @@ include = ["nornir-pyre"]
 
 [project]
 name = "pyre"
-version = "1.5.1"
+version = "1.5.2"
 authors = [
     { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
 ]
 description = "A helper library that wraps python threads, multiprocessing, a process pool for shell commands, and parallel python with the same interface"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.13s"
 dependencies = [
     "dependency-injector >= 4.45.0",
     "six >= 1.16",
@@ -30,17 +30,20 @@ dependencies = [
     "pydantic >= 2.9.2",
     "PyYAML>=6.0.2",
     "wxPython>=4.0",
-    "nornir_shared>=1.5.1",
+    "nornir_shared @ git+https://github.com/jamesra/nornir-shared.git@dev",
+    "nornir_pools @ git+https://github.com/jamesra/nornir-pools.git@dev",
+    "nornir_imageregistration @ git+https://github.com/jamesra/nornir-imageregistration.git@CuPy",
+    "nornir_buildmanager @ git+https://github.com/jamesra/nornir-buildmanager.git@dev",
 ]
 classifiers = [
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
 ]
 
 [project.optional-dependencies]
 test = ["nose"]
-gl = [""]
+gl = ["pyopengl-accelerate"]
 
 
 [project.urls]
@@ -48,4 +51,4 @@ Homepage = "https://github.com/jamesra/nornir-pyre"
 Issues = "https://github.com/jamesra/nornir-pyre/issues"
 
 [project.scripts]
-start-pyre = "scripts/start_pyre.py"
+start-pyre = "pyre.Run"
