@@ -4,6 +4,7 @@ import os
 import sys
 import pydantic
 from typing import Generator
+from importlib import resources
 
 from dependency_injector import containers, providers
 from dependency_injector.providers import AbstractFactory, Factory, Dict, AbstractSingleton
@@ -36,7 +37,7 @@ def find_file_in_syspath(filename) -> Generator[str, None, None]:
 def load_yaml_settings() -> object:
     try:
         current_directory = os.path.dirname(__file__)
-        cwd_config = os.path.join(current_directory, 'config.yaml')
+        cwd_config = resources.files('pyre').joinpath('config.yaml')
         with open(cwd_config, 'r') as file:
             return yaml.load(file, Loader=yaml.FullLoader)
     except:
@@ -55,7 +56,7 @@ def load_yaml_settings() -> object:
 def load_json_settings() -> AppSettings:
     try:
         current_directory = os.path.dirname(__file__)
-        cwd_config = os.path.join(current_directory, 'settings.json')
+        cwd_config = resources.files('pyre').joinpath('settings.json')
         return AppSettings.parse_file(cwd_config)
 
     except Exception as e:
@@ -67,7 +68,7 @@ def load_json_settings() -> AppSettings:
         except:
             print("Failed to load configuration file: " + configuration)
 
-    raise ValueError(f"Failed to find config.yaml configuration file in {sys.path}")
+    raise ValueError(f"Failed to find settings.json configuration file in {sys.path}")
 
 
 class IContainer(containers.DeclarativeContainer):
