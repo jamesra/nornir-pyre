@@ -23,6 +23,10 @@ To install Pyre and its dependencies, follow these steps:
 
     pip install -r requirements-v1.5.2.txt
 
+3. Run Pyre (with pyre-env activated)::
+
+    python -m pyre
+
 You can download the requirements file directly from GitHub:
 `requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
 
