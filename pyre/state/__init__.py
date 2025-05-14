@@ -70,9 +70,9 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
         settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                       mask_fullpath=load_result.target.mask_fullpath)
     else:
-        if settings.stos.target_image.image_fullpath is not None:
+        if settings.stos.target_image is not None and settings.stos.target_image.image_fullpath is not None:
             image_loader.load_image_into_manager(ViewType.Target, settings.stos.target_image.image_fullpath,
                                                  mask_path=settings.stos.target_image.mask_fullpath)
-        if settings.stos.source_image.image_fullpath is not None:
+        if settings.stos.source_image is not None and settings.stos.source_image.image_fullpath is not None:
             image_loader.load_image_into_manager(ViewType.Source, settings.stos.source_image.image_fullpath,
                                                  mask_path=settings.stos.source_image.mask_fullpath)

@@ -50,14 +50,15 @@ def load_yaml_settings() -> object:
         except:
             print("Failed to load configuration file: " + configuration)
 
-    raise ValueError(f"Failed to find config.yaml configuration file in {sys.path}")
+    print(f"Failed to find config.yaml configuration file in {sys.path}")
+    return AppSettings()
 
 
 def load_json_settings() -> AppSettings:
     try:
         current_directory = os.path.dirname(__file__)
         cwd_config = resources.files('pyre').joinpath('settings.json')
-        return AppSettings.parse_file(cwd_config)
+        return AppSettings.model_validate_json(cwd_config)
 
     except Exception as e:
         print(f"Failed to load configuration file: {cwd_config}\n{e}")
@@ -68,7 +69,8 @@ def load_json_settings() -> AppSettings:
         except:
             print("Failed to load configuration file: " + configuration)
 
-    raise ValueError(f"Failed to find settings.json configuration file in {sys.path}")
+    print(f"Failed to find settings.json configuration file in {sys.path}")
+    return AppSettings()
 
 
 class IContainer(containers.DeclarativeContainer):

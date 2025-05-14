@@ -1,0 +1,54 @@
+{
+    "debug": false,
+    "readme": "README.txt",
+    "ui": {
+        "zoom_limits": {
+            "max": 16.0,
+            "min": 0.00390625
+        },
+        "control_point_search_radius": 10.0,
+        "image_search_paths": [
+            "./Leveled/Tileset/004",
+            "//storage2.connectomes.utah.edu/Data/Volumes/MiniRC1x/"
+        ],
+        "replacement_paths": {
+            "\\OpR-Marc-Syn1\\Data\\": "\\storage1.connectomes.utah.edu\\Data\\",
+            "\\OpR-Marc-Syn2\\Data\\": "\\storage2.connectomes.utah.edu\\Data\\",
+            "\\OpR-Marc-Syn3\\Data\\": "\\storage3.connectomes.utah.edu\\Data\\",
+            "\\OpR-Marc-Syn4\\Data\\": "\\storage4.connectomes.utah.edu\\Data\\"
+        }
+    },
+    "stos": {
+        "stos_dirname": null,
+        "stos_filename": "D:\\Data\\RC3\\TEM\\Grid32\\1095-1096_ctrl-TEM_Leveled_map-TEM_Leveled_ready_to_refine.stos",
+        "grid_registration": {
+            "alignment_area": 256,
+            "angle_search_range": {
+                "max_angle": 7.5,
+                "angle_step_size": 2.5
+            }
+        },
+        "brute_registration": {
+            "angles": null,
+            "min_overlap": 0.75,
+            "source_image_scale_factors": null,
+            "larget_dimension": 1024,
+            "try_flipped": false
+        },
+        "point_registration": {
+            "alignment_area": 256,
+            "angle_search_range": {
+                "max_angle": 0.0,
+                "angle_step_size": 1.0
+            }
+        },
+        "source_image": {
+            "image_fullpath": "D:\\Data\\RC3\\TEM\\1095\\TEM\\Leveled\\Images\\032\\1095_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Data\\RC3\\TEM\\1095\\TEM\\Mask\\Images\\032\\1095_TEM_Mask.png"
+        },
+        "target_image": {
+            "image_fullpath": "D:\\Data\\RC3\\TEM\\1096\\TEM\\Leveled\\Images\\032\\1096_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Data\\RC3\\TEM\\1096\\TEM\\Mask\\Images\\032\\1096_TEM_Mask.png"
+        }
+    }
+}
