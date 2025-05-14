@@ -181,7 +181,6 @@ def SaveSettings(settings_provider: Provider[AppSettings] = Provide[IContainer.s
 @inject
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
         imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
-        window_manager: IWindowManager = Provide[IContainer.window_manager],
         stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]
         ):
     global app
@@ -199,6 +198,11 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
     readmetxt = resource_paths.README()
     print(readmetxt)
 
+    main_wx()
+
+
+def main_wx(window_manager: IWindowManager = Provide[IContainer.window_manager],
+            stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
     args = ProcessArgs()
     arg_values = args.parse_args()
 
