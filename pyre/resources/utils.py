@@ -1,7 +1,5 @@
 import os
 
-from nornir_volumemodel import Image
-
 
 def try_locate_file(ImageFullPath: str, listAltDirs: list[str],
                     replacement_paths: dict[str, str] | None = None) -> str | None:

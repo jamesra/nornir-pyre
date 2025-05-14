@@ -66,13 +66,12 @@ __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common
 import numpy as np
 from numpy.typing import NDArray
 
+vector3 = NDArray[np.floating]  # A 3 element vector
+vector2 = NDArray[np.floating]  # A 2 element vector
+
 import pyre.gl_engine as gl_engine
 from pyre.gl_engine.shaders import ColorShader, InitializeShaders, TextureShader
-import pyre.space
 from pyre.space import Space
 from pyre.command_interfaces import ICommand, CommandStatus, CommandResult
 
 Windows = {}
-
-vector3 = NDArray[np.floating]  # A 3 element vector
-vector2 = NDArray[np.floating]  # A 2 element vector
