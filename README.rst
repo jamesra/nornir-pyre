@@ -12,7 +12,7 @@ To install Pyre and its dependencies, follow these steps:
 
     # Using venv
     python -m venv pyre-env
-    
+
     # Activate the environment
     # On Windows:
     pyre-env\Scripts\activate
@@ -22,6 +22,12 @@ To install Pyre and its dependencies, follow these steps:
 2. Install dependencies using the requirements file::
 
     pip install -r requirements-v1.5.2.txt
+
+You can download the requirements file directly from GitHub:
+`requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/OpenGL/requirements-v1.5.2.txt>`_
+
+Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 13th 2025)
+
 
 Alternative Installation Methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
