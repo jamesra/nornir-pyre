@@ -5,10 +5,18 @@ A Python-based image registration and visualization tool written by James Anders
 
 Installation
 -----------
+Pre-Install:
+    **Open command Prompt or Terminal Window**
+    1. #Check active Python (version needs to be >= 3.13.2)
+        python --version
+    2. If Python is not >= 13.3.2, install latest python: https://www.python.org/downloads/
+    3. Ensure new python is returned when executing --version command above. 
 
 To install Pyre and its dependencies, follow these steps:
 
 1. Create a new Python environment (recommended)::
+
+    **Open a Command Prompt or Terminal Window**
 
     # Using venv
     python -m venv pyre-env
@@ -20,6 +28,8 @@ To install Pyre and its dependencies, follow these steps:
     source pyre-env/bin/activate
 
 2. Install dependencies using the requirements file::
+    You need to download the requirements file directly from GitHub:
+    `requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
 
     pip install -r requirements-v1.5.2.txt
 
@@ -27,8 +37,7 @@ To install Pyre and its dependencies, follow these steps:
 
     python -m pyre
 
-You can download the requirements file directly from GitHub:
-`requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
+
 
 Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 13th 2025)
 
