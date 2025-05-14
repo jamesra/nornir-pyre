@@ -1,27 +1,54 @@
-'''
+"""
 Created on Oct 19, 2012
 
 @author: u0490822
-'''
+"""
+from multiprocessing.managers import Value
+from typing import Callable
 
-import logging
-import os
+import OpenGL.GL as gl
+import numpy as np
+from numpy.typing import NDArray
+from dependency_injector.wiring import Provide, inject
+
+import wx
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
-import numpy
-import pyglet
-import scipy.spatial
+from pyre.gl_engine import FrameBuffer
+import pyre.gl_engine.shaders as shaders
+from pyre.interfaces.action import Action
+from pyre.interfaces.managers import IImageViewModelManager
+from pyre.space import Space
+import pyre.viewmodels
+from pyre.controllers.transformcontroller import TransformController
+from pyre.views.interfaces import IImageTransformView
+from pyre.container import IContainer
 
-import pyglet.gl as gl
-from pyre.views import imagegridtransformview
-import pyre.views
 
-
-class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
-    '''
+class CompositeTransformView(IImageTransformView):
+    """
     Combines and image and a transform to render an image
-    '''
+    """
+    _source_viewmodel_name: str  # The texture/image in the source space
+    _target_viewmodel_name: str  # The texture/image in the target space
+    _nameset: frozenset[str]  # The set of source and target names
+    _source_image_view: IImageTransformView | None
+    _target_image_view: IImageTransformView | None
+    _transform_controller: TransformController
+    _imageviewmodel_manager: IImageViewModelManager
+
+    # These hold the rendered images for the source and target images.
+    # These images are aligned if the transform aligns them.
+    # A second pass rendering will blend the images together and draw to the back buffer
+    _source_frame_buffer: FrameBuffer
+    _target_frame_buffer: FrameBuffer
+
+    _display_space: Space
+
+    @property
+    def display_space(self) -> Space:
+        return self._display_space
 
     def _ClearVertexAngleDelta(self):
         self._transformVertexAngleDeltas = None
@@ -30,8 +57,8 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
     def _UpdateVertexAngleDelta(self, transform):
         self._transformVertexAngleDeltas = metrics.TriangleVertexAngleDelta(transform)
-        self._vertexMaxAngleDelta = numpy.asarray(list(map(numpy.max, self._transformVertexAngleDeltas)))
-        self._MaxAngleDelta = numpy.max(self._vertexMaxAngleDelta)
+        self._vertexMaxAngleDelta = np.asarray(list(map(np.max, self._transformVertexAngleDeltas)))
+        self._MaxAngleDelta = np.max(self._vertexMaxAngleDelta)
         if self._MaxAngleDelta != 0:
             self._normalized_vertex_max_angle_delta = self._vertexMaxAngleDelta / self._MaxAngleDelta
         else:
@@ -40,57 +67,67 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
     @property
     def TransformVertexAngleDelta(self):
         if self._transformVertexAngleDeltas is None:
-            self._UpdateVertexAngleDelta(self.TransformController)
+            self._UpdateVertexAngleDelta(self._transform_controller)
 
         return self._transformVertexAngleDeltas
 
     @property
-    def VertexMaxAngleDelta(self):
+    def VertexMaxAngleDelta(self) -> float:
         return self._vertexMaxAngleDelta
 
     @property
-    def NormalizedVertexMaxAngleDelta(self):
+    def NormalizedVertexMaxAngleDelta(self) -> float:
         return self._vertexMaxAngleDelta
 
     @property
-    def MaxAngleDelta(self):
+    def MaxAngleDelta(self) -> float:
         return self._MaxAngleDelta
 
     @property
-    def width(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.width
+    def width(self) -> int:
+        return None if self._source_image_view is None else self._source_image_view.width
 
     @property
-    def height(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.height
+    def height(self) -> int:
+        return None if self._source_image_view is None else self._source_image_view.height
 
     @property
-    def fixedwidth(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.width
+    def fixedwidth(self) -> int | None:
+        return None if self._source_image_view is None else self._source_image_view.width
 
     @property
-    def fixedheight(self):
-        if self.FixedImageArray is None:
-            return None
-        return self.FixedImageArray.height
+    def fixedheight(self) -> int | None:
+        return None if self._source_image_view is None else self._source_image_view.height
 
-    def __init__(self, FixedImageArray: pyre.viewmodels.ImageViewModel,
-                 WarpedImageArray: pyre.viewmodels.ImageViewModel,
-                 Transform: pyre.viewmodels.TransformController):
-        '''
+    @property
+    def transform(self) -> nornir_imageregistration.ITransform:
+        return self._transform_controller.TransformModel
+
+    @property
+    def transform_controller(self) -> TransformController:
+        return self._transform_controller
+
+    @inject
+    def __init__(self,
+                 display_space: Space,
+                 activate_context: Callable[[], None],
+                 source_image_name: str,
+                 target_image_name: str,
+                 transform_controller: TransformController,
+                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager], ):
+        """
         Constructor
-        '''
-        super(CompositeTransformView, self).__init__(ImageViewModel=FixedImageArray, Transform=Transform)
+        """
+        self._display_space = display_space
+        self._source_viewmodel_name = source_image_name
+        self._target_viewmodel_name = target_image_name
+        self._nameset = frozenset([source_image_name, target_image_name])
 
-        self.FixedImageArray = FixedImageArray
-        self.WarpedImageArray = WarpedImageArray
-        self.TransformController = Transform
+        self._imageviewmodel_manager = image_viewmodel_manager
+        self._activate_context = activate_context
+        # self._source_image_array = source_image_view
+        # self._target_image_array = target_image_view
+        self._transform_controller = transform_controller
 
         self._transformVertexAngleDeltas = None
 
@@ -103,89 +140,142 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
 
         self._tranformed_verts_cache = None
 
+        self._source_frame_buffer = FrameBuffer()
+        self._target_frame_buffer = FrameBuffer()
 
-    def OnTransformChanged(self):
+        self._source_image_view = None
+        self._target_image_view = None
 
-        super(CompositeTransformView, self).OnTransformChanged()
+        self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
-        self._tranformed_verts_cache = None
-        self._ClearVertexAngleDelta()
+        # self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
-    def PopulateTransformedVertsCache(self):
-        # verts = self.Transform.WarpedPoints
-        # self._tranformed_verts_cache = self.Transform.Transform(verts)
-        if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
-            self._tranformed_verts_cache = self.Transform.TargetPoints
-        return
+        # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
-    def draw_points(self, ForwardTransform=True, SelectedIndex=None, FixedSpace=True, BoundingBox=None, ScaleFactor=1):
-        # if(ForwardTransform):
+        if self._imageviewmodel_manager.__contains__(self._source_viewmodel_name):
+            wx.CallAfter(self._handle_add_imageviewmodel_event, self._source_viewmodel_name,
+                         self._imageviewmodel_manager[self._source_viewmodel_name])
 
-        if self.TransformController is None:
-            return
+        if self._imageviewmodel_manager.__contains__(self._target_viewmodel_name):
+            wx.CallAfter(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
+                         self._imageviewmodel_manager[
+                             self._target_viewmodel_name])
 
-        if self._tranformed_verts_cache is None:
-            self.PopulateTransformedVertsCache()
+    def __del__(self):
+        try:
+            self._imageviewmodel_manager.remove_change_event_listener(self.on_imageviewmodelmanager_change)
+        except ValueError:  # Ignore if we've already been removed from the subscription list
+            pass
 
-        # if self._vertexMaxAngleDelta is None:
-        #    self._UpdateVertexAngleDelta(self.TransformController)
+    def on_imageviewmodelmanager_change(self,
+                                        name: str,
+                                        action: Action,
+                                        image: pyre.viewmodels.ImageViewModel):
+        """Called when an imageviewmodel is added or removed from the manager"""
+        print(
+            f'* CompositeTransformView.on_imageviewmodelmanager_change {name} {action.value} self: {self._nameset}')
+        if name not in self._nameset:
+            print('\tDoes not match')
+            return  # Not of interest to our class
 
-        if not self._tranformed_verts_cache is None:
-            self._draw_points(self._tranformed_verts_cache, SelectedIndex, BoundingBox=BoundingBox,
-                              ScaleFactor=ScaleFactor)
+        if action == Action.ADD:
+            self._handle_add_imageviewmodel_event(name, image)
+        elif action == Action.REMOVE:
+            self._handle_remove_imageviewmodel_event(name)
+        else:
+            raise NotImplementedError()
 
-    def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
-        Triangles = numpy.array(T)
-        if Triangles.ndim == 1:
-            Triangles = Triangles.reshape(len(Triangles) / 3, 3)
+    def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
 
-        convex_hull_flat = numpy.unique(convex_hull)
+        from pyre.views import ImageTransformView
+        """Process an add event from the imageviewmodel manager"""
+        space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
+        view = ImageTransformView(space=space_mapping,
+                                  activate_context=self._activate_context,
+                                  image_view_model=image,
+                                  transform_controller=self._transform_controller)
+        print(f'Added image view model {name} to existing CompositeTransformView')
 
-        iTri = len(Triangles) - 1
-        while iTri >= 0:
-            tri = Triangles[iTri]
-            if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
-                # OK, find out if the midpoint of any lines are outside the convex hull
-                Triangles = numpy.delete(Triangles, iTri, 0)
+        if space_mapping == Space.Source:
+            self._source_image_view = view
+        elif space_mapping == Space.Target:
+            self._target_image_view = view
 
-            iTri -= 1
+        # self.center_camera()
 
-        return Triangles
+    def _handle_remove_imageviewmodel_event(self, name: str):
+        """Process a remove event from the imageviewmodel manager"""
+        space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
+        if space_mapping == Space.Source:
+            self._source_image_view = None
+        elif space_mapping == Space.Target:
+            self._target_image_view = None
 
+    # def on_imageviewmodelmanager_change(self,
+    #                                     name: str,
+    #                                     action: Action,
+    #                                     image: ImageViewModel):
+    #     """Called when an imageviewmodel is added or removed from the manager"""
+    #     print(
+    #         f'* ImageTransformViewPanel.on_imageviewmodelmanager_change {name} {action.value} self: {self._config.imagenames}')
+    #     if name not in self._nameset:
+    #         print('\tDoes not match')
+    #         return  # Not of interest to our class
     #
-    #     def draw_lines(self, ForwardTransform=True):
-    #         if(self.TransformController is None):
-    #             return
+    #     if action == Action.ADD:
+    #         self._handle_add_imageviewmodel_event(name, image)
+    #     elif action == Action.REMOVE:
+    #         self._handle_remove_imageviewmodel_event(name)
+    #     else:
+    #         raise NotImplementedError()
     #
-    #         pyglet.gl.glColor4f(1.0, 0, 0, 1.0)
-    #         ImageArray = self.WarpedImageArray
-    #         for ix in range(0, ImageArray.NumCols):
-    #             for iy in range(0, ImageArray.NumRows):
-    #                 x = ImageArray.TextureSize[1] * ix
-    #                 y = ImageArray.TextureSize[0] * iy
-    #                 h, w = ImageArray.TextureSize
+    # def _handle_add_imageviewmodel_event(self, name: str, image: ImageViewModel):
+    #     """Process an add event from the imageviewmodel manager"""
+    #     # self._image_transform_view.image_view_model = image
+    #     view = ImageTransformView(space=self.space,
+    #                               activate_context=self.activate_context,
+    #                               image_view_model=image,
+    #                               transform_controller=self._config.transform_controller)
+    #     print(f'Added image view model {name} to ImageTransformViewPanel')
+    #     self._image_transform_view = view
     #
-    #                 WarpedCorners = [[y, x],
-    #                                 [y, x + w],
-    #                                 [y + h, x],
-    #                                 [y + h, x + w]]
+    #     self.center_camera()
     #
-    #                 FixedCorners = self.TransformController.Transform(WarpedCorners)
+    # def _handle_remove_imageviewmodel_event(self, name: str):
+    #     """Process a remove event from the imageviewmodel manager"""
+    #     raise NotImplementedError()
+
+    # def OnTransformChanged(self, transform_controller: TransformController):
     #
-    #                 tri = scipy.spatial.Delaunay(FixedCorners)
-    #                 LineIndicies = pyre.views.LineIndiciesFromTri(tri.vertices)
+    #     #super(CompositeTransformView, self).OnTransformChanged(transform_controller)
     #
-    #                 FlatPoints = numpy.fliplr(FixedCorners).ravel().tolist()
+    #     self._tranformed_verts_cache = None
+    #     #self._ClearVertexAngleDelta()
     #
-    #                 vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
+    # def PopulateTransformedVertsCache(self):
+    #     # verts = self.transform.WarpedPoints
+    #     # self._tranformed_verts_cache = self.transform.transform(verts)
+    #     if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
+    #         self._tranformed_verts_cache = self.Transform.TargetPoints
+    #     return
     #
-    #                 gl.glDisable(gl.GL_TEXTURE_2D)
+    # def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
+    #     Triangles = np.array(T)
+    #     if Triangles.ndim == 1:
+    #         Triangles = Triangles.reshape(len(Triangles) / 3, 3)
     #
-    #                 pyglet.graphics.draw_indexed(len(vertarray) / 2,
-    #                                                          gl.GL_LINES,
-    #                                                          LineIndicies,
-    #                                                          ('v2f', vertarray))
-    #         pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+    #     convex_hull_flat = np.unique(convex_hull)
+    #
+    #     iTri = len(Triangles) - 1
+    #     while iTri >= 0:
+    #         tri = Triangles[iTri]
+    #         if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
+    #             # OK, find out if the midpoint of any lines are outside the convex hull
+    #             Triangles = np.delete(Triangles, iTri, 0)
+    #
+    #         iTri -= 1
+    #
+    #     return Triangles
 
     def setup_composite_rendering(self):
 
@@ -198,27 +288,99 @@ class CompositeTransformView(imagegridtransformview.ImageGridTransformView):
         # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
         return
 
-    def draw_textures(self, BoundingBox=None, glFunc=None):
+    def draw(self,
+             view_proj: NDArray[np.floating],
+             space: Space,
+             client_size: tuple[int, int],
+             bounding_box: nornir_imageregistration.Rectangle | None = None):
+        """Draw the image in either source (fixed) or target (warped) space
+        :param view_proj: View projection matrix
+        :param client_size: Size of the client area in pixels. (height, width)"""
+
+        # Rough idea:
+        # 1. Render each image to a FrameBufferObject
+        # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
+        if self._source_image_view is not None and self._target_image_view is not None:
+
+            source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, source_fbo)
+
+            gl.glClearDepth(10000.0)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+
+            target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
+
+            gl.glClearDepth(10000.0)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
+
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            # OK, we have two textures with the rendered+transformed images of source and target images.
+            # Inject textures into an overlay renderer and blend the images
+            # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
+            #                                                                -1, 1,
+            #                                                                -1, 1)
+
+            ortho_projection = np.identity(4)
+            ortho_projection[0, 0] = 2.0
+            ortho_projection[1, 1] = 2.0
+            shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
+                                        source_texture=self._source_frame_buffer.fbo_texture,
+                                        target_texture=self._target_frame_buffer.fbo_texture,
+                                        overlay_type=None,
+                                        source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0]),
+                                        target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0]))
+
+        elif self._source_image_view is not None:
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+        elif self._target_image_view is not None:
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
+
+    def draw_textures(self, view_proj: NDArray[np.floating],
+                      space: Space,
+                      BoundingBox=None,
+                      glFunc=None):
         self.setup_composite_rendering()
 
         glFunc = gl.GL_FUNC_ADD
 
-        if self.FixedImageArray is not None:
+        gl.glEnable(gl.GL_BLEND)
+        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
+        if self._source_image_array is not None:
             FixedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
-            self.DrawFixedImage(self.FixedImageArray, FixedColor, BoundingBox=BoundingBox, z=0.25)
+            # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
+            self.draw(view_proj=view_proj,
+                      space=Space.Source,
+                      BoundingBox=BoundingBox,
+                      glFunc=glFunc)
+            self.DrawWarpedImage(view_proj, self._source_image_array, tex_color=FixedColor, BoundingBox=BoundingBox,
+                                 z=None,
+                                 glFunc=glFunc,
+                                 tween=1.0)
 
-        if self.WarpedImageArray is not None:
+        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
+
+        if self._target_image_array is not None:
             WarpedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 gl.glBlendEquation(glFunc)
                 WarpedColor = (0, 1.0, 0, 1)
 
-            self.DrawWarpedImage(self.WarpedImageArray, tex_color=WarpedColor, BoundingBox=BoundingBox, z=0.75,
-                                 glFunc=glFunc)
+            self.DrawWarpedImage(view_proj, self._target_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,
+                                 z=None,
+                                 glFunc=glFunc,
+                                 tween=1)
 
+        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         self.clear_composite_rendering()
-        # self.DrawFixedImage(self.__WarpedImageArray)
-        # self._draw_warped_image(self.__FixedImageArray)

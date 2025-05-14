@@ -4,20 +4,21 @@ Created on Oct 16, 2012
 @author: u0490822
 '''
 from typing import Iterable
-from numpy.typing import NDArray
-import argparse
-import logging
-import os
-import sys
 
-import nornir_pools
-import nornir_imageregistration
-import nornir_shared.misc
+from dependency_injector.wiring import Provide, inject
 import numpy
+from numpy.typing import NDArray
 
-import pyre
+import nornir_imageregistration
+from nornir_imageregistration import ITransform
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
+import nornir_pools
+import pyre
+from pyre.container import IContainer
+from pyre.interfaces.managers import IImageManager
+from pyre.interfaces.managers.command_history import ICommandHistory
+from pyre.controllers.transformcontroller import TransformController
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistration.ITransform, warpedImage: NDArray):
@@ -29,7 +30,8 @@ def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistra
     nornir_imageregistration.ImageSave(fileFullPath, registeredImage)
 
 
-def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray, warpedImage: NDArray):
+def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray,
+                                      warpedImage: NDArray):
     '''Cut image into tiles, assemble small chunks'''
 
     return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
@@ -69,29 +71,42 @@ def SyncWindows(LookAt, scale: float):
     pyre.Windows['Warped'].imagepanel.camera.scale = scale
 
 
-def RotateTranslateWarpedImage(LimitImageSize: bool = False):
+@inject
+def RotateTranslateWarpedImage(source_image_key: str,
+                               target_image_key: str,
+                               settings: nornir_imageregistration.settings.StosBruteSettings,
+                               LimitImageSize: bool = False,
+                               image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
 
-    if not (pyre.state.currentStosConfig.FixedImageViewModel is None or
-            pyre.state.currentStosConfig.WarpedImageViewModel is None):
-        alignRecord = stos.SliceToSliceBruteForce(pyre.state.currentStosConfig.FixedImages.Image,
-                                                  pyre.state.currentStosConfig.WarpedImages.Image,
-                                                  pyre.state.currentStosConfig.FixedImages.Mask,
-                                                  pyre.state.currentStosConfig.WarpedImages.Mask,
-                                                  LargestDimension=largestdimension,
-                                                  TestFlip=False,
-                                                  Cluster=False)
-        # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
-        print("Alignment found: " + str(alignRecord))
-        transform = alignRecord.ToImageTransform(pyre.state.currentStosConfig.FixedImageViewModel.RawImageSize,
-                                                 pyre.state.currentStosConfig.WarpedImageViewModel.RawImageSize)
-        pyre.state.currentStosConfig.TransformController.TransformModel = transform
-        #pyre.state.currentStosConfig.TransformController.SetPoints(transform.points)
+    if source_image_key not in image_manager:
+        print("Source image not loaded")
+        return
 
-        #pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.Transform,
-                               #pyre.state.currentStosConfig.TransformController.Transform)
+    if target_image_key not in image_manager:
+        print("Target image not loaded")
+        return
+
+    source_image = image_manager[source_image_key]
+    target_image = image_manager[target_image_key]
+    settings._method = nornir_imageregistration.settings.SliceToSliceMethod.LogPolar
+    alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=source_image,
+                                                                           target_image_data=target_image,
+                                                                           settings=settings,
+                                                                           SingleThread=False,
+                                                                           Cluster=False,
+                                                                           )
+    # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
+    print("Alignment found: " + str(alignRecord))
+    transform = alignRecord.ToImageTransform(source_image_shape=source_image.shape,
+                                             target_image_shape=target_image.shape)
+    return transform
+    # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
+
+    # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.transform,
+    # pyre.state.currentStosConfig._transform_controller.transform)
 
 
 def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefinement | None):
@@ -103,27 +118,31 @@ def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefineme
             pyre.state.currentStosConfig.TransformController.TransformModel,
             settings=settings,
             SaveImages=False,
-            SavePlots=False,
-            outputDir=None)
+            SavePlots=True,
+            outputDir="C:\\Temp")
 
         pyre.state.currentStosConfig.TransformController.TransformModel = updatedTransform
-        #pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.SetPoints,
-#                               pyre.state.currentStosConfig.TransformController.points)
+        # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,
+    #                               pyre.state.currentStosConfig._transform_controller.points)
     except Exception as e:
         print(f"Exception running grid refinement:\n{e}")
-        pass
+        raise
 
-def LinearBlendTransform(blend_factor: float):
+
+@inject
+def LinearBlendTransform(blend_factor: float,
+                         command_history: ICommandHistory = Provide[IContainer.command_history]):
     if not isinstance(pyre.state.currentStosConfig.Transform, nornir_imageregistration.transforms.IControlPoints):
         print("Linear blend requires control point based transform")
         return
 
-    pyre.history.SaveState(pyre.state.currentStosConfig.TransformController.__setattr__,
-                           'TransformModel',
-                           pyre.state.currentStosConfig.TransformController.TransformModel)
+    command_history.SaveState(pyre.state.currentStosConfig.TransformController.__setattr__,
+                              'TransformModel',
+                              pyre.state.currentStosConfig.TransformController.TransformModel)
 
-    updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(pyre.state.currentStosConfig.Transform,
-                                                                              blend_factor, ignore_rotation=False)
+    updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(
+        pyre.state.currentStosConfig.Transform,
+        blend_factor, ignore_rotation=False)
 
     pyre.state.currentStosConfig.TransformController.TransformModel = updated_transform
     print(f"Linear blend completed for blend value {blend_factor}")
@@ -166,14 +185,16 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            target_image_stats: nornir_imageregistration.ImageStats,
                            source_image_stats: nornir_imageregistration.ImageStats,
                            target_controlpoint,
-                           alignmentArea,
+                           alignmentArea: NDArray | tuple[float, float],
                            anglesToSearch: Iterable[float]):
-
     if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
         return None
 
     if pool is None:
-        pool = nornir_pools.GetGlobalLocalMachinePool()
+        if nornir_imageregistration.in_debug_mode():
+            pool = nornir_pools.GetGlobalSerialPool()
+        else:
+            pool = nornir_pools.GetGlobalLocalMachinePool()
 
     '''Try to use the Composite view to render the two tiles we need for alignment'''
     task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,
@@ -186,41 +207,8 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                                                                                        target_controlpoint=target_controlpoint,
                                                                                        alignmentArea=alignmentArea,
                                                                                        anglesToSearch=anglesToSearch)
-    
+
     return task
-    
-
-
-#
-#     FixedRectangle = nornir_imageregistration.Rectangle.CreateFromPointAndArea(point=[controlpoint[0] - (alignmentArea[0] / 2.0),
-#                                                                                    controlpoint[1] - (alignmentArea[1] / 2.0)],
-#                                                                              area=alignmentA rea)
-# 
-#     FixedRectangle = nornir_imageregistration.Rectangle.SafeRound(FixedRectangle)
-#     FixedRectangle = nornir_imageregistration.Rectangle.change_area(FixedRectangle, alignmentArea)
-#     
-#     # Pull image subregions 
-#     rigid_transforms = nornir_imageregistration.local_distortion_correction.ApproximateRigidTransform(input_transform=transform,
-#                                                                                                       target_points=controlpoint)
-#     
-#     warpedImageROI = assemble.WarpedImageToFixedSpace(rigid_transforms[0],
-#                             fixedImage.shape, warpedImage, botleft=FixedRectangle.BottomLeft, area=FixedRectangle.Size, extrapolate=True)
-# 
-#     fixedImageROI = nornir_imageregistration.CropImage(fixedImage, FixedRectangle.BottomLeft[1], FixedRectangle.BottomLeft[0], int(FixedRectangle.Size[1]), int(FixedRectangle.Size[0]))
-# 
-#     nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI])
-# 
-#     # pool = Pools.GetGlobalMultithreadingPool()
-# 
-#     # task = pool.add_task("AttemptAlignPoint", core.FindOffset, fixedImageROI, warpedImageROI, MinOverlap = 0.2)
-#     # apoint = task.wait_return()
-#     # apoint = core.FindOffset(fixedImageROI, warpedImageROI, MinOverlap=0.2)
-#     #nornir_imageregistration.ShowGrayscale([fixedImageROI, warpedImageROI], "Fixed <---> Warped")
-#  
-#     apoint = stos.SliceToSliceBruteForce(fixedImageROI, warpedImageROI, AngleSearchRange=anglesToSearch, MinOverlap=0.25, SingleThread=True, Cluster=False, TestFlip=False)
-# 
-#     print("Auto-translate result: " + str(apoint))
-#     return apoint
 
 
 def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
@@ -239,7 +227,8 @@ def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
     return numpy.maximum(too_large, too_small)
 
 
-def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskImage: NDArray, WarpedMaskImage: NDArray):
+def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskImage: NDArray,
+                      WarpedMaskImage: NDArray):
     '''Remove all transform points that are positioned in the mask image'''
 
     if FixedMaskImage is not None:

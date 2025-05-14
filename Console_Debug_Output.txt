@@ -1,8 +1,0 @@
-[WinError 10054] An existing connection was forcibly closed by the remote host
-Traceback (most recent call last):
-  File "C:\src\git\nornir-shared\nornir_shared\console.py", line 174, in ListenLoop
-    ReadFromStream(conn)
-  File "C:\src\git\nornir-shared\nornir_shared\console.py", line 100, in ReadFromStream
-    data = conn.recv(1024)
-ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
-

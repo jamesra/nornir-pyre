@@ -3,10 +3,10 @@ Created on Feb 6, 2015
 
 @author: u0490822
 '''
-from pyre.views import imagegridtransformview
+from pyre.views import imagetransformview
 
 
-class MosaicView(imagegridtransformview.ImageGridTransformView):
+class MosaicView(imagetransformview.ImageTransformView):
     '''
     classdocs
     '''
@@ -47,5 +47,5 @@ class MosaicView(imagegridtransformview.ImageGridTransformView):
         '''
         Constructor
         '''
-        super(imagegridtransformview.ImageGridTransformView, self).__init__()
+        super(imagegridtransformview.ImageTransformView, self).__init__()
         self._tiles = {}

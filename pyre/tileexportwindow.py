@@ -6,12 +6,12 @@ Created on Oct 26, 2012
 
 import PIL
 import numpy
-from pyglet import *
 
 from pyre.ui import Camera
+from wx import Window
 
 
-class TileExportWindow(window.Window):
+class TileExportWindow(Window):
     '''
     classdocs
     '''
@@ -43,7 +43,7 @@ class TileExportWindow(window.Window):
         self.clear()
         self.camera.focus(self.width, self.height)
 
-        View.draw_textures(BoundingBox=boundingBox, ShowWarped=ShowWarped)
+        View.draw(bounding_box=boundingBox, ShowWarped=ShowWarped)
 
         imageBuffer = image.get_buffer_manager().get_color_buffer().get_image_data()
 
@@ -75,8 +75,10 @@ class TileExportWindow(window.Window):
         return rawData
 
     def ImageCoordsForMouse(self, x, y):
-        ImageX = ((float(x) / self.width) * self.camera.ViewWidth) + (self.camera.x - (self.camera.ViewWidth / 2))
-        ImageY = ((float(y) / self.height) * self.camera.ViewHeight) + (self.camera.y - (self.camera.ViewHeight / 2))
+        ImageX = ((float(x) / self.width) * self.camera.visible_world_width) + (
+                self.camera.x - (self.camera.visible_world_width / 2))
+        ImageY = ((float(y) / self.height) * self.camera.visible_world_height) + (
+                self.camera.y - (self.camera.visible_world_height / 2))
         return ImageX, ImageY
 
     def VisibleImageBoundingBox(self):

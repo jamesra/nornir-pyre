@@ -55,7 +55,7 @@
     <Compile Include="pyre\viewmodels\transformcontroller.py" />
     <Compile Include="pyre\viewmodels\__init__.py" />
     <Compile Include="pyre\views\compositetransformview.py" />
-    <Compile Include="pyre\views\imagegridtransformview.py" />
+    <Compile Include="pyre\views\imagetransformview.py" />
     <Compile Include="pyre\views\mosaicview.py" />
     <Compile Include="pyre\views\__init__.py" />
     <Compile Include="pyre\__init__.py" />
