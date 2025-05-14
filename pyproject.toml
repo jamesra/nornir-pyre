@@ -3,12 +3,12 @@ requires = ["setuptools >= 61.0"]
 build-backend = 'setuptools.build_meta'
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["."] 
 include = ["pyre"]
 
 [project]
 name = "pyre"
-version = "1.5.2"
+version = "1.5.2" 
 authors = [
     { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
 ]
@@ -34,6 +34,7 @@ dependencies = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3.13",
+ 
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering",
 ]
