@@ -24,7 +24,7 @@ To install Pyre and its dependencies, follow these steps:
     pip install -r requirements-v1.5.2.txt
 
 You can download the requirements file directly from GitHub:
-`requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/OpenGL/requirements-v1.5.2.txt>`_
+`requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
 
 Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 13th 2025)
 
@@ -40,7 +40,7 @@ If you prefer to install the latest development versions directly, you can use::
     pip install git+https://github.com/jamesra/nornir-pools.git@dev-v1.5.2
     pip install git+https://github.com/jamesra/nornir-imageregistration.git@cupy-v1.6.5
     pip install git+https://github.com/jamesra/nornir-buildmanager.git@dev-v1.6.5
-    pip install git+https://github.com/jamesra/nornir-pyre.git@opengl-v1.5.2
+    pip install git+https://github.com/jamesra/nornir-pyre.git@dev-v1.5.2
 
 
 Usage
