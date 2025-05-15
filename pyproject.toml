@@ -1,5 +1,3 @@
-#I do not package settings.json.  It is generated on first run after installation.
-
 [build-system]
 requires = ["setuptools >= 61.0"]
 build-backend = 'setuptools.build_meta'
@@ -40,6 +38,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
+
+[tool.setuptools.package-data]
+"pyre" = ["pyre/resources/*.png"]
 
 
 [project.optional-dependencies]
