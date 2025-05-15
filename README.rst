@@ -4,11 +4,29 @@ Pyre
 A Python-based image registration and visualization tool written by James Anderson and Drew Ferrel
 
 Installation
+~~~~~~~~~~~~
+
+Pre-Install
 -----------
+    **Install git:** `http://git-scm.com/ <https://git-scm.com>`_
 
-To install Pyre and its dependencies, follow these steps:
+    **Open command Prompt or Terminal Window**
 
+    1. Check active Python (version needs to be >= 3.13.2)::
+
+        python --version
+
+    2. If Python is not >= 13.3.2, install latest python: https://www.python.org/downloads/
+        a. Be sure to check the option to add python to the environment variables.
+    3. Close and reopen the prompt/terminal.
+    4. Ensure new python is returned when executing --version command above.
+
+
+Installing Pyre and its dependencies
+------------------------------------
 1. Create a new Python environment (recommended)::
+
+    **Open a Command Prompt or Terminal Window**
 
     # Using venv
     python -m venv pyre-env
@@ -19,22 +37,32 @@ To install Pyre and its dependencies, follow these steps:
     # On Linux/Mac:
     source pyre-env/bin/activate
 
-2. Install dependencies using the requirements file::
+2. Install dependencies using the requirements file
+    Download the requirements file directly from GitHub
+    `requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
 
-    pip install -r requirements-v1.5.2.txt
+    Run the install command below from the same folder you downloaded the requirements into::
 
-3. Run Pyre (with pyre-env activated)::
+        pip install -r requirements-v1.5.2.txt
 
-    python -m pyre
 
-You can download the requirements file directly from GitHub:
-`requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
+Running Pyre
+------------
+    Ensure python environment is active::
+
+        pyre-env\Scripts\activate
+
+    Start Pyre::
+
+        python -m pyre
+
+
 
 Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 13th 2025)
 
 
 Alternative Installation Methods
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Using pip directly with git repositories**:
 
@@ -48,10 +76,10 @@ If you prefer to install the latest development versions directly, you can use::
 
 
 Usage
------
+~~~~~
 
 Mouse Controls
-~~~~~~~~~~~~~
+--------------
 
 Left Button:
     * Click to select an existing point
@@ -71,7 +99,7 @@ Scroll wheel:
     * Ctrl+Shift+scroll to slowly rotate warped image
 
 Keyboard Controls
-~~~~~~~~~~~~~~~
+-----------------
 
 Navigation:
     * A, W, S, D: Move the view
@@ -92,6 +120,6 @@ Undo/Redo:
     * Ctrl+X: Redo a step
 
 About
------
+~~~~~
 
 Pyre was written by James Anderson and Drew Ferrell

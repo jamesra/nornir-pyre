@@ -108,7 +108,7 @@ def StartProfilerCheck():
 
 def EndProfilerCheck():
     if not __profiler is None:
-        __profiler.dump_stats("C:\Temp\pyre.profile")
+        __profiler.dump_stats(r"C:\Temp\pyre.profile")
 
 
 def OnImageAdded(action, key, value):

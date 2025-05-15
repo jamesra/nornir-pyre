@@ -11,6 +11,8 @@ import OpenGL.GL as gl
 from pyre.interfaces.managers.gl_context_manager import IGLContextManager
 from pyre.container import IContainer
 
+from nornir_imageregistration import in_debug_mode
+
 try:
     import wx
     import wx.glcanvas
@@ -65,12 +67,14 @@ class GLPanel(wx.glcanvas.GLCanvas):
         # self.canvas = wx.glcanvas.GLCanvas(self, disp_attrs, -1)
 
         context_attrs = wx.glcanvas.GLContextAttrs()
-        context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
+
+        if in_debug_mode():
+            context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
+
         context = wx.glcanvas.GLContext(self, GLPanel.SharedGLContext, context_attrs)
         add_listener = False
         if GLPanel.SharedGLContext is None:
             # Install our debug message callback
-            # GLPanel.SharedGLContext = wx.glcanvas.GLContext(self.canvas, None, context_attrs)
             GLPanel.SharedGLContext = context
             add_listener = True
 
@@ -79,7 +83,9 @@ class GLPanel(wx.glcanvas.GLCanvas):
 
         if add_listener:
             gl.glDebugMessageCallback(debug_callback_func, None)
-            gl.glEnable(gl.GL_DEBUG_OUTPUT)
+
+            if in_debug_mode():
+                gl.glEnable(gl.GL_DEBUG_OUTPUT)
 
         #    GLPanel.pygletcontext = gl.Context(gl.current_context)
 
