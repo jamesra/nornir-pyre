@@ -1,5 +1,7 @@
 *.py[cod]
 
+pyre/PyreLogs
+
 # C extensions
 *.so
 

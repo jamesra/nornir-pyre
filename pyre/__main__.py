@@ -1,21 +1,17 @@
-'''
+"""
 Created on Sep 12, 2013
 
 @author: u0490822
-'''
+"""
+import pyre.launcher as launcher
 
-import sys
-
-#if not hasattr(sys, 'frozen'):
-    #import wxversion
-    #wxversion.select('2.8')
-
-from pyre import state
-from pyre import launcher
 
 def main():
-    state.init()
+    # print(f"CWD: {os.getcwd()}")
+    # print(f"Path: {sys.path}")
+    launcher.build_container()
     launcher.Run()
+
 
 if __name__ == '__main__':
     main()

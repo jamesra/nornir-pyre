@@ -1,5 +1,7 @@
-import wx
-import sys
+try:
+    import wx
+except:
+    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
 # This working example of the use of OpenGL in the wxPython context
 # was assembled in August 2012 from the GLCanvas.py file found in
@@ -10,6 +12,7 @@ import sys
 
 try:
     from wx import glcanvas
+
     haveGLCanvas = True
 except ImportError:
     haveGLCanvas = False
@@ -19,16 +22,17 @@ try:
     # http://PyOpenGL.sourceforge.net/
     from OpenGL.GL import *
     from OpenGL.GLUT import *
+
     haveOpenGL = True
 except ImportError:
     haveOpenGL = False
 
-#----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 buttonDefs = {
-    wx.NewId() : ('CubeCanvas', 'Cube'),
-    wx.NewId() : ('ConeCanvas', 'Cone'),
-    }
+    wx.NewId(): ('CubeCanvas', 'Cube'),
+    wx.NewId(): ('ConeCanvas', 'Cone'),
+}
 
 
 class ButtonPanel(wx.Panel):
@@ -87,7 +91,7 @@ class MyCanvasBase(glcanvas.GLCanvas):
         glcanvas.GLCanvas.__init__(self, parent, -1)
         self.init = False
         self.context = glcanvas.GLContext(self)
-        
+
         # initial mouse position
         self.lastx = self.x = 30
         self.lasty = self.y = 30
@@ -110,7 +114,7 @@ class MyCanvasBase(glcanvas.GLCanvas):
         size = self.size = self.GetClientSize()
         self.SetCurrent(self.context)
         glViewport(0, 0, size.width, size.height)
-        
+
     def OnPaint(self, event):
         dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
@@ -202,8 +206,8 @@ class CubeCanvas(MyCanvasBase):
         h = max(h, 1.0)
         xScale = 180.0 / w
         yScale = 180.0 / h
-        glRotatef((self.y - self.lasty) * yScale, 1.0, 0.0, 0.0);
-        glRotatef((self.x - self.lastx) * xScale, 0.0, 1.0, 0.0);
+        glRotatef((self.y - self.lasty) * yScale, 1.0, 0.0, 0.0)
+        glRotatef((self.x - self.lastx) * xScale, 0.0, 1.0, 0.0)
 
         self.SwapBuffers()
 
@@ -231,7 +235,7 @@ class ConeCanvas(MyCanvasBase):
         # position viewer
         glMatrixMode(GL_MODELVIEW)
         # position viewer
-        glTranslatef(0.0, 0.0, -2.0);
+        glTranslatef(0.0, 0.0, -2.0)
         #
         glutInit(sys.argv)
 
@@ -249,13 +253,13 @@ class ConeCanvas(MyCanvasBase):
         glRotate(250, 1, 0, 0)
         glutSolidCone(0.5, 1, 30, 5)
         glPopMatrix()
-        glRotatef((self.y - self.lasty), 0.0, 0.0, 1.0);
-        glRotatef((self.x - self.lastx), 1.0, 0.0, 0.0);
+        glRotatef((self.y - self.lasty), 0.0, 0.0, 1.0)
+        glRotatef((self.x - self.lastx), 1.0, 0.0, 0.0)
         # push into visible buffer
         self.SwapBuffers()
 
 
-#----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 class RunDemoApp(wx.App):
 
     def __init__(self):
@@ -263,7 +267,7 @@ class RunDemoApp(wx.App):
 
     def OnInit(self):
         frame = wx.Frame(None, -1, "RunDemo: ", pos=(0, 0),
-                        style=wx.DEFAULT_FRAME_STYLE, name="run a sample")
+                         style=wx.DEFAULT_FRAME_STYLE, name="run a sample")
         # frame.CreateStatusBar()
 
         menuBar = wx.MenuBar()
@@ -271,7 +275,7 @@ class RunDemoApp(wx.App):
         item = menu.Append(wx.ID_EXIT, "E&xit\tCtrl-Q", "Exit demo")
         self.Bind(wx.EVT_MENU, self.OnExitApp, item)
         menuBar.Append(menu, "&File")
-        
+
         frame.SetMenuBar(menuBar)
         frame.Show(True)
         frame.Bind(wx.EVT_CLOSE, self.OnCloseFrame)
@@ -287,7 +291,7 @@ class RunDemoApp(wx.App):
         self.SetTopWindow(frame)
         self.frame = frame
         return True
-        
+
     def OnExitApp(self, evt):
         self.frame.Close(True)
 
