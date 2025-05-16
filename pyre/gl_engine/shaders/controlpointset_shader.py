@@ -218,10 +218,14 @@ class ControlPointSetShader(BaseShader):
              scale: float,
              tween: float):
         """Draws the texture using the vertex and index buffers."""
+        if num_instances == 0:
+            return
+
         try:
             gl.glUseProgram(self.program)
             check_for_error()
-            vao.bind()
+            if not vao.bind():
+                return  # Skip drawing if the vao isn't able to bind (May be invalid)
 
             gl.glActiveTexture(gl.GL_TEXTURE0)
             check_for_error()

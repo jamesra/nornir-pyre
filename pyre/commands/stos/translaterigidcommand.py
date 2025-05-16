@@ -3,7 +3,9 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy._typing import NDArray
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent
 
 import nornir_imageregistration
 from nornir_imageregistration import IRigidTransform
@@ -36,7 +38,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: pyre.ui.Camera,
                  bounds: nornir_imageregistration.Rectangle,
                  selected_points: ObservableSet[int],  # The indices of the selected points
@@ -74,25 +76,25 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     def __str__(self):
         return "TranslateControlPointCommand"
 
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
-        if event.MiddleIsDown() or event.RightIsDown():
+        if event.buttons() & Qt.MouseButton.MiddleButton or event.buttons() & Qt.MouseButton.RightButton:
             self.cancel()  # Cancel if the middle mouse button is pressed
 
-    def on_mouse_release(self, event: wx.MouseEvent):
+    def on_mouse_release(self, event: QMouseEvent):
         """Called when the mouse is released"""
-        if not event.LeftIsDown():
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
             self.execute()
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse is dragged"""
 
-        if event.RightIsDown():
+        if event.buttons() & Qt.MouseButton.RightButton:
             # super().on_mouse_motion(event)
             self.cancel()
             return
 
-        if not event.LeftIsDown():
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
             return
 
         point_pair = self.get_world_positions(event)
@@ -122,38 +124,38 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
         pass
 
-    def on_mouse_wheel(self, event: wx.MouseEvent):
+    def on_mouse_wheel(self, event: QMouseEvent):
         """Called when the mouse wheel is scrolled"""
-        
+
         pass
 
-    def on_key_down(self, event: wx.KeyEvent):
+    def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
-        keycode = event.GetKeyCode()
+        keycode = event.key()
 
-        if (keycode == wx.WXK_LEFT or
-                keycode == wx.WXK_RIGHT or
-                keycode == wx.WXK_UP or
-                keycode == wx.WXK_DOWN):
+        if (keycode == Qt.Key.Key_Left or
+                keycode == Qt.Key.Key_Right or
+                keycode == Qt.Key.Key_Up or
+                keycode == Qt.Key.Key_Down):
 
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
             print(str(multiplier))
-            if event.ShiftDown():
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 multiplier *= 5
                 print(str(multiplier))
-            if event.ControlDown():
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 multiplier *= 25
                 print(str(multiplier))
 
             delta = [0, 0]
-            if keycode == wx.WXK_LEFT:
+            if keycode == Qt.Key.Key_Left:
                 delta = [0, -1]
-            elif keycode == wx.WXK_RIGHT:
+            elif keycode == Qt.Key.Key_Right:
                 delta = [0, 1]
-            elif keycode == wx.WXK_UP:
+            elif keycode == Qt.Key.Key_Up:
                 delta = [1, 0]
-            elif keycode == wx.WXK_DOWN:
+            elif keycode == Qt.Key.Key_Down:
                 delta = [-1, 0]
 
             delta[0] *= multiplier
@@ -167,11 +169,11 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     def activate(self):
         super().activate()
 
-    def on_mouse_scroll(self, event: wx.MouseEvent):
+    def on_mouse_scroll(self, event: QMouseEvent):
         """Called when the mouse wheel is scrolled"""
         pass
 
-    def on_key_up(self, event: wx.KeyEvent):
+    def on_key_up(self, event: QKeyEvent):
         """Called when a key is released"""
         pass
 

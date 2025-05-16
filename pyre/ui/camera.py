@@ -194,7 +194,7 @@ class Camera(IReadOnlyCamera):
     def translate(self, delta: nornir_imageregistration.PointLike):
         """translate the camera by the specified amount"""
         # print("Translate X: %g Y: %g" % (delta[1], delta[0]))
-        delta = nornir_imageregistration.EnsureArray(delta, float)
+        delta = nornir_imageregistration.EnsureArray(delta, int)
         self.lookat += delta
 
     @property
@@ -248,6 +248,10 @@ class Camera(IReadOnlyCamera):
                                                       -half_window_size[0], half_window_size[0],
                                                       -255, 255)
 
+        # self._projection = self.orthogonal_projection(0, win_width,
+        #                                               0, win_height,
+        #                                               -255, 255)
+
         self._view = self.look_at(position=np.array((self.x, self.y, +1.0)),
                                   target=np.array((self.x, self.y, -1.0)),
                                   up=np.array((0, 1, 0)))  # camera  x,y,z
@@ -271,9 +275,9 @@ class Camera(IReadOnlyCamera):
         sy = 2.0 / height
         sz = 2.0 / -depth
 
-        tx = -(right + left) / width
-        ty = -(top + bottom) / height
-        tz = -(z_far + z_near) / depth
+        tx = (right + left) / width
+        ty = (top + bottom) / height
+        tz = (z_far + z_near) / depth
 
         return np.array(((sx, 0, 0, tx),
                          (0, sy, 0, ty),

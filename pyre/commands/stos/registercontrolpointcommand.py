@@ -4,7 +4,6 @@ from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Configuration
 import numpy as np
 from numpy._typing import NDArray
-import wx
 from pyre.observable import ObservableSet, ObservedAction
 from nornir_imageregistration import ImagePermutationHelper
 import nornir_pools as pools

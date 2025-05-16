@@ -1,26 +1,54 @@
 import os
-
-import wx
+from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
 from pyre import state
 
 
-class FileDrop(wx.FileDropTarget):
-    def __init__(self, window):
-
-        super(FileDrop, self).__init__()
+class FileDrop:
+    """
+    A helper class to add drag and drop functionality to a QWidget.
+    This is not a widget itself, but rather a mixin that adds the necessary
+    event handlers to an existing widget.
+    """
+    def __init__(self, window: QWidget):
         self.window = window
-
-    def OnDragOver(self, *args, **kwargs):
-        # print("DragOver")
-        return wx.FileDropTarget.OnDragOver(self, *args, **kwargs)
-
-    def OnDropFiles(self, x, y, filenames):
+        
+        # Enable drag and drop for the window
+        self.window.setAcceptDrops(True)
+        
+        # Store the original event handlers
+        self._original_dragEnterEvent = window.dragEnterEvent
+        self._original_dropEvent = window.dropEvent
+        
+        # Override the event handlers
+        window.dragEnterEvent = self.dragEnterEvent
+        window.dropEvent = self.dropEvent
+    
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter events"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        elif self._original_dragEnterEvent:
+            self._original_dragEnterEvent(event)
+    
+    def dropEvent(self, event: QDropEvent):
+        """Handle drop events"""
+        if event.mimeData().hasUrls():
+            filenames = [url.toLocalFile() for url in event.mimeData().urls()]
+            self.processDroppedFiles(filenames)
+            event.acceptProposedAction()
+        elif self._original_dropEvent:
+            self._original_dropEvent(event)
+    
+    def processDroppedFiles(self, filenames):
+        """Process the dropped files"""
         for fullpath in filenames:
             try:
                 dirname, filename = os.path.split(fullpath)
                 root, extension = os.path.splitext(fullpath)
-
+                
                 if extension == ".stos":
                     state.currentStosConfig.stosdirname = dirname
                     state.currentStosConfig.stosfilename = filename
@@ -34,11 +62,8 @@ class FileDrop(wx.FileDropTarget):
                         state.currentStosConfig.LoadFixedImage(fullpath)
                     elif self.window.ID == "Warped":
                         state.currentStosConfig.LoadWarpedImage(fullpath)
-                    else:
-                        pass
-
+            
             except IOError as error:
-                dlg = wx.MessageDialog(None, "Error opening file\n" + str(error))
-                dlg.ShowModal()
-
+                QMessageBox.critical(self.window, "Error", f"Error opening file\n{str(error)}")
+        
         return True

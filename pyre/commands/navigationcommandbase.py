@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dependency_injector.wiring import Provide, inject
 import numpy as np
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 import nornir_imageregistration
 
 import abc
@@ -56,7 +58,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  transform_controller: pyre.viewmodels.TransformController,
                  camera: pyre.ui.Camera,
                  space: Space,
@@ -79,39 +81,39 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                                                     completed_func=completed_func)
 
     @staticmethod
-    def ParamToMousePosition(e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def ParamToMousePosition(e: QMouseEvent | tuple[float, float]) -> tuple[float, float]:
         """
-        :param e Either a wx.MouseEvent or a tuple of (y, x) coordinates:
+        :param e Either a QMouseEvent or a tuple of (y, x) coordinates:
         :return: (y, x) coordinates of mouse
         """
 
         if isinstance(e, tuple):
             y, x = e
-        elif isinstance(e, wx.MouseEvent):
-            x, y = e.GetPosition()
+        elif isinstance(e, QMouseEvent) or isinstance(e, QWheelEvent):
+            x, y = e.position().x(), e.position().y()
         else:
             raise ValueError("Unknown e type")
 
         return y, x
 
     @staticmethod
-    def GetCorrectedMousePosition(e: wx.MouseEvent | tuple[float, float], height: int) -> tuple[float, float]:
-        """wxPython inverts the mouse position, flip it back"""
+    def GetCorrectedMousePosition(e: QMouseEvent | tuple[float, float], height: int) -> tuple[float, float]:
+        """Qt mouse coordinates have origin at top-left, convert to bottom-left origin"""
         y, x = NavigationCommandBase.ParamToMousePosition(e)
 
         return height - y, x
 
-    def get_space_position(self, e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def get_space_position(self, e: QMouseEvent | tuple[float, float]) -> tuple[float, float]:
         """
         Return the mouse position in the source or target space, matching the source property of our instance
-        :param e: wx.MouseEvent or (y,x) tuple
+        :param e: QMouseEvent or (y,x) tuple
         :return: (y,x) tuple
         """
         y, x = NavigationCommandBase.ParamToMousePosition(e)
         cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
         return self.camera.ImageCoordsForMouse(cy, cx)
 
-    def get_world_positions(self, e: wx.MouseEvent | tuple[float, float]) -> PointPair:
+    def get_world_positions(self, e: QMouseEvent | tuple[float, float]) -> PointPair:
         """
         Returns a tuple of the mouse position in both source and target space
         :param e:
@@ -128,11 +130,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         else:
             raise ValueError("Unknown space")
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse moves"""
 
         try:
-            width, height = self.parent.GetClientSize()
+            width, height = self.parent.size().width(), self.parent.size().height()
             (y, x) = self.GetCorrectedMousePosition(event, height)
 
             if self._last_mouse_position is None:
@@ -151,12 +153,12 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             ImageDX = (float(dx) / width) * self.camera.visible_world_width
             ImageDY = (float(dy) / height) * self.camera.visible_world_height
 
-            if event.RightIsDown():
+            if event.buttons() & Qt.MouseButton.RightButton:
                 self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
 
             # Commenting this block until I have a command to translate control points
-            # if event.LeftIsDown():
-            #     if event.CmdDown():
+            # if event.buttons() & Qt.MouseButton.LeftButton:
+            #     if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             #         # Translate all points
             #         self._transform_controller.TranslateFixed((ImageDY, ImageDX))
             #     else:
@@ -164,7 +166,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             #         if self.SelectedPointIndex is not None:
             #             self.SelectedPointIndex = self._transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
             #                                                                            ImageDY, space=self.space)
-            #         elif event.ShiftDown():  # The shift key is selected and we do not have a last point dragged
+            #         elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:  # The shift key is selected and we do not have a last point dragged
             #             return
             #         else:
             #             # find nearest point
@@ -173,22 +175,26 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             #                                                                          space=self.space)
 
         finally:
-            event.Skip()
+            event.accept()
 
-    def on_mouse_scroll(self, e: wx.MouseEvent):
+    def on_mouse_scroll(self, e: QWheelEvent):
         try:
             if self.camera is None:
                 return
 
-            scroll_y = e.GetWheelRotation() / 120.0
+            # Qt wheel events use angleDelta which is in eighths of a degree
+            # Divide by 120 to get a similar scale to wx's GetWheelRotation
+            scroll_y = e.angleDelta().y() / 120.0
 
-            if e.CmdDown() and e.AltDown() and isinstance(self._transform_controller.TransformModel,
-                                                          nornir_imageregistration.ITransformRelativeScaling):
+            if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and (
+                    e.modifiers() & Qt.KeyboardModifier.AltModifier) and isinstance(
+                    self._transform_controller.TransformModel,
+                    nornir_imageregistration.ITransformRelativeScaling):
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 self._transform_controller.TransformModel.ScaleWarped(scale_delta)
-            elif e.CmdDown():  # We rotate when command is down
+            elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # We rotate when command is down
                 angle = float(abs(scroll_y) * 2) ** 2.0
-                if e.ShiftDown():
+                if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     angle = float(abs(scroll_y) / 2) ** 2.0
 
                 rangle = (angle / 180.0) * 3.14159
@@ -197,7 +203,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                 # print "Angle: " + str(angle)
                 try:
-                    width, height = self.parent.GetClientSize()
+                    width, height = self.parent.size().width(), self.parent.size().height()
 
                     area = np.array([height, width])
                     center = area / 2.0
@@ -247,19 +253,21 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 #    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
                 self._last_mouse_position = mouse_y, mouse_x
         finally:
-            e.Skip()
+            e.accept()
 
-    def on_key_down(self, e):
-        keycode = e.GetKeyCode()
+    def on_key_down(self, e: QKeyEvent):
+        keycode = e.key()
 
         symbol = ''
         try:
-            key_char = '%c' % keycode
-            symbol = key_char.lower()
+            # Convert key code to character if it's a printable ASCII character
+            if 32 <= keycode <= 126:  # ASCII printable characters
+                key_char = chr(keycode)
+                symbol = key_char.lower()
         except:
             pass
 
-        # if keycode == wx.WXK_TAB:
+        # if keycode == Qt.Key.Key_Tab:
         #     try:
         #         if self.composite:
         #             self.NextGLFunction()
@@ -281,15 +289,15 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             ImageDY = -0.05 * self.camera.visible_world_height
             self._camera.translate((ImageDY, 0))
 
-        elif keycode == wx.WXK_PAGEUP:
+        elif keycode == Qt.Key.Key_PageUp:
             self.camera.scale *= 0.9
-        elif keycode == wx.WXK_PAGEDOWN:
+        elif keycode == Qt.Key.Key_PageDown:
             self.camera.scale *= 1.1
 
             self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         # elif symbol == 'l':
         #    self.show_lines = not self.show_lines
-        # elif keycode == wx.WXK_F1:
+        # elif keycode == Qt.Key.Key_F1:
         #    self._image_transform_view.Debug = not self._image_transform_view.Debug
         elif symbol == 'm':
             look_at = [self.camera.y, self.camera.x]
@@ -301,10 +309,12 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             pyre.state.currentStosConfig.WindowsLookAtFixedPoint(look_at, self.camera.scale)
             # pyre.SyncWindows(LookAt, self.camera.scale)
 
-        elif symbol == 'z' and e.CmdDown():
+        elif symbol == 'z' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Undo()
-        elif symbol == 'x' and e.CmdDown():
+        elif symbol == 'x' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Redo()
         elif symbol == 'f':
             self._transform_controller.FlipWarped()
             self.history_manager.SaveState(self._transform_controller.FlipWarped)
+
+        e.accept()

@@ -1,4 +1,4 @@
-import wx.glcanvas
+from PyQt6.QtGui import QOpenGLContext
 import numpy as np
 from numpy.typing import NDArray
 from typing import AbstractSet, Sequence, Iterable, Callable
@@ -69,7 +69,7 @@ class TransformControllerView:
         self._gl_context_manager.add_glcontext_added_event_listener(self.create_objects)
         # pyre.state.currentStosConfig.AddOnTransformControllerChangeEventListener(self._OnTransformControllerChange)
 
-    def create_objects(self, context: wx.glcanvas.GLContext):
+    def create_objects(self, context: QOpenGLContext):
         """"Creates opengl objects when opengl is initialized"""
         if self._initialized:
             return True

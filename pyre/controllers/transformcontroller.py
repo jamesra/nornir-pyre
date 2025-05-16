@@ -13,13 +13,14 @@ from typing import Callable, Sequence, Iterable
 import numpy
 import numpy as np
 from numpy.typing import NDArray
-import wx
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
 
 import nornir_imageregistration
 from nornir_imageregistration import ImagePermutationHelper
 from nornir_imageregistration.transforms.base import IControlPoints
 import nornir_pools as pools
-import pyre.eventmanager
+import pyre.qt_eventmanager
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.space import Space
 
@@ -227,10 +228,10 @@ class TransformController:
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
         #        Pool = pools.GetGlobalThreadPool()
         # tlist = list()
-        if wx.App.Get() is None:
+        if QApplication.instance() is None:
             self.__OnChangeEventListeners.invoke(self)
         else:
-            wx.CallAfter(self.__OnChangeEventListeners.invoke, self)
+            QTimer.singleShot(0, lambda: self.__OnChangeEventListeners.invoke(self))
         #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
 
         # for task in tlist:
@@ -243,10 +244,10 @@ class TransformController:
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
         #        Pool = pools.GetGlobalThreadPool()
         # tlist = list()
-        if wx.App.Get() is None:
+        if QApplication.instance() is None:
             self.__OnTransformModelReplacedEventListeners.invoke(self, old, new)
         else:
-            wx.CallAfter(self.__OnTransformModelReplacedEventListeners.invoke, self, old, new)
+            QTimer.singleShot(0, lambda: self.__OnTransformModelReplacedEventListeners.invoke(self, old, new))
         #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
 
         # for task in tlist:
@@ -270,8 +271,8 @@ class TransformController:
         self._id = self.debug_id
         TransformController.debug_id += 1
 
-        self.__OnChangeEventListeners = pyre.eventmanager.wxEventManager[TransformChangedCallback]()
-        self.__OnTransformModelReplacedEventListeners = pyre.eventmanager.wxEventManager[TransformChangedCallback]()
+        self.__OnChangeEventListeners = pyre.qt_eventmanager.QtEventManager[TransformChangedCallback]()
+        self.__OnTransformModelReplacedEventListeners = pyre.qt_eventmanager.QtEventManager[TransformChangedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 

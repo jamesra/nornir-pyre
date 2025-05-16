@@ -93,12 +93,15 @@ class InstancedVAO:
         buffer.layout.add_vertex_attributes()
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-    def bind(self):
+    def bind(self) -> bool:
         """Bind the VAO to the context for rendering"""
         valid = gl.glIsVertexArray(self._vao)
-        assert (valid)
+        if not valid:
+            return False
+
         gl.glBindVertexArray(self._vao)
         pyre.gl_engine.helpers.check_for_error()
+        return True
 
     def unbind(self):
         gl.glBindVertexArray(0)

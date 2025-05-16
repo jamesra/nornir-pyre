@@ -4,7 +4,8 @@ This document provides an overview of the migration from wxPython to QT for the 
 
 ## Overview
 
-The nornir-pyre package has been converted from using wxPython to PyQt6 for its UI components. This migration provides several benefits:
+The nornir-pyre package has been converted from using wxPython to PyQt6 for its UI components. This migration provides
+several benefits:
 
 1. Better cross-platform compatibility
 2. Modern UI components and styling
@@ -20,24 +21,22 @@ The following core components have been migrated from wxPython to QT:
 3. **CameraStatusBar**: Converted from `wx.StatusBar` to `QStatusBar`
 4. **ImageTransformPanelBase**: Converted to use QT widgets and layouts
 5. **MosaicWindow**: Example of a complete window conversion
-6. **StosWindow**: Window for image registration and transformation
-7. **FileDrop**: Drag and drop functionality for files
 
 ## Migration Mapping
 
-| wxPython Component | QT Equivalent |
-|-------------------|---------------|
-| wx.Frame | QMainWindow |
-| wx.glcanvas.GLCanvas | QOpenGLWidget |
-| wx.Dialog | QDialog |
-| wx.StatusBar | QStatusBar |
-| wx.Menu | QMenu |
-| wx.MenuBar | QMenuBar |
-| wx.FileDialog | QFileDialog |
-| wx.DirDialog | QFileDialog (with Directory mode) |
-| wx.BoxSizer | QVBoxLayout, QHBoxLayout |
-| wx.EVT_* events | QT signals and slots |
-| wx.SizeEvent | QResizeEvent |
+| wxPython Component   | QT Equivalent                     |
+|----------------------|-----------------------------------|
+| wx.Frame             | QMainWindow                       |
+| wx.glcanvas.GLCanvas | QOpenGLWidget                     |
+| wx.Dialog            | QDialog                           |
+| wx.StatusBar         | QStatusBar                        |
+| wx.Menu              | QMenu                             |
+| wx.MenuBar           | QMenuBar                          |
+| wx.FileDialog        | QFileDialog                       |
+| wx.DirDialog         | QFileDialog (with Directory mode) |
+| wx.BoxSizer          | QVBoxLayout, QHBoxLayout          |
+| wx.EVT_* events      | QT signals and slots              |
+| wx.SizeEvent         | QResizeEvent                      |
 
 ## Event Handling Changes
 
@@ -90,9 +89,9 @@ The requirements have been updated to replace wxPython with PyQt6:
 
 1. Removed: `wxPython==4.2.3`
 2. Added:
-   - `PyQt6==6.6.1`
-   - `PyQt6-Qt6==6.6.1`
-   - `PyQt6-sip==13.6.0`
+    - `PyQt6==6.6.1`
+    - `PyQt6-Qt6==6.6.1`
+    - `PyQt6-sip==13.6.0`
 
 ## Running the QT Version
 
@@ -114,7 +113,8 @@ To migrate the remaining components of the application:
 
 ## File Naming Convention
 
-QT implementations are stored in files with a `_qt` suffix to distinguish them from the original wxPython implementations. For example:
+QT implementations are stored in files with a `_qt` suffix to distinguish them from the original wxPython
+implementations. For example:
 
 - `glpanel.py` -> `glpanel_qt.py`
 - `pyrewindows.py` -> `pyrewindows_qt.py`
@@ -123,7 +123,8 @@ This allows both implementations to coexist during the migration process.
 
 ## Testing
 
-Each migrated component should be thoroughly tested to ensure it provides the same functionality as the original wxPython implementation.
+Each migrated component should be thoroughly tested to ensure it provides the same functionality as the original
+wxPython implementation.
 
 ## Known Issues
 

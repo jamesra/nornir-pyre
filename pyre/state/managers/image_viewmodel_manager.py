@@ -7,7 +7,7 @@ from threading import Lock
 import numpy as np
 from numpy.typing import NDArray
 
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.interfaces.managers import IImageViewModelManager, ImageViewModelManagerChangeCallback
 from pyre.interfaces.action import Action
@@ -25,7 +25,7 @@ class ImageViewModelManager(IImageViewModelManager):
         self._models = {}
         self._change_event_listeners = []
         self._lock = Lock()
-        self._change_event_manager = wxEventManager[ImageViewModelManagerChangeCallback]()
+        self._change_event_manager = QtEventManager[ImageViewModelManagerChangeCallback]()
         # self._glcontext_manager = glcontext_manager
         # self._glcontext_manager.add_glcontext_added_event_listener(self._on_glcontext_added)
 

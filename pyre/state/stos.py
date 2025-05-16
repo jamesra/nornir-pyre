@@ -5,7 +5,7 @@ import os
 import numpy
 import numpy as np
 from numpy.typing import NDArray
-import wx
+from PyQt6.QtWidgets import QFrame
 
 from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
@@ -102,15 +102,15 @@ class StosState(StateEventsImpl):
         self._CompositeImageViewModel = None
 
     @property
-    def FixedWindow(self) -> wx.Frame:
+    def FixedWindow(self) -> QFrame:
         return pyre.Windows["Fixed"]
 
     @property
-    def WarpedWindow(self) -> wx.Frame:
+    def WarpedWindow(self) -> QFrame:
         return pyre.Windows["Warped"]
 
     @property
-    def CompositeWindow(self) -> wx.Frame:
+    def CompositeWindow(self) -> QFrame:
         return pyre.Windows["Composite"]
 
     @property

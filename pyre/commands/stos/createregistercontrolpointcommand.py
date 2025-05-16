@@ -4,7 +4,7 @@ from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Configuration
 import numpy as np
 from numpy.typing import NDArray
-import wx
+from PyQt6.QtCore import QTimer
 
 import nornir_imageregistration
 import pyre
@@ -68,7 +68,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._original_points = transform_controller.points
 
     def on_activate(self):
-        wx.CallAfter(self.queue_registration_command)
+        QTimer.singleShot(0, self.queue_registration_command)
 
     def __str__(self):
         return "CreateControlPointCommand"

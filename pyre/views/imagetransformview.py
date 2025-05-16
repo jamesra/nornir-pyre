@@ -12,6 +12,8 @@ import numpy as np
 # from imageop import scale
 from numpy.typing import NDArray
 
+from pyre.qt_eventmanager import qt_post_to_main
+
 import nornir_imageregistration
 import nornir_imageregistration.transforms.base
 import nornir_imageregistration.transforms.triangulation
@@ -128,7 +130,7 @@ class ImageTransformView(IImageTransformView):
 
         self.Debug = False
 
-        self.create_objects()
+        qt_post_to_main(self.create_objects)
 
     def create_objects(self):
         """Initialize GL objects"""
@@ -145,9 +147,21 @@ class ImageTransformView(IImageTransformView):
         """Update the buffers for all tiles in the image viewmodel"""
         unused_grid_coords = set(self._tile_render_data.keys())
 
+        # Ensure we have a valid context before proceeding
         self._activate_context()
 
-        if self._image_viewmodel is not None:
+        # Make sure we have a valid transform and image viewmodel
+        if self._image_viewmodel is None or self.transform is None:
+            return
+
+        try:
+            # Check if OpenGL is initialized properly
+            if not gl.glGetIntegerv(gl.GL_ARRAY_BUFFER_BINDING):
+                # If not initialized, it's likely we don't have a valid context yet
+                # Schedule a retry after a brief delay
+                qt_post_to_main(self.update_all_tile_buffers)
+                return
+
             for grid_coords in self._image_viewmodel.generate_grid_indicies():
                 gltiles._update_tile_buffers(self.transform,
                                              grid_coords,
@@ -157,8 +171,14 @@ class ImageTransformView(IImageTransformView):
                 if grid_coords in unused_grid_coords:
                     unused_grid_coords.remove(grid_coords)
 
-        for grid_coord in unused_grid_coords:
-            del self._tile_render_data[grid_coord]
+            for grid_coord in unused_grid_coords:
+                del self._tile_render_data[grid_coord]
+
+        except gl.GLError as e:
+            # If we still get GL errors, it means the context isn't ready yet
+            print(f"GL not ready yet, will retry: {e}")
+            # Schedule a retry
+            qt_post_to_main(self.update_all_tile_buffers)
 
     def draw_lines(self, draw_in_fixed_space: bool):
         """

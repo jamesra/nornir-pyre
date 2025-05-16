@@ -3,7 +3,6 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy._typing import NDArray
-import wx
 from pyre.observable import ObservableSet, ObservedAction
 
 import nornir_imageregistration

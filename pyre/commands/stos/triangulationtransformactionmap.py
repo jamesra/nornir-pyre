@@ -13,7 +13,7 @@ from pyre.interfaces.managers.command_manager import IControlPointActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
 
-import wx  # Need to map this to localized keycodes if another ui library is used
+from PyQt6.QtCore import Qt  # Using Qt for key codes
 
 
 class TriangulationTransformActionMap(IControlPointActionMap):
@@ -95,7 +95,7 @@ class TriangulationTransformActionMap(IControlPointActionMap):
         interactions = self.find_interactions(event.position, 1 / event.camera.scale)
 
         if event.IsKeyboardInput and event.input == InputEvent.Press:
-            if event.keycode == wx.WXK_SPACE:
+            if event.keycode == Qt.Key.Key_Space:
                 # If SHIFT is held down, align everything.  Otherwise align the selected point
                 if event.IsShiftPressed:
                     return ControlPointActionResult(ControlPointAction.REGISTER_ALL, interactions)

@@ -5,8 +5,8 @@ import enum
 from dependency_injector.providers import Provider, Configuration
 from dependency_injector.wiring import inject, Provide
 import numpy as np
-from numpy._typing import NDArray
-import wx
+from numpy.typing import NDArray
+from PyQt6.QtWidgets import QWidget
 from pyre.observable import ObservableSet, ObservedAction
 from pyre.observable import SetOperation
 
@@ -36,7 +36,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
                  space: Space,  # Space we are moving the points in, source or target side

@@ -1,7 +1,6 @@
 import logging
 import sys
 from dependency_injector import containers, providers
-import wx
 import yaml
 import os
 from typing import Generator
@@ -21,6 +20,7 @@ from pyre.state.imageloader import ImageLoader
 from pyre.state import TransformController
 from pyre.observable.oset import ObservableSet
 from pyre.container import IContainer
+from pyre.qt_eventmanager import qt_post_to_main
 import pyre.commands.stos
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
@@ -81,6 +81,6 @@ class StosContainer(containers.DeclarativeContainer):
             TransformType.RIGID: providers.Factory(RigidTransformActionMap).provider,
         })
 
-    selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=wx.CallAfter))
+    selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=qt_post_to_main))
 
     # stos_settings: providers.Resource = providers.Resource(load_settings)

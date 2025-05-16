@@ -96,13 +96,15 @@ class DynamicVAO(IVAO):
 
         buffer.layout.add_vertex_attributes()
 
-    def bind(self):
+    def bind(self) -> bool:
         """Bind the VAO to the context for rendering"""
         valid = gl.glIsVertexArray(self._vao)
         if valid == 0:
-            raise Exception("Vertex Array is invalid")
+            return False
+
         gl.glBindVertexArray(self._vao)
         pyre.gl_engine.helpers.check_for_error()
+        return True
 
     def unbind(self):
         gl.glBindVertexArray(0)

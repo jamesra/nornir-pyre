@@ -1,6 +1,7 @@
 import os
 
-import wx
+from PyQt6.QtWidgets import QMenu, QMenuBar, QFileDialog
+from PyQt6.QtCore import Qt
 
 import pyre
 from pyre import state
@@ -12,67 +13,90 @@ class MosaicWindow(PyreWindowBase):
     mosaicfilename = ''
 
     def __init__(self, parent, windowID, title):
-
         super(MosaicWindow, self).__init__(parent=parent, windowID=windowID, title=title)
 
-        self.mosaicpanel = pyre.ui.MosaicTransformPanel(parent=self,
-                                                        imageTransformViewList=None)
+        # Create the mosaic panel
+        self.mosaicpanel = pyre.ui.widgets.MosaicTransformPanel(parent=self,
+                                                                imageTransformViewList=None)
 
-        self.CreateMenu()
+        # Set the mosaic panel as the central widget
+        self.setCentralWidget(self.mosaicpanel)
 
-        self.Show(True)
+        # Create menu
+        self.createMenu()
+
+        # Show the window and set position
+        self.show()
         self.setPosition()
 
-    def CreateMenu(self):
+    def createMenu(self):
+        """Create the menu bar and menus"""
+        menuBar = QMenuBar(self)
+        self.setMenuBar(menuBar)
 
-        menuBar = wx.MenuBar()
+        # Create File menu
+        filemenu = self.__createFileMenu()
+        menuBar.addMenu(filemenu)
 
-        filemenu = self.__CreateFileMenu()
-        menuBar.Append(filemenu, "&File")
+    def __createFileMenu(self):
+        """Create the File menu"""
+        filemenu = QMenu("&File", self)
 
-        self.SetMenuBar(menuBar)
+        # Open mosaic action
+        menuOpenMosaic = filemenu.addAction("&Open mosaic file")
+        menuOpenMosaic.triggered.connect(self.onOpenMosaic)
 
-        self.Bind(wx.EVT_CLOSE, self.OnClose)
+        filemenu.addSeparator()
 
-    def __CreateFileMenu(self):
+        # Save mosaic action
+        menuSaveMosaic = filemenu.addAction("&Save mosaic file")
+        menuSaveMosaic.triggered.connect(self.onSaveMosaic)
 
-        filemenu = wx.Menu()
+        filemenu.addSeparator()
 
-        menuOpenMosaic = filemenu.Append(wx.ID_ANY, "&Open mosaic file")
-        self.Bind(wx.EVT_MENU, self.OnOpenMosaic, menuOpenMosaic)
-
-        filemenu.AppendSeparator()
-
-        menuSaveMosaic = filemenu.Append(wx.ID_ANY, "&Save mosaic file")
-        self.Bind(wx.EVT_MENU, self.OnSaveMosaic, menuSaveMosaic)
-
-        filemenu.AppendSeparator()
-
-        menuExit = filemenu.Append(wx.ID_EXIT, "&Exit")
-        self.Bind(wx.EVT_MENU, self.OnExit, menuExit)
+        # Exit action
+        menuExit = filemenu.addAction("&Exit")
+        menuExit.triggered.connect(self.onExit)
 
         return filemenu
 
-    def OnOpenMosaic(self, e):
+    def onOpenMosaic(self):
+        """Handle Open mosaic file action"""
         self.dirname = ''
-        dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "*.mosaic", wx.OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            dirname = str(dlg.GetDirectory())
-            MosaicWindow.mosaicfilename = filename
 
-            ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(os.path.join(dirname, filename))
-            if ImageTransformViewList is None:
-                # Prompt for UI to choose tiles directory
-                tiles_dir_dlg = wx.DirDialog(self, "Choose the directory containing the tiles for the mosaic file",
-                                             dirname, name="Tile directory")
-                if tiles_dir_dlg.ShowModal() == wx.ID_OK:
-                    ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(os.path.join(dirname, filename),
-                                                                                  tiles_dir=tiles_dir_dlg.Path)
+        # Create file dialog
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose a file")
+        dialog.setNameFilter("Mosaic files (*.mosaic)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-            self.mosaicpanel.ImageTransformViewList = ImageTransformViewList
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            # Get selected file
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                filepath = selected_files[0]
+                filename = os.path.basename(filepath)
+                dirname = os.path.dirname(filepath)
+                MosaicWindow.mosaicfilename = filename
 
-        dlg.Destroy()
+                # Load mosaic
+                ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(filepath)
+                if ImageTransformViewList is None:
+                    # Prompt for UI to choose tiles directory
+                    tiles_dir_dialog = QFileDialog(self)
+                    tiles_dir_dialog.setWindowTitle("Choose the directory containing the tiles for the mosaic file")
+                    tiles_dir_dialog.setDirectory(dirname)
+                    tiles_dir_dialog.setFileMode(QFileDialog.FileMode.Directory)
 
-    def OnSaveMosaic(self, e):
+                    if tiles_dir_dialog.exec() == QFileDialog.DialogCode.Accepted:
+                        selected_dirs = tiles_dir_dialog.selectedFiles()
+                        if selected_dirs:
+                            tiles_dir = selected_dirs[0]
+                            ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(filepath, tiles_dir=tiles_dir)
+
+                # Set the image transform view list
+                self.mosaicpanel.ImageTransformViewList = ImageTransformViewList
+
+    def onSaveMosaic(self):
+        """Handle Save mosaic file action"""
         pass

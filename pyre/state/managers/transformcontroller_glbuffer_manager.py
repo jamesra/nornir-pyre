@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 # from pyre.container import Container
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.gl_engine.gl_buffer import GLBuffer
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 from pyre.interfaces.managers import BufferType, GLBufferCollection, IGLContextManager, \
@@ -35,7 +35,7 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
                  buffer_layouts: dict[BufferType, VertexArrayLayout],
                  glcontext_manager: IGLContextManager = Provide[IContainer.glcontext_manager]):
         self._glcontext_manager = glcontext_manager
-        self._OnTransformControllerAddRemoveEventListeners = wxEventManager[TransformControllerAddRemoveCallback]()
+        self._OnTransformControllerAddRemoveEventListeners = QtEventManager[TransformControllerAddRemoveCallback]()
         self._transform_controllers = {}
         self._buffer_layouts = buffer_layouts
         self._OnTransformControllerChangeEventListeners = set()
@@ -136,6 +136,9 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         """Fetch the gl buffer for a transform controller of the requested type.
         If the buffer has not been initialized and we have a context, initialize it,
         otherwise raise an exception"""
+        if key not in self._transform_controllers:
+            raise KeyError(f"Transform controller not found: {key}")
+
         buffers = self._transform_controllers[key]
         if buffers is None:
             raise ValueError("Buffers not initialized")

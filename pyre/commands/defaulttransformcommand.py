@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QCursor
 from dependency_injector.wiring import Provide, inject
 from dependency_injector.providers import Dict, Factory
 from logging import Logger
@@ -44,9 +46,9 @@ class DefaultTransformCommand(NavigationCommandBase):
     _commandqueue: ICommandQueue
     # _action_command_map: dict[ControlPointAction, ICommand]
     _selected_points: ObservableSet[int]
-    cursor_action_map: dict[ControlPointAction, wx.Cursor]
+    cursor_action_map: dict[ControlPointAction, QCursor]
     _setselection: SetSelectionCallable | None
-    _last_mouse_press_event_args: wx.MouseEvent | None = None
+    _last_mouse_press_event_args: QMouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
     _action_to_command: Dict[ControlPointAction, Factory]
 
@@ -80,7 +82,7 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: pyre.ui.Camera,
                  bounds: nornir_imageregistration.Rectangle,
                  space: Space,
@@ -108,16 +110,16 @@ class DefaultTransformCommand(NavigationCommandBase):
                          completed_func=completed_func)
 
         self.cursor_action_map = {
-            ControlPointAction.NONE: wx.Cursor(wx.CURSOR_DEFAULT),
-            ControlPointAction.CREATE: wx.Cursor(wx.CURSOR_PENCIL),
-            ControlPointAction.DELETE: wx.Cursor(wx.CURSOR_NO_ENTRY),
-            ControlPointAction.TRANSLATE: wx.Cursor(wx.CURSOR_HAND),
-            ControlPointAction.REGISTER: wx.Cursor(wx.CURSOR_MAGNIFIER),
-            ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(wx.CURSOR_HAND),
-            ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(
-                wx.CURSOR_HAND),
-            ControlPointAction.TRANSLATE_ALL: wx.Cursor(wx.CURSOR_CROSS),
-            ControlPointAction.CALL_TO_MOUSE: wx.Cursor(wx.CURSOR_BULLSEYE),
+            ControlPointAction.NONE: QCursor(Qt.CursorShape.ArrowCursor),
+            ControlPointAction.CREATE: QCursor(Qt.CursorShape.CrossCursor),
+            ControlPointAction.DELETE: QCursor(Qt.CursorShape.ForbiddenCursor),
+            ControlPointAction.TRANSLATE: QCursor(Qt.CursorShape.OpenHandCursor),
+            ControlPointAction.REGISTER: QCursor(Qt.CursorShape.WhatsThisCursor),
+            ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: QCursor(Qt.CursorShape.OpenHandCursor),
+            ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: QCursor(
+                Qt.CursorShape.OpenHandCursor),
+            ControlPointAction.TRANSLATE_ALL: QCursor(Qt.CursorShape.CrossCursor),
+            ControlPointAction.CALL_TO_MOUSE: QCursor(Qt.CursorShape.CrossCursor),
         }
 
         self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
@@ -190,7 +192,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   input=InputEvent.Press,
                                                   modifiers=GetKeyModifiers(event),
                                                   position=point,
-                                                  keycode=event.GetKeyCode(),
+                                                  keycode=event.key(),
                                                   existing_selections=self._selected_points)
         new_command = self.check_for_new_command(selection_event_data)
         if not new_command:
@@ -212,7 +214,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                   input=InputEvent.Release,
                                                   modifiers=GetKeyModifiers(event),
                                                   position=point,
-                                                  keycode=event.GetKeyCode(),
+                                                  keycode=event.key(),
                                                   existing_selections=self._selected_points)
         new_command = self.check_for_new_command(selection_event_data)
         if not new_command:
@@ -222,9 +224,9 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return
 
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         """Determine the command for the mouse action, if any"""
-        self.parent.SetFocus()
+        self.parent.setFocus()
         point_pair = self.get_world_positions(event)
 
         # Update the mouse position history
@@ -246,7 +248,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         if not new_command:
             self._update_cursor_for_possible_actions(selection_event_data)
 
-        self._last_mouse_press_event_args = event.Clone()
+        self._last_mouse_press_event_args = event
 
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
@@ -287,7 +289,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                                                            1 / self.camera.scale)
         self.selected_points.update(new_selections)
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         point_pair = self.get_world_positions(event)
         try:
             point = point_pair.source if self.space == Space.Source else point_pair.target
@@ -307,10 +309,10 @@ class DefaultTransformCommand(NavigationCommandBase):
                 return
 
             # Todo: Make these commands as well
-            if event.LeftIsDown():
+            if event.buttons() & Qt.MouseButton.LeftButton:
                 # Draw a rectangle to select point
                 pass
-            elif event.RightIsDown():
+            elif event.buttons() & Qt.MouseButton.RightButton:
                 old_point = self._mouse_position_history[self.space]
                 dy, dx = self._mouse_position_history[self.space] - point
                 if nornir_imageregistration.in_debug_mode():
@@ -326,7 +328,7 @@ class DefaultTransformCommand(NavigationCommandBase):
             # Ensure we update the mouse position history
             self._mouse_position_history[Space.Source] = point_pair.source
             self._mouse_position_history[Space.Target] = point_pair.target
-            self._last_mouse_press_event_args = event.Clone()
+            self._last_mouse_press_event_args = event
         return
 
     def _update_cursor_for_possible_actions(self, selection_event_data: SelectionEventData):
@@ -336,7 +338,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         # print(f'possible actions: {possible_actions}')
         if possible_actions.action in self.cursor_action_map:
             cursor = self.cursor_action_map[possible_actions.action]
-            wx.SetCursor(cursor)
+            self.parent.setCursor(cursor)
 
     def on_mouse_release(self, event):
         point_pair = self.get_world_positions(event)
@@ -354,6 +356,6 @@ class DefaultTransformCommand(NavigationCommandBase):
         if not new_command:
             self._update_cursor_for_possible_actions(selection_event_data)
 
-        self._last_mouse_press_event_args = event.Clone()
+        self._last_mouse_press_event_args = event
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return

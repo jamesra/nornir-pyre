@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import abc
 
-import wx
+from PyQt6.QtCore import QObject, QTimer, QEvent, Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QResizeEvent
 
 import pyre
 from pyre.command_interfaces import IInstantCommand, StatusChangeCallback, ICommand
@@ -123,7 +125,7 @@ class InstantCommandBase(CommandBase, IInstantCommand, abc.ABC):
         may still wait to commit to the action if it is part of a sequence of commands and it is
         waiting for a callback from a command it spawned.  In this case it may still be active"""
         for callback in self._command_completed_callbacks:
-            wx.CallAfter(callback, self)
+            QTimer.singleShot(0, lambda cb=callback: cb(self))
 
 
 class UICommandBase(ICommand, CommandBase, abc.ABC):
@@ -131,7 +133,7 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
     Helper implementation for commands that interact with the UI
     """
 
-    _parent: wx.Window
+    _parent: QWidget
     _width: int
     _height: int
 
@@ -155,7 +157,7 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         may still wait to commit to the action if it is part of a sequence of commands and it is
         waiting for a callback from a command it spawned.  In this case it may still be active"""
         for callback in self._command_completed_callbacks:
-            wx.CallAfter(callback, self)
+            QTimer.singleShot(0, lambda cb=callback: cb(self))
 
         if self._status == pyre.CommandStatus.Completed or self._status == pyre.CommandStatus.Inactive:
             self.unsubscribe_to_parent()
@@ -169,7 +171,7 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         raise NotImplementedError()
 
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  completed_func: StatusChangeCallback | None = None):
         """
         :param window parent: Window to subscribe to for events
@@ -177,11 +179,11 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         """
         super().__init__(completed_func=completed_func)
         self._parent = parent
-        self._width, self._height = parent.GetSize()
+        self._width, self._height = parent.size().width(), parent.size().height()
 
-    def on_resize(self, event: wx.SizeEvent):
+    def on_resize(self, event: QResizeEvent):
         """Resize our window the command is active within"""
-        self._width, self._height = event.GetSize()
+        self._width, self._height = event.size().width(), event.size().height()
 
     def activate(self):
         super().activate()
@@ -192,55 +194,93 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         super().deactivate()
 
     def _bind_resize_event(self):
-        self._parent.Bind(wx.EVT_SIZE, handler=self.on_resize)
+        self._parent.resizeEvent = self._handle_resize_event
 
     def _unbind_resize_event(self):
-        self._parent.Unbind(wx.EVT_SIZE, handler=self.on_resize)
+        self._parent.resizeEvent = self._parent.__class__.resizeEvent
+
+    def _handle_resize_event(self, event):
+        # Call the original resize event handler
+        self._parent.__class__.resizeEvent(self._parent, event)
+        # Then call our handler
+        self.on_resize(event)
 
     def _bind_mouse_events(self):
-        self._parent.Bind(wx.EVT_MOUSEWHEEL, handler=self.on_mouse_scroll)
-        self._parent.Bind(wx.EVT_LEFT_DOWN, handler=self.on_mouse_press)
-        self._parent.Bind(wx.EVT_MIDDLE_DOWN, handler=self.on_mouse_press)
-        self._parent.Bind(wx.EVT_RIGHT_DOWN, handler=self.on_mouse_press)
-        self._parent.Bind(wx.EVT_MOTION, handler=self.on_mouse_motion)
-        self._parent.Bind(wx.EVT_LEFT_UP, handler=self.on_mouse_release)
+        self._parent.wheelEvent = self._handle_wheel_event
+        self._parent.mousePressEvent = self._handle_mouse_press_event
+        self._parent.mouseMoveEvent = self._handle_mouse_move_event
+        self._parent.mouseReleaseEvent = self._handle_mouse_release_event
 
     def _unbind_mouse_events(self):
-        self._parent.Unbind(wx.EVT_MOUSEWHEEL, handler=self.on_mouse_scroll)
-        self._parent.Unbind(wx.EVT_LEFT_DOWN, handler=self.on_mouse_press)
-        self._parent.Unbind(wx.EVT_MIDDLE_DOWN, handler=self.on_mouse_press)
-        self._parent.Unbind(wx.EVT_RIGHT_DOWN, handler=self.on_mouse_press)
-        self._parent.Unbind(wx.EVT_MOTION, handler=self.on_mouse_motion)
-        self._parent.Unbind(wx.EVT_LEFT_UP, handler=self.on_mouse_release)
+        self._parent.wheelEvent = self._parent.__class__.wheelEvent
+        self._parent.mousePressEvent = self._parent.__class__.mousePressEvent
+        self._parent.mouseMoveEvent = self._parent.__class__.mouseMoveEvent
+        self._parent.mouseReleaseEvent = self._parent.__class__.mouseReleaseEvent
+
+    def _handle_wheel_event(self, event):
+        # Call the original wheel event handler
+        self._parent.__class__.wheelEvent(self._parent, event)
+        # Then call our handler
+        self.on_mouse_scroll(event)
+
+    def _handle_mouse_press_event(self, event):
+        # Call the original mouse press event handler
+        self._parent.__class__.mousePressEvent(self._parent, event)
+        # Then call our handler
+        self.on_mouse_press(event)
+
+    def _handle_mouse_move_event(self, event):
+        # Call the original mouse move event handler
+        self._parent.__class__.mouseMoveEvent(self._parent, event)
+        # Then call our handler
+        self.on_mouse_motion(event)
+
+    def _handle_mouse_release_event(self, event):
+        # Call the original mouse release event handler
+        self._parent.__class__.mouseReleaseEvent(self._parent, event)
+        # Then call our handler
+        self.on_mouse_release(event)
 
     def _bind_key_events(self):
-        self._parent.Bind(wx.EVT_KEY_DOWN, handler=self.on_key_down)
-        self._parent.Bind(wx.EVT_KEY_UP, handler=self.on_key_up)
+        self._parent.keyPressEvent = self._handle_key_press_event
+        self._parent.keyReleaseEvent = self._handle_key_release_event
 
     def _unbind_key_events(self):
-        self._parent.Unbind(wx.EVT_KEY_DOWN, handler=self.on_key_down)
-        self._parent.Unbind(wx.EVT_KEY_UP, handler=self.on_key_up)
+        self._parent.keyPressEvent = self._parent.__class__.keyPressEvent
+        self._parent.keyReleaseEvent = self._parent.__class__.keyReleaseEvent
+
+    def _handle_key_press_event(self, event):
+        # Call the original key press event handler
+        self._parent.__class__.keyPressEvent(self._parent, event)
+        # Then call our handler
+        self.on_key_down(event)
+
+    def _handle_key_release_event(self, event):
+        # Call the original key release event handler
+        self._parent.__class__.keyReleaseEvent(self._parent, event)
+        # Then call our handler
+        self.on_key_up(event)
 
     @abc.abstractmethod
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         pass
 
     @abc.abstractmethod
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         pass
 
     @abc.abstractmethod
-    def on_mouse_release(self, event: wx.MouseEvent):
+    def on_mouse_release(self, event: QMouseEvent):
         pass
 
     @abc.abstractmethod
-    def on_mouse_scroll(self, event: wx.MouseEvent):
+    def on_mouse_scroll(self, event: QMouseEvent):
         pass
 
     @abc.abstractmethod
-    def on_key_down(self, event: wx.KeyEvent):
+    def on_key_down(self, event: QKeyEvent):
         pass
 
     @abc.abstractmethod
-    def on_key_up(self, event: wx.KeyEvent):
+    def on_key_up(self, event: QKeyEvent):
         pass

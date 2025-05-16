@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Callable
 
-import wx.glcanvas
+from PyQt6.QtGui import QOpenGLContext
 
-GLContextCreatedCallback = Callable[[wx.glcanvas.GLContext], None]
+GLContextCreatedCallback = Callable[[QOpenGLContext], None]
 
 
 class IGLContextManager(ABC):
@@ -12,7 +12,7 @@ class IGLContextManager(ABC):
     the context so subscribers can create GL resources."""
 
     @abstractmethod
-    def add_context(self, context: wx.glcanvas.GLContext):
+    def add_context(self, context: QOpenGLContext):
         """Add a context to the context manager. This should be called by the GLCanvas when a context is created."""
         raise NotImplementedError()
 

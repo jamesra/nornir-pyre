@@ -1,8 +1,6 @@
 import os
 import sys
 
-import wx
-
 from nornir_imageregistration import Mosaic
 import nornir_imageregistration.tileset
 import nornir_pools
@@ -121,8 +119,6 @@ class MosaicState(StateEventsImpl):
             # image_transform_view.z = z
             z += z_step
             # ImageTransformViewList.append(image_transform_view)
-
-        wx.Yield()
 
         for t in tasks:
             image_transform_view = t.wait_return()

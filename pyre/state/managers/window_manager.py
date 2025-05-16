@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from enum import Enum
 
-import wx
+from PyQt6.QtWidgets import QMainWindow
 
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces import IEventManager
 from pyre.interfaces.managers import IWindowManager, WindowManagerChangeCallback
 from pyre.interfaces.action import Action
@@ -17,14 +17,14 @@ from pyre.interfaces.viewtype import convert_to_key
 
 class WindowManager(IWindowManager):
     """Tracks various windows and their associated frames"""
-    _windows: dict[str, wx.Frame]
+    _windows: dict[str, QMainWindow]
     _change_event: IEventManager[WindowManagerChangeCallback]
 
     def __init__(self):
         self._windows = {}
-        self._change_event = wxEventManager[WindowManagerChangeCallback]()
+        self._change_event = QtEventManager[WindowManagerChangeCallback]()
 
-    def add(self, key: str | Enum, frame: wx.Frame):
+    def add(self, key: str | Enum, frame: QMainWindow):
         key = convert_to_key(key)
         if key in self._windows:
             raise KeyError(f"Image with key {key} already exists in the manager")
@@ -45,21 +45,21 @@ class WindowManager(IWindowManager):
         key = convert_to_key(key)
         return key in self._windows
 
-    def __getitem__(self, name: str | Enum) -> wx.Frame:
-        """Get the GL ImageViewModel for the image"""
+    def __getitem__(self, name: str | Enum) -> QMainWindow:
+        """Get the window for the given key"""
         key = convert_to_key(name)
         return self._windows[key]
 
     def exit(self):
-        """Destroy all windows and exit the application"""
+        """Close all windows and exit the application"""
         for w in self._windows.values():
-            w.Destroy()
+            w.close()
 
     @property
     def any_visible_windows(self) -> bool:
         """Return True if any windows are visible"""
         for w in self._windows.values():
-            if w.IsShown():
+            if w.isVisible():
                 return True
 
         return False
@@ -70,10 +70,10 @@ class WindowManager(IWindowManager):
         key = convert_to_key(key)
         if key in self._windows:
             w = self._windows[key]
-            if w.IsShown():
-                w.Hide()
+            if w.isVisible():
+                w.hide()
             else:
-                w.Show()
+                w.show()
 
         if not self.any_visible_windows:
             self.exit()

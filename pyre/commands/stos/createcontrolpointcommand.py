@@ -3,8 +3,9 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy.typing import NDArray
-import wx
-
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
+from PyQt6.QtCore import Qt, QTimer
 import nornir_imageregistration
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
@@ -29,7 +30,7 @@ class CreateControlPointCommand(NavigationCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: pyre.ui.Camera,
                  bounds: nornir_imageregistration.Rectangle,
                  space: Space,  # Space we are moving the points in, source or target side
@@ -63,29 +64,29 @@ class CreateControlPointCommand(NavigationCommandBase):
         self._original_points = transform_controller.points
 
     def on_activate(self):
-        wx.CallAfter(self.queue_translate_command)
+        QTimer.singleShot(0, self.queue_translate_command)
 
     def __str__(self):
         return "CreateControlPointCommand"
 
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
-        self._left_mouse_down = event.LeftIsDown()
+        self._left_mouse_down = bool(event.buttons() & Qt.MouseButton.LeftButton)
         super().on_mouse_press(event)
 
-    def on_mouse_release(self, event: wx.MouseEvent):
+    def on_mouse_release(self, event: QMouseEvent):
         """Called when the mouse is released"""
-        self._left_mouse_down = event.LeftIsDown()
+        self._left_mouse_down = bool(event.buttons() & Qt.MouseButton.LeftButton)
         super().on_mouse_release(event)
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse is dragged"""
         super().on_mouse_motion(event)
 
-    def on_key_down(self, event: wx.KeyEvent):
+    def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
-        keycode = event.GetKeyCode()
-        if keycode == wx.WXK_SPACE:
+        keycode = event.key()
+        if keycode == Qt.Key.Key_Escape:
             self.cancel()
             # self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         else:
@@ -93,11 +94,11 @@ class CreateControlPointCommand(NavigationCommandBase):
 
         return
 
-    def on_mouse_scroll(self, event: wx.MouseEvent):
+    def on_mouse_scroll(self, event: QWheelEvent):
         """Called when the mouse wheel is scrolled"""
         super().on_mouse_scroll(event)
 
-    def on_key_up(self, event: wx.KeyEvent):
+    def on_key_up(self, event: QKeyEvent):
         """Called when a key is released"""
         super().on_key_up(event)
 

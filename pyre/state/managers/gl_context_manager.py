@@ -9,9 +9,10 @@ This module tracks when windows create a GL context.  This the rough order of co
 5. GLPanel then invokes create_objects() so anyone inheriting GLPanel can perform initialization.
 """
 
-import wx.glcanvas
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from PyQt6.QtGui import QOpenGLContext
 
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces import IEventManager
 from pyre.interfaces.managers.gl_context_manager import GLContextCreatedCallback, IGLContextManager
 
@@ -22,13 +23,13 @@ class GLContextManager(IGLContextManager):
     the context so subscribers can create GL resources."""
 
     _GLContextAddedEventListeners: IEventManager[GLContextCreatedCallback]
-    _known_contexts: list[wx.glcanvas.GLContext]
+    _known_contexts: list[QOpenGLContext]
 
     def __init__(self):
-        self._GLContextAddedEventListeners = wxEventManager[GLContextCreatedCallback]()
+        self._GLContextAddedEventListeners = QtEventManager[GLContextCreatedCallback]()
         self._known_contexts = list()
 
-    def add_context(self, context: wx.glcanvas.GLContext):
+    def add_context(self, context: QOpenGLContext):
         """Add a context to the manager.  This will invoke all subscribers with the new context."""
         if context not in self._known_contexts:
             print(f"Adding context {context}")

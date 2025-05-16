@@ -1,18 +1,17 @@
-"""
-Created on Sep 12, 2013
+#!/usr/bin/python
 
-@author: u0490822
-"""
 from __future__ import annotations
+import sys
+import atexit
+
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QSurfaceFormat
+
 import argparse
 import atexit
 import logging
 import os
-import asyncio
-
-import yaml
-
-import nornir_imageregistration
 
 from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Provider
@@ -20,9 +19,7 @@ from dependency_injector.providers import Provider
 # Set the backend to WXAgg before importing pyplot
 import matplotlib
 
-matplotlib.use('wxAgg')
-
-import wx
+matplotlib.use('WebAgg')
 
 import nornir_shared.misc
 from pyre.interfaces.managers import IImageViewModelManager, IWindowManager
@@ -38,7 +35,8 @@ from pyre.stos_container import StosContainer
 import pyre.commands.stos
 from pyre.settings import AppSettings
 
-app = None
+from pyre.ui.windows.mosaicwindow import MosaicWindow
+from pyre.ui.windows.stoswindow import StosWindow
 
 
 def ProcessArgs():
@@ -91,28 +89,6 @@ def ProcessArgs():
                         )
 
     return parser
-
-
-__profiler = None
-
-
-def StartProfilerCheck():
-    if 'PROFILE' in os.environ:
-        profile_val = os.environ['PROFILE']
-        if len(profile_val) > 0 and profile_val != '0':
-            import cProfile
-            print("Starting profiler because PROFILE environment variable is defined")
-            __profiler = cProfile.Profile()
-            __profiler.enable()
-
-
-def EndProfilerCheck():
-    if not __profiler is None:
-        __profiler.dump_stats(r"C:\Temp\pyre.profile")
-
-
-def OnImageAdded(action, key, value):
-    print("Image added: " + key)
 
 
 def readme(path) -> str:
@@ -178,15 +154,32 @@ def SaveSettings(settings_provider: Provider[AppSettings] = Provide[IContainer.s
     print(f"Saved settings to {output_file}")
 
 
+def DefineDefaultSurface():
+    """Define the default surface format for OpenGL"""
+    format = QSurfaceFormat()
+    format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    format.setVersion(4, 1)
+    format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+
+    format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
+    format.setDepthBufferSize(24)
+    QSurfaceFormat.setDefaultFormat(format)
+
+
 @inject
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
         imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
-        stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]
-        ):
-    global app
+        stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
+    # Build the container first
+    container = build_container()
+
+    # Get the required services from the container
+    image_manager = container.image_manager()
+    imageviewmodel_manager = container.imageviewmodel_manager()
+
     print("Starting Pyre")
 
-    StartProfilerCheck()
+    # StartProfilerCheck()
 
     nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir, "PyreLogs"), Level=logging.WARNING)
 
@@ -198,38 +191,41 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
     readmetxt = resource_paths.README()
     print(readmetxt)
 
-    main_wx()
+    # Run the QT application
+    main_qt(window_manager=container.window_manager(), stos_transform_controller=stos_transform_controller)
 
 
-def main_wx(window_manager: IWindowManager = Provide[IContainer.window_manager],
+def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
             stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
-    args = ProcessArgs()
-    arg_values = args.parse_args()
+    """Main entry point for the QT version of the application"""
+    # Context Sharing must be set before creating QApplication
+    DefineDefaultSurface()
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
-    app = wx.App(False)
+    # Create the QT application
+    app = QApplication(sys.argv)
 
-    window_manager.add(ViewType.Fixed.value,
-                       pyre.ui.windows.StosWindow(None, ViewType.Source, 'Source Image',
-                                                  view_type=ViewType.Source))
-    window_manager.add(ViewType.Warped.value,
-                       pyre.ui.windows.StosWindow(None, ViewType.Target, 'Target Image',
-                                                  view_type=ViewType.Target))
-    window_manager.add(ViewType.Composite.value,
-                       pyre.ui.windows.StosWindow(None, ViewType.Composite, 'Composite Image',
-                                                  view_type=ViewType.Composite))
+    # Create the windows
+    # mosaic_window = MosaicWindow(None, 1, "Mosaic Viewer")
 
-    wx.CallAfter(pyre.state.UpdateSettingsFromArguments, arg_values)
-    wx.CallAfter(pyre.state.InitializeStateFromSettings, stos_transform_controller)
+    # Create STOS windows for source, target, and composite views
+    source_window = StosWindow(None, ViewType.Source, "Fixed Image", ViewType.Source)
+    target_window = StosWindow(None, ViewType.Target, "Warped Image", ViewType.Target)
+    composite_window = StosWindow(None, ViewType.Composite, "Composite Image", ViewType.Composite)
 
-    # app.MainLoop()
+    window_manager.add(ViewType.Source, source_window)
+    window_manager.add(ViewType.Target, target_window)
+    window_manager.add(ViewType.Composite, composite_window)
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(app.MainLoop())
+    # Show the windows
+    #    mosaic_window.show()
+    source_window.show()
+    target_window.show()
+    composite_window.show()
 
-    print("Exiting main loop")
+    # Run the application
+    sys.exit(app.exec())
 
-    EndProfilerCheck()
 
-
-if __name__ == '__main__':
-    pass
+if __name__ == "__main__":
+    Run()

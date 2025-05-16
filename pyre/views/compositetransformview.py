@@ -11,8 +11,6 @@ import numpy as np
 from numpy.typing import NDArray
 from dependency_injector.wiring import Provide, inject
 
-import wx
-
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
 from pyre.gl_engine import FrameBuffer
@@ -24,6 +22,7 @@ import pyre.viewmodels
 from pyre.controllers.transformcontroller import TransformController
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
+import pyre.qt_eventmanager
 
 
 class CompositeTransformView(IImageTransformView):
@@ -153,13 +152,13 @@ class CompositeTransformView(IImageTransformView):
         # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
         if self._imageviewmodel_manager.__contains__(self._source_viewmodel_name):
-            wx.CallAfter(self._handle_add_imageviewmodel_event, self._source_viewmodel_name,
-                         self._imageviewmodel_manager[self._source_viewmodel_name])
+            pyre.qt_eventmanager.qt_post_to_main(self._handle_add_imageviewmodel_event, self._source_viewmodel_name,
+                                                 self._imageviewmodel_manager[self._source_viewmodel_name])
 
         if self._imageviewmodel_manager.__contains__(self._target_viewmodel_name):
-            wx.CallAfter(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
-                         self._imageviewmodel_manager[
-                             self._target_viewmodel_name])
+            pyre.qt_eventmanager.qt_post_to_main(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
+                                                 self._imageviewmodel_manager[
+                                                     self._target_viewmodel_name])
 
     def __del__(self):
         try:

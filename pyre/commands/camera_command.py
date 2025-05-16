@@ -1,7 +1,9 @@
 import nornir_imageregistration.spatial
 
 try:
-    import wx
+    import PyQt6.Key
+    import PyQt6.QtCore
+    from PyQt6.QtCore import Qt
 except:
     print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
@@ -39,9 +41,9 @@ class CameraCommand(uicommand_base.UICommandBase):
         elif symbol == 's':  # "S" Character
             ImageDY = 0.1 * self.camera.visible_world_height
             self.camera.y = self.camera.y + ImageDY
-        elif keycode == wx.WXK_PAGEUP:
+        elif keycode == Qt.Key.Key_PageUp:
             self.camera.scale = self.scale * 0.9
-        elif keycode == wx.WXK_PAGEDOWN:
+        elif keycode == Qt.Key.Key_PageDown:
             self.camera.scale *= 1.1
         elif symbol == 'm':
             LookAt = [self.camera.x, self.camera.y]

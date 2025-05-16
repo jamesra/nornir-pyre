@@ -65,11 +65,18 @@ class ShaderVAO:
             gl.glBindVertexArray(0)
             check_for_error()
 
-    def bind(self):
-        """Bind the VAO to the context for rendering"""
+    def bind(self) -> bool:
+        """Bind the VAO to the context for rendering.
+        Returns true if bind was successful"""
+        valid = gl.glIsVertexArray(self._vao)
+        if not valid:
+            # Log the problem but don't crash
+            print(f"Warning: VAO {self._vao} is not valid in the current context")
+            return False
 
         gl.glBindVertexArray(self._vao)
         pyre.gl_engine.helpers.check_for_error()
+        return True
 
     def unbind(self):
         gl.glBindVertexArray(0)
