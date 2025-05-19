@@ -40,7 +40,7 @@ classifiers = [
 
 
 [tool.setuptools.package-data]
-"pyre" = ["pyre/resources/*.png"]
+"pyre" = ["pyre/resources/Point.png", "pyre/resources/SelectedPoint.png"]
 
 
 [project.optional-dependencies]
