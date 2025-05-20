@@ -8,7 +8,7 @@ import OpenGL.GL as gl
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
-from PyQt6.QtCore import Qt, QSize, QPoint
+from PyQt6.QtCore import Qt, QSize, QPoint, QTimer
 from PyQt6.QtGui import QResizeEvent, QPaintEvent
 from PyQt6.QtGui import QSurfaceFormat, QOpenGLContext
 
@@ -35,6 +35,7 @@ class GLPanel(QOpenGLWidget):
     _glinitialized: bool = False
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
+    gl_funcs: QOpenGLFunctions = None
 
     @classmethod
     def initialize_shared_context(cls):
@@ -56,6 +57,9 @@ class GLPanel(QOpenGLWidget):
         # Set format
         self.setFormat(QSurfaceFormat.defaultFormat())
 
+        self.gl_funcs = None
+        QTimer.singleShot(0, self._initialize_gl_functions)
+
         # # Create context that shares with SharedContext
         # context = QOpenGLContext(self)
         # context.setFormat(self.format())
@@ -75,6 +79,13 @@ class GLPanel(QOpenGLWidget):
             self.move(pos)
         if size != QSize():
             self.resize(size)
+
+    def _initialize_gl_functions(self):
+        """Initialize GL functions"""
+        self.gl_funcs = QOpenGLFunctions()
+        self.gl_funcs.initializeOpenGLFunctions()
+        self._glinitialized = True
+        print("OpenGL functions initialized")
 
     #
     # def setContext(self, context):
@@ -124,6 +135,14 @@ class GLPanel(QOpenGLWidget):
         physical_width = int(width * pixel_ratio)
         physical_height = int(height * pixel_ratio)
 
+        # Scale the viewport dimensions by the pixel ratio
+        viewport_dims = gl.glGetIntegerv(gl.GL_MAX_VIEWPORT_DIMS)
+
+        max_width, max_height = viewport_dims
+
+        physical_width = max(1, min(physical_width, max_width))
+        physical_height = max(1, min(physical_height, max_height))
+
         # Update the viewport with the physical pixel dimensions
         gl.glViewport(0, 0, physical_width, physical_height)
 
@@ -136,24 +155,29 @@ class GLPanel(QOpenGLWidget):
         if not self._glinitialized:
             return
 
+        if self.gl_funcs is None:
+            return
+
+        self.activate_context()
+
         # This should be set by resizeGL, but ensure it's correct
         extents = self.GetGLExtents()
         pixel_ratio = self.devicePixelRatio()
 
-        # Scale the viewport dimensions by the pixel ratio
         physical_width = int(extents.width() * pixel_ratio)
         physical_height = int(extents.height() * pixel_ratio)
 
-        gl.glViewport(0, 0, physical_width, physical_height)
+        # Create/get OpenGL functions for this context
 
-        gl.glClearDepth(10000.0)
-        gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        gl.glEnable(gl.GL_BLEND)
-        gl.glEnable(gl.GL_POLYGON_OFFSET_FILL)
-        gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glDepthFunc(gl.GL_LESS)
-        gl.glDisable(gl.GL_CULL_FACE)
+        # Use the QOpenGLFunctions interface directly
+
+        self.gl_funcs.glEnable(gl.GL_BLEND)
+        self.gl_funcs.glEnable(gl.GL_POLYGON_OFFSET_FILL)
+        self.gl_funcs.glEnable(gl.GL_DEPTH_TEST)
+        self.gl_funcs.glDepthFunc(gl.GL_LESS)
+        self.gl_funcs.glDisable(gl.GL_CULL_FACE)
+
+        self.clear()
 
         # draw objects
         self._draw_method()
@@ -163,6 +187,6 @@ class GLPanel(QOpenGLWidget):
         self.makeCurrent()
 
     def clear(self):
-        gl.glClearDepth(10000.0)
-        gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self.gl_funcs.glClearDepthf(1)
+        self.gl_funcs.glClearColor(0, 0.1, 0, 1)
+        self.gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)

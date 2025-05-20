@@ -81,7 +81,7 @@ class TileExportWindow(QOpenGLWidget):
         '''
         Clear the OpenGL buffer
         '''
-        gl.glClearDepth(10000.0)
+        gl.glClearDepthf(1)
         gl.glClearColor(0, 0.1, 0, 1)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 

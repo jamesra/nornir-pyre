@@ -150,6 +150,8 @@ class TextureShader(BaseShader):
 
             if vertex_array_object.num_elements == 0:
                 warnings.warn("No elements to draw")
+                return
+            
             gl.glDrawElements(gl.GL_TRIANGLES, vertex_array_object.num_elements, gl.GL_UNSIGNED_SHORT, None)
             check_for_error()
         finally:

@@ -156,11 +156,11 @@ class ImageTransformView(IImageTransformView):
 
         try:
             # Check if OpenGL is initialized properly
-            if not gl.glGetIntegerv(gl.GL_ARRAY_BUFFER_BINDING):
-                # If not initialized, it's likely we don't have a valid context yet
-                # Schedule a retry after a brief delay
-                qt_post_to_main(self.update_all_tile_buffers)
-                return
+            # if not gl.glGetIntegerv(gl.GL_ARRAY_BUFFER_BINDING):
+            #     # If not initialized, it's likely we don't have a valid context yet
+            #     # Schedule a retry after a brief delay
+            #     qt_post_to_main(self.update_all_tile_buffers)
+            #     return
 
             for grid_coords in self._image_viewmodel.generate_grid_indicies():
                 gltiles._update_tile_buffers(self.transform,

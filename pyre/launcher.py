@@ -5,7 +5,7 @@ import sys
 import atexit
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QSurfaceFormat
 
 import argparse
@@ -18,6 +18,8 @@ from dependency_injector.providers import Provider
 
 # Set the backend to WXAgg before importing pyplot
 import matplotlib
+
+import nornir_imageregistration
 
 matplotlib.use('WebAgg')
 
@@ -160,9 +162,11 @@ def DefineDefaultSurface():
     format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
     format.setVersion(4, 1)
     format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-
     format.setSwapBehavior(QSurfaceFormat.SwapBehavior.DoubleBuffer)
-    format.setDepthBufferSize(24)
+    format.setDepthBufferSize(16)
+    if nornir_imageregistration.in_debug_mode():
+        format.setOption(QSurfaceFormat.FormatOption.DebugContext)  # Enable debug output
+
     QSurfaceFormat.setDefaultFormat(format)
 
 
@@ -199,6 +203,9 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
             stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
     """Main entry point for the QT version of the application"""
     # Context Sharing must be set before creating QApplication
+    args = ProcessArgs()
+    arg_values = args.parse_args()
+
     DefineDefaultSurface()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
@@ -216,6 +223,13 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     window_manager.add(ViewType.Source, source_window)
     window_manager.add(ViewType.Target, target_window)
     window_manager.add(ViewType.Composite, composite_window)
+
+    def process_arguments():
+        pyre.state.UpdateSettingsFromArguments(arg_values)
+        pyre.state.InitializeStateFromSettings(stos_transform_controller)
+
+    # Schedule the initialization to occur after the event loop starts
+    QTimer.singleShot(0, process_arguments)
 
     # Show the windows
     #    mosaic_window.show()
