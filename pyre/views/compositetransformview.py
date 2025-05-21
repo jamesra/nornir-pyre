@@ -24,6 +24,8 @@ from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 import pyre.qt_eventmanager
 
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+
 
 class CompositeTransformView(IImageTransformView):
     """
@@ -36,6 +38,7 @@ class CompositeTransformView(IImageTransformView):
     _target_image_view: IImageTransformView | None
     _transform_controller: TransformController
     _imageviewmodel_manager: IImageViewModelManager
+    _gl_funcs: QOpenGLFunctions  # OpenGL functions for this context
 
     # These hold the rendered images for the source and target images.
     # These images are aligned if the transform aligns them.
@@ -106,6 +109,11 @@ class CompositeTransformView(IImageTransformView):
     def transform_controller(self) -> TransformController:
         return self._transform_controller
 
+    @property
+    def gl(self) -> QOpenGLFunctions:
+        """Set of OpenGL functions for the context this view operates within"""
+        return self._gl_funcs
+
     @inject
     def __init__(self,
                  display_space: Space,
@@ -113,10 +121,13 @@ class CompositeTransformView(IImageTransformView):
                  source_image_name: str,
                  target_image_name: str,
                  transform_controller: TransformController,
-                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager], ):
+                 gl_funcs: QOpenGLFunctions,
+                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+                 ):
         """
         Constructor
         """
+        self._gl_funcs = gl_funcs
         self._display_space = display_space
         self._source_viewmodel_name = source_image_name
         self._target_viewmodel_name = target_image_name
@@ -139,8 +150,8 @@ class CompositeTransformView(IImageTransformView):
 
         self._tranformed_verts_cache = None
 
-        self._source_frame_buffer = FrameBuffer()
-        self._target_frame_buffer = FrameBuffer()
+        self._source_frame_buffer = FrameBuffer(gl_funcs)
+        self._target_frame_buffer = FrameBuffer(gl_funcs)
 
         self._source_image_view = None
         self._target_image_view = None
@@ -192,7 +203,8 @@ class CompositeTransformView(IImageTransformView):
         view = ImageTransformView(space=space_mapping,
                                   activate_context=self._activate_context,
                                   image_view_model=image,
-                                  transform_controller=self._transform_controller)
+                                  transform_controller=self._transform_controller,
+                                  gl_funcs=self._gl_funcs)
         print(f'Added image view model {name} to existing CompositeTransformView')
 
         if space_mapping == Space.Source:
@@ -302,24 +314,24 @@ class CompositeTransformView(IImageTransformView):
         if self._source_image_view is not None and self._target_image_view is not None:
 
             source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, source_fbo)
+            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, source_fbo)
 
-            gl.glClearDepth(10000.0)
-            gl.glClearColor(0, 0.1, 0, 1)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            self.gl.glClearDepth(10000.0)
+            self.gl.glClearColor(0, 0.1, 0, 1)
+            self.gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
             self._source_image_view.draw(view_proj, space, client_size, bounding_box)
 
             target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
+            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
 
-            gl.glClearDepth(10000.0)
-            gl.glClearColor(0, 0.1, 0, 1)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            self.gl.glClearDepth(10000.0)
+            self.gl.glClearColor(0, 0.1, 0, 1)
+            self.gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
             self._target_image_view.draw(view_proj, space, client_size, bounding_box)
 
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
             # OK, we have two textures with the rendered+transformed images of source and target images.
             # Inject textures into an overlay renderer and blend the images
             # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
@@ -349,9 +361,9 @@ class CompositeTransformView(IImageTransformView):
 
         glFunc = gl.GL_FUNC_ADD
 
-        gl.glEnable(gl.GL_BLEND)
-        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
-        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        self.gl.glEnable(gl.GL_BLEND)
+        self.gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
+        self.gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
         if self._source_image_array is not None:
             FixedColor = None
@@ -381,5 +393,5 @@ class CompositeTransformView(IImageTransformView):
                                  glFunc=glFunc,
                                  tween=1)
 
-        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
+        self.gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         self.clear_composite_rendering()

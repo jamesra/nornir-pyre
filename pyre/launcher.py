@@ -1,4 +1,32 @@
 #!/usr/bin/python
+"""
+Launcher module for the Pyre application.
+
+This module serves as the main entry point for the Pyre application. It handles:
+1. Command-line argument processing
+2. Dependency injection container setup
+3. Application initialization
+4. Window creation and management
+5. OpenGL context configuration
+
+The module provides two main entry points:
+- Run(): Legacy entry point for the application
+- main_qt(): Modern entry point using the QT interface
+
+Usage:
+    To start Pyre with the QT interface (recommended):
+        python -m pyre.main_qt
+
+    To start Pyre with the legacy interface:
+        python -m pyre
+
+Command-line Arguments:
+    -Fixed: Path to the target (fixed) image
+    -Warped: Path to the image to be warped (source)
+    -stos: Path to a STOS file to load
+    -mosaic: Path to a mosaic file to load
+    -tiles: Path to the tiles referred to in the mosaic file
+"""
 
 from __future__ import annotations
 import sys

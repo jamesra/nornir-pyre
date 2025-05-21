@@ -12,6 +12,8 @@ import numpy as np
 # from imageop import scale
 from numpy.typing import NDArray
 
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+
 from pyre.qt_eventmanager import qt_post_to_main
 
 import nornir_imageregistration
@@ -46,6 +48,13 @@ class ImageTransformView(IImageTransformView):
     _image_space: Space  # The space the image is in
     _activate_context: Callable[
         [], None]  # A function we can call to ensure the view's GL context is current, must be used before creating GL Objects
+
+    _gl_funcs: QOpenGLFunctions
+
+    @property
+    def gl(self) -> QOpenGLFunctions:
+        """Set of OpenGL functions for the context this view operates within"""
+        return self._gl_funcs
 
     @property
     def width(self) -> int:
@@ -108,6 +117,7 @@ class ImageTransformView(IImageTransformView):
     def __init__(self,
                  space: Space,
                  activate_context: Callable[[], None],
+                 gl_funcs: QOpenGLFunctions,
                  image_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  image_mask_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  transform_controller: TransformController | None = None,
@@ -117,6 +127,7 @@ class ImageTransformView(IImageTransformView):
         :param imageviewmodel image_view_model: Textures for image
         :param transform transform_controller: nornir_imageregistration transform
         """
+        self._gl_funcs = gl_funcs
         self._activate_context = activate_context
         self._tile_render_data = {}
         self._image_space = space

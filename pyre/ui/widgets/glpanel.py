@@ -35,7 +35,14 @@ class GLPanel(QOpenGLWidget):
     _glinitialized: bool = False
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
-    gl_funcs: QOpenGLFunctions = None
+    _gl_funcs: QOpenGLFunctions = None
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """Get the OpenGL functions for this context"""
+        if not self._glinitialized:
+            raise RuntimeError("OpenGL functions not initialized")
+        return self._gl_funcs
 
     @classmethod
     def initialize_shared_context(cls):
@@ -57,7 +64,6 @@ class GLPanel(QOpenGLWidget):
         # Set format
         self.setFormat(QSurfaceFormat.defaultFormat())
 
-        self.gl_funcs = None
         QTimer.singleShot(0, self._initialize_gl_functions)
 
         # # Create context that shares with SharedContext
@@ -82,8 +88,8 @@ class GLPanel(QOpenGLWidget):
 
     def _initialize_gl_functions(self):
         """Initialize GL functions"""
-        self.gl_funcs = QOpenGLFunctions()
-        self.gl_funcs.initializeOpenGLFunctions()
+        self._gl_funcs = QOpenGLFunctions()
+        self._gl_funcs.initializeOpenGLFunctions()
         self._glinitialized = True
         print("OpenGL functions initialized")
 
@@ -114,11 +120,15 @@ class GLPanel(QOpenGLWidget):
 
             # Install debug message callback
             if nornir_imageregistration.in_debug_mode():
-                gl.glDebugMessageCallback(debug_callback_func, None)
-                gl.glEnable(gl.GL_DEBUG_OUTPUT)
+                self.gl_funcs.glDebugMessageCallback(debug_callback_func, None)
+                self.gl_funcs.glEnable(gl.GL_DEBUG_OUTPUT)
 
         # Notify the context manager that a new context has been created
+        self.context().setShareContext(GLPanel.SharedContext)
         self._glcontextmanager.add_context(self.context())
+
+        self._gl_funcs = QOpenGLFunctions()
+        self._gl_funcs.initializeOpenGLFunctions()
 
         self._glinitialized = True
 
@@ -126,6 +136,9 @@ class GLPanel(QOpenGLWidget):
         """Reshape the OpenGL viewport based on the dimensions of the window."""
         # Zero values occasionally appear during window setup. Ignore these until real values appear
         if width == 0 or height == 0:
+            return
+
+        if not self._glinitialized:
             return
 
         # Get the device pixel ratio to account for high-DPI displays
@@ -136,7 +149,7 @@ class GLPanel(QOpenGLWidget):
         physical_height = int(height * pixel_ratio)
 
         # Scale the viewport dimensions by the pixel ratio
-        viewport_dims = gl.glGetIntegerv(gl.GL_MAX_VIEWPORT_DIMS)
+        viewport_dims = self.gl_funcs.glGetIntegerv(gl.GL_MAX_VIEWPORT_DIMS)
 
         max_width, max_height = viewport_dims
 
@@ -144,7 +157,7 @@ class GLPanel(QOpenGLWidget):
         physical_height = max(1, min(physical_height, max_height))
 
         # Update the viewport with the physical pixel dimensions
-        gl.glViewport(0, 0, physical_width, physical_height)
+        self.gl_funcs.glViewport(0, 0, physical_width, physical_height)
 
     def paintGL(self):
         """Draw the window."""
@@ -155,7 +168,7 @@ class GLPanel(QOpenGLWidget):
         if not self._glinitialized:
             return
 
-        if self.gl_funcs is None:
+        if self._gl_funcs is None:
             return
 
         self.activate_context()
@@ -171,11 +184,11 @@ class GLPanel(QOpenGLWidget):
 
         # Use the QOpenGLFunctions interface directly
 
-        self.gl_funcs.glEnable(gl.GL_BLEND)
-        self.gl_funcs.glEnable(gl.GL_POLYGON_OFFSET_FILL)
-        self.gl_funcs.glEnable(gl.GL_DEPTH_TEST)
-        self.gl_funcs.glDepthFunc(gl.GL_LESS)
-        self.gl_funcs.glDisable(gl.GL_CULL_FACE)
+        self._gl_funcs.glEnable(gl.GL_BLEND)
+        self._gl_funcs.glEnable(gl.GL_POLYGON_OFFSET_FILL)
+        self._gl_funcs.glEnable(gl.GL_DEPTH_TEST)
+        self._gl_funcs.glDepthFunc(gl.GL_LESS)
+        self._gl_funcs.glDisable(gl.GL_CULL_FACE)
 
         self.clear()
 
@@ -187,6 +200,6 @@ class GLPanel(QOpenGLWidget):
         self.makeCurrent()
 
     def clear(self):
-        self.gl_funcs.glClearDepthf(1)
-        self.gl_funcs.glClearColor(0, 0.1, 0, 1)
-        self.gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self._gl_funcs.glClearDepthf(1)
+        self._gl_funcs.glClearColor(0, 0.1, 0, 1)
+        self._gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)

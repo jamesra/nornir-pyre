@@ -4,6 +4,7 @@ import ctypes
 
 import OpenGL.GL as gl
 from OpenGL.arrays import vbo
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 import numpy
 from numpy.typing import NDArray
 import scipy.spatial
@@ -95,13 +96,13 @@ def DrawRectangle(rect, color):
     pyglet.gl.glColor4f(1.0, 1.0, 1.0, 1.0)
 
 
-def SetDrawTextureState():
+def SetDrawTextureState(funcs: QOpenGLFunctions):
     # gl.glEnable(gl.GL_TEXTURE_2D)
-    gl.glDisable(gl.GL_CULL_FACE)
-    gl.glEnable(gl.GL_DEPTH_TEST)
+    funcs.glDisable(gl.GL_CULL_FACE)
+    funcs.glEnable(gl.GL_DEPTH_TEST)
 
-    gl.glEnable(gl.GL_BLEND)
-    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+    funcs.glEnable(gl.GL_BLEND)
+    funcs.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
     # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
     # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
@@ -109,7 +110,7 @@ def SetDrawTextureState():
     # gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
     # gl.glEnable(gl.GL_BLEND)
     # gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
-    gl.glDepthFunc(gl.GL_LESS)
+    funcs.glDepthFunc(gl.GL_LESS)
 
 
 def SetDrawMosaicState():
@@ -126,12 +127,12 @@ def SetDrawMosaicState():
     gl.glDepthFunc(gl.GL_LESS)
 
 
-def ClearDrawTextureState():
+def ClearDrawTextureState(funcs: QOpenGLFunctions):
     """Reset the GL device from drawing textures"""
 
-    gl.glBlendEquation(gl.GL_FUNC_ADD)
-    gl.glClearColor(1.0, 1.0, 1.0, 1.0)
-    gl.glDisable(gl.GL_BLEND)
+    funcs.glBlendEquation(gl.GL_FUNC_ADD)
+    funcs.glClearColor(1.0, 1.0, 1.0, 1.0)
+    funcs.glDisable(gl.GL_BLEND)
 
 
 def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FUNC_ADD):

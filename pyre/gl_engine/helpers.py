@@ -1,10 +1,14 @@
 from OpenGL import GL as gl
 import numpy as np
 from numpy.typing import NDArray
+from nornir_imageregistration import in_debug_mode
 
 
 def check_for_error():
     """Raises an exception if an OpenGL error has occurred."""
+    if not in_debug_mode():
+        return
+
     error = gl.glGetError()
     if error != gl.GL_NO_ERROR:
         raise ValueError(f"OpenGL error: {error}")

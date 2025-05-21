@@ -6,6 +6,8 @@ Created on Oct 16, 2012
 from __future__ import annotations
 from dataclasses import dataclass
 import warnings
+
+import PyQt6.QtGui
 import numpy as np
 
 import OpenGL.GL as gl
@@ -272,7 +274,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                     activate_context=self.glcanvas.activate_context,
                                                                     source_image_name=ViewType.Source,
                                                                     target_image_name=ViewType.Target,
-                                                                    transform_controller=self.transform_controller)
+                                                                    transform_controller=self.transform_controller,
+                                                                    gl_funcs=self._glpanel._gl_funcs)
             else:
                 # The CompositeTransformView should exist and be subscribed so this ViewModel should be added by the View
                 pass
@@ -281,7 +284,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self._image_transform_view = ImageTransformView(space=self.space,
                                                             activate_context=self.glcanvas.activate_context,
                                                             image_view_model=image,
-                                                            transform_controller=self.transform_controller)
+                                                            transform_controller=self.transform_controller,
+                                                            gl_funcs=self._glpanel._gl_funcs)
             print(f'Added image view model {name} to {self.view_type.value} view')
 
         # Use QTimer to call center_camera after the widget is fully initialized
@@ -291,7 +295,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Process a remove event from the imageviewmodel manager"""
         self._image_transform_view = None
 
-    def create_objects(self, context):
+    def create_objects(self, context: PyQt6.QtGui.QOpenGLContext):
         """create opengl objects when opengl is initialized"""
         if self._image_transform_view is not None:
             self._image_transform_view.create_objects()
@@ -358,10 +362,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.camera.focus(self.width(), self.height())
 
+        self._glpanel.activate_context()
+
         if self._image_transform_view is not None:
             bounding_box = self.camera.VisibleImageBoundingBox
 
-            SetDrawTextureState()
+            SetDrawTextureState(self._glpanel._gl_funcs)
 
             # Draw an image if we can
             self._image_transform_view.draw(self.camera.view_proj,
@@ -369,7 +375,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                             client_size=(self.height(), self.width()),
                                             bounding_box=bounding_box)
 
-            ClearDrawTextureState()
+            ClearDrawTextureState(self._glpanel._gl_funcs)
 
         if self._transform_controller_view is not None:
             tween = 0 if self.space == pyre.Space.Source else 1

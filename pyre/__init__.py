@@ -1,64 +1,27 @@
 """
+Pyre - Python Registration Environment
 
-Pyre commands
-=============
+A Python-based image registration and visualization tool for scientific image processing,
+developed as part of the Nornir project.
 
-The blinking point is the currently selected point
+Pyre provides an interactive interface for:
+* Manual and automatic image alignment
+* Visualization of image transformations
+* Creation and editing of spatial transformations between images
+* Management of image mosaics and volumes
+* Integration with the broader Nornir image processing ecosystem
 
-Mouse
-______
+For complete documentation including keyboard and mouse controls,
+please refer to the main README.rst file in the repository root.
 
-Left Button
-
-   ``<Left Click>`` to select an existing point
-
-   ``Shift + <Left Click>`` to add a new point
-
-   ``Alt+Shift + <Left Click>`` to add a new point and auto-align
-
-   ``<Left Click> + drag`` to move point under the cursor
-
-   ``Ctrl + <Left Click> + drag`` to translate entire warped image
-
-   ``Alt + <Left Click>`` to move currently selected point to mouse position
-
-Right Button
-
-   ``Shift + <Right Click>`` to delete point under the cursor
-
-   ``<Right Click> + drag`` to move the view
-
-Scroll wheel
-
-   ``<Scroll wheel>`` zoom in or out
-
-   ``Ctrl + <Scroll wheel>`` to rotate warped image
-
-   ``Ctrl + Shift + <Scroll wheel>`` to rotate warped image slowly
-
-Keys
-____
-
-   ``A,W,S,D`` Move the view
-
-   ``Page Up/Down`` Change the magnification
-
-   ``M`` Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
-
-   ``L`` Show transform mesh lines
-
-   ``f`` Flip the warped image
-
-   ``Space`` Auto-align the selected point
-
-   ``Shift + Space`` Auto-align all points
-
-   ``Ctrl+Z`` to undo a step
-
-   ``Ctrl+X`` to redo a step
-
-   ``Tab`` Change properties of the view.  A warped image may be displayed as it appears registered.  The composite view will switch to a different view.
-
+Project Structure:
+-----------------
+* pyre.gl_engine: OpenGL rendering engine for high-performance image visualization
+* pyre.ui: User interface components built with PyQt6
+* pyre.views: View implementations for different visualization modes
+* pyre.state: State management and controllers
+* pyre.commands: Command pattern implementations for operations
+* pyre.interfaces: Interface definitions for dependency injection
 """
 
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common', 'Space']

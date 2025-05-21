@@ -4,6 +4,8 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+
 from pyre.gl_engine.helpers import check_for_error
 from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
@@ -17,6 +19,15 @@ class GLBuffer(IBuffer):
     _usage: int  # How the buffer will be used
 
     _capacity: int | None  # The number of elements the buffer can hold.  This is different than the number of elements in the data array if the buffer is oversized for dynamic use
+    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """The OpenGL functions used to create the buffer"""
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
 
     @property
     def data(self) -> NDArray[np.floating]:
@@ -56,7 +67,9 @@ class GLBuffer(IBuffer):
                  layout: VertexArrayLayout | None,
                  data: NDArray[np.floating] | None = None,
                  usage: int = gl.GL_STATIC_DRAW,
-                 capacity: int | None = None):
+                 capacity: int | None = None,
+                 gl_funcs: QOpenGLFunctions = None):
+        self._gl_funcs = gl_funcs
         self._layout = layout
         self._data = data
         self._usage = usage
@@ -67,7 +80,7 @@ class GLBuffer(IBuffer):
     def _create_open_gl_objects(self, data: NDArray[np.floating] | None):
         """Create the buffer object.  This will break any VAO's that use this buffer."""
         check_for_error()
-        self._buffer = gl.glGenBuffers(1)
+        self._buffer = self.gl_funcs.glGenBuffers(1)
         check_for_error()
 
         if data is not None:
@@ -77,28 +90,28 @@ class GLBuffer(IBuffer):
         """Update the buffer data, should allow existing VAO's to continue to work."""
         data = data.flatten()
         data = np.ascontiguousarray(data)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.buffer)
+        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, self.buffer)
         check_for_error()
 
         # buffer data will be zero if the buffer is not initialized
-        buffer_size = gl.glGetBufferParameteriv(gl.GL_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
+        buffer_size = self.gl_funcs.glGetBufferParameteriv(gl.GL_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
 
         # Expand capacity if needed
         if buffer_size == 0 or self._capacity < data.nbytes:
             self._capacity = data.nbytes
-            gl.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data, self._usage)
+            self.gl_funcs.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data, self._usage)
             check_for_error()
         else:  # Expansion not needed, replace the existing data
             assert (buffer_size >= self._capacity)
-            gl.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, data.nbytes, data)
+            self.gl_funcs.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, data.nbytes, data)
             check_for_error()
 
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         check_for_error()
 
     def __del__(self):
         if self._buffer is not None:
-            gl.glDeleteBuffers(1, [self._buffer])
+            self.gl_funcs.glDeleteBuffers(1, [self._buffer])
             self._buffer = None
 
 
@@ -110,6 +123,16 @@ class GLIndexBuffer(IIndexBuffer):
     _usage: int  # How the buffer will be used
 
     _capacity: int | None  # The number of elements the buffer can hold.  This is different than the number of elements in the data array if the buffer is oversized for dynamic use
+
+    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """The OpenGL functions used to create the buffer"""
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
 
     @property
     def data(self) -> NDArray[np.integer]:
@@ -143,7 +166,9 @@ class GLIndexBuffer(IIndexBuffer):
     def __init__(self,
                  data: NDArray[np.integer] | None = None,
                  usage: int = gl.GL_STATIC_DRAW,
-                 capacity: int | None = None):
+                 capacity: int | None = None,
+                 gl_funcs: QOpenGLFunctions = None):
+        self._gl_funcs = gl_funcs
         self._data = data if data is not None else np.array([], dtype=np.uint16)
         self._usage = usage
         self._capacity = capacity if capacity is not None else \
@@ -153,7 +178,7 @@ class GLIndexBuffer(IIndexBuffer):
     def _create_open_gl_objects(self, data: NDArray[np.integer] | None):
         """Create the buffer object.  This will break any VAO's that use this buffer."""
         check_for_error()
-        self._buffer = gl.glGenBuffers(1)
+        self._buffer = self.gl_funcs.glGenBuffers(1)
         check_for_error()
 
         if data is not None:
@@ -163,26 +188,26 @@ class GLIndexBuffer(IIndexBuffer):
         """Update the buffer data, should allow existing VAO's to continue to work."""
         data = data.flatten()
         data = np.ascontiguousarray(data)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.buffer)
+        self.gl_funcs.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.buffer)
         check_for_error()
 
         # buffer data will be zero if the buffer is not initialized
-        buffer_size = gl.glGetBufferParameteriv(gl.GL_ELEMENT_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
+        buffer_size = self.gl_funcs.glGetBufferParameteriv(gl.GL_ELEMENT_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
 
         # Expand capacity if needed
         if buffer_size == 0 or self._capacity < data.nbytes:
             self._capacity = data.nbytes
-            gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, self.capacity, data, self._usage)
+            self.gl_funcs.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, self.capacity, data, self._usage)
             check_for_error()
         else:  # Expansion not needed, replace the existing data
             assert (buffer_size >= self._capacity)
-            gl.glBufferSubData(gl.GL_ELEMENT_ARRAY_BUFFER, 0, data.nbytes, data)
+            self.gl_funcs.glBufferSubData(gl.GL_ELEMENT_ARRAY_BUFFER, 0, data.nbytes, data)
             check_for_error()
 
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+        self.gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
         check_for_error()
 
     def __del__(self):
         if self._buffer is not None:
-            gl.glDeleteBuffers(1, [self._buffer])
+            self.gl_funcs.glDeleteBuffers(1, [self._buffer])
             self._buffer = None

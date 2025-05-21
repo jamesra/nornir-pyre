@@ -12,7 +12,7 @@
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "W:/Volumes/miniRCx1/TEM/Grid16/41-40_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
+        "stos_filename": "D:\\Volumes\\miniRCx1\\TEM\\Grid16\\Automatic\\12-13_ctrl-TEM_Blob_map-TEM_Blob.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -35,12 +35,12 @@
             }
         },
         "source_image": {
-            "image_fullpath": "\\\\OpR-Marc-SYN2\\Data\\Volumes\\miniRCx1\\TEM\\0041\\TEM\\Leveled\\Images\\016\\0041_TEM_Leveled.png",
-            "mask_fullpath": "\\\\OpR-Marc-SYN2\\Data\\Volumes\\miniRCx1\\TEM\\0041\\TEM\\Mask\\Images\\016\\0041_TEM_Mask.png"
+            "image_fullpath": "D:\\Volumes\\MiniRCx1\\TEM\\0012\\TEM\\Leveled\\Images\\016\\0012_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Volumes\\MiniRCx1\\TEM\\0012\\TEM\\Mask\\Images\\016\\0012_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "\\\\OpR-Marc-SYN2\\Data\\Volumes\\miniRCx1\\TEM\\0040\\TEM\\Leveled\\Images\\016\\0040_TEM_Leveled.png",
-            "mask_fullpath": "\\\\OpR-Marc-SYN2\\Data\\Volumes\\miniRCx1\\TEM\\0040\\TEM\\Mask\\Images\\016\\0040_TEM_Mask.png"
+            "image_fullpath": "D:\\Volumes\\MiniRCx1\\TEM\\0013\\TEM\\Leveled\\Images\\016\\0013_TEM_Leveled.png",
+            "mask_fullpath": "D:\\Volumes\\MiniRCx1\\TEM\\0013\\TEM\\Mask\\Images\\016\\0013_TEM_Mask.png"
         }
     }
 }

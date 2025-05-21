@@ -4,6 +4,8 @@ from numpy.typing import NDArray
 from typing import AbstractSet, Sequence, Iterable, Callable
 from dependency_injector.wiring import Provide
 
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+
 from nornir_imageregistration import ITransform
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
@@ -54,13 +56,26 @@ class TransformControllerView:
 
     _initialized: bool = False
 
+    _gl_funcs: QOpenGLFunctions | None = None
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """The OpenGL functions used to create the frame buffer"""
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
+
     def __init__(self,
-                 transform_controller: pyre.controllers.TransformController | None):
+                 transform_controller: pyre.controllers.TransformController | None,
+                 gl_funcs: QOpenGLFunctions | None = None,
+                 ):
         """
         :param transform_controller:
         :param selected_points: A set indicating which points are selected.  If None, no points are selectable.
         selected points at index 1
         """
+        self._gl_funcs = gl_funcs
         self._controlpoint_view = None
         self._transform_controller = transform_controller
         self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)
@@ -74,6 +89,10 @@ class TransformControllerView:
         if self._initialized:
             return True
 
+        context = QOpenGLContext.currentContext()
+        if not context.isValid():
+            raise RuntimeError("OpenGL context is not valid")
+
         self._initialized = True
         self._gl_context_manager.remove_glcontext_added_event_listener(self.create_objects)
 
@@ -86,7 +105,8 @@ class TransformControllerView:
 
         self._controlpoint_view = PointView(points=glcontrolpointbuffer,
                                             texture_indicies=glselectionbuffer,
-                                            texture_array=pyre.resources.pointtextures.PointArray)
+                                            texture_array=pyre.resources.pointtextures.PointArray,
+                                            gl_funcs=self.gl_funcs)
 
     def _OnTransformControllerChange(self, new_transform_controller: pyre.controllers.TransformController | None):
         if self._transform_controller is not None:
