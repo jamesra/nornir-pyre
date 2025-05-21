@@ -180,7 +180,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             if self.camera is None:
                 return
 
-            scroll_y = e.GetWheelRotation() / 120.0
+            scroll_y = e.GetWheelRotation() / e.GetWheelDelta()
 
             if e.CmdDown() and e.AltDown() and isinstance(self._transform_controller.TransformModel,
                                                           nornir_imageregistration.ITransformRelativeScaling):
