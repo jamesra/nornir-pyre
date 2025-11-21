@@ -198,7 +198,17 @@ class PointView:
             texture_array (int): OpenGL texture array ID containing the textures to use.
             gl_funcs (QOpenGLFunctions | None, optional): OpenGL functions to use.
                 If None, a new QOpenGLFunctions object will be created when needed.
+                
+        Raises:
+            RuntimeError: If no valid OpenGL context is current when creating OpenGL objects
         """
+        # Validate that we have an active OpenGL context
+        from PyQt6.QtGui import QOpenGLContext
+        context = QOpenGLContext.currentContext()
+        if not context or not context.isValid():
+            raise RuntimeError("PointView.__init__ requires an active OpenGL context. "
+                             "Ensure the context is current before creating PointView objects.")
+        
         self._gl_funcs = gl_funcs
         self.create_open_gl_objects(pyre.gl_engine.shaders.controlpointset_shader, points,
                                     texture_indicies=texture_indicies)
@@ -278,8 +288,7 @@ class PointView:
             texture_indicies (NDArray[np.integer] | GLBuffer | None, optional): Indices of
                 textures to use for each point. If None, all points use texture 0.
         """
-        self._vertex_buffer = GLBuffer(layout=shader.vertex_layout, data=self._square_verts, usage=gl.GL_STATIC_DRAW,
-                                       gl_funcs=self.gl_funcs)
+        self._vertex_buffer = GLBuffer(layout=shader.vertex_layout, data=self._square_verts, usage=gl.GL_STATIC_DRAW )
         if points is None:
             points = np.zeros((0, 3), dtype=np.float32)
         if isinstance(points, np.ndarray):
@@ -310,7 +319,7 @@ class PointView:
         InstancedVAO class: begin_init(), add buffers, add index buffer, and end_init().
         """
 
-        self._vao = InstancedVAO(gl_funcs=self.gl_funcs)
+        self._vao = InstancedVAO()
 
         self._vao.begin_init()
         self._vao.add_buffer(self._point_buffer)
@@ -334,12 +343,17 @@ class PointView:
             scale_factor (float): Scale factor to apply to the point billboards, controlling
                 their size on screen
         """
+        from pyre.gl_engine.helpers import check_for_error
         self._gl_funcs.glDisable(gl.GL_DEPTH_TEST)
+        check_for_error("after glDisable(GL_DEPTH_TEST) in pointview.draw")
         self._gl_funcs.glEnable(gl.GL_BLEND)
+        check_for_error("after glEnable(GL_BLEND) in pointview.draw")
         self._gl_funcs.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        check_for_error("after glBlendFunc in pointview.draw")
         pyre.gl_engine.shaders.controlpointset_shader.draw(view_proj_matrix,
                                                            self._texture_array,
                                                            self._vao,
                                                            len(self._point_buffer.data),
                                                            tween=tween, scale=scale_factor)
         self._gl_funcs.glEnable(gl.GL_DEPTH_TEST)
+        check_for_error("after glEnable(GL_DEPTH_TEST) in pointview.draw")

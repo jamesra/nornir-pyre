@@ -1,6 +1,8 @@
 import ctypes
 
-import OpenGL.GL as gl
+from OpenGL import GL as gl
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+import PyQt6.QtOpenGL as QtOpenGL
 import numpy as np
 from numpy.typing import NDArray
 from PyQt6.QtGui import QOpenGLContext
@@ -11,13 +13,31 @@ from pyre.gl_engine.helpers import raise_on_error, check_for_error
 from pyre.gl_engine.interfaces import IBuffer, IVAO
 
 
-class DynamicVAO(IVAO):
-    """Creates a Vertex Array Object for a set of vertex data that can be updated dynamically"""
-    _vao: ctypes.c_uint | None = None
+class DynamicVAOQt(IVAO):
+    """Creates a Vertex Array Object for a set of vertex data that can be updated dynamically using Qt's OpenGL system"""
+    _vao: QtOpenGL.QOpenGLVertexArrayObject | int | None = None
     _intializing: bool = False
     _initialized: bool = False
     _index_buffer: GLIndexBuffer = None  # The index buffer
     _buffers: set[IBuffer] = set()  # The vertex buffers
+    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """
+        Get the OpenGL functions object.
+
+        This property provides access to the OpenGL functions used to create and
+        manage the VAO. If no OpenGL functions object has been set, a new one is
+        created and initialized.
+
+        Returns:
+            QOpenGLFunctions: The OpenGL functions object
+        """
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
 
     @property
     def num_elements(self) -> int:
@@ -29,8 +49,15 @@ class DynamicVAO(IVAO):
         """List of triangle indicies.  Should be in groups of three"""
         return self._index_buffer.data
 
-    def __init__(self):
-        pass
+    def __init__(self, gl_funcs: QOpenGLFunctions = None):
+        """
+        Initialize a new DynamicVAOQt.
+
+        Args:
+            gl_funcs (QOpenGLFunctions, optional): OpenGL functions to use.
+                If None, a new QOpenGLFunctions object will be created when needed.
+        """
+        self._gl_funcs = gl_funcs
 
     def begin_init(self):
         """This is called once, before adding any buffers"""
@@ -40,34 +67,29 @@ class DynamicVAO(IVAO):
             raise ValueError("VAO already initializing")
 
         # Validate that we have an active OpenGL context before creating VAO
-        
         context = QOpenGLContext.currentContext()
         if not context or not context.isValid():
             raise RuntimeError(
-                "DynamicVAO.begin_init() requires an active OpenGL context. "
-                "Ensure the context is current before creating VAO objects."
+                "DynamicVAOQt.begin_init() requires an active OpenGL context."
             )
 
         self._intializing = True
 
         self._buffers = set()
         
+        # Use raw OpenGL VAO directly for better compatibility
         try:
-            # Create and bind the VAO - binding a new VAO automatically unbinds any previous one
             self._vao = gl.glGenVertexArrays(1)
             if self._vao == 0:
                 raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
-            raise_on_error("after glGenVertexArrays", RuntimeError("glGenVertexArrays failed"))
+            raise_on_error("after glGenVertexArrays in begin_init", RuntimeError("glGenVertexArrays failed"))
             
             gl.glBindVertexArray(self._vao)
             raise_on_error("after glBindVertexArray in begin_init")
                 
         except Exception as e:
-            # Check for OpenGL errors in exception handler
-            check_for_error("during VAO creation exception handling")
             raise RuntimeError(
-                f"Failed to create VAO using glGenVertexArrays: {e}. "
-                f"This usually indicates no valid OpenGL context is current or the context is in an error state."
+                f"Failed to create VAO using glGenVertexArrays: {e}."
             ) from e
 
     def end_init(self):
@@ -84,11 +106,13 @@ class DynamicVAO(IVAO):
         self._intializing = False
         self._initialized = True
 
-        gl.glBindVertexArray(0)
-
-        valid = gl.glIsVertexArray(self._vao)
-        if not valid:
-            raise ValueError("VAO is not valid")
+        # Unbind the VAO (cleanup code - use check_for_error to log and clear)
+        try: 
+            gl.glBindVertexArray(0)
+            check_for_error("after glBindVertexArray(0) in end_init")
+        except Exception as e:
+            print(f"Warning: Error unbinding VAO: {e}")
+            check_for_error("during VAO unbind exception handling")
 
     def add_index_buffer(self, value: GLIndexBuffer):
         """Adds the index buffer to the VAO"""
@@ -123,23 +147,29 @@ class DynamicVAO(IVAO):
 
     def bind(self) -> bool:
         """Bind the VAO to the context for rendering"""
-        # Try to bind the VAO directly - if it's invalid or there's an error, this will fail
-        valid = gl.glIsVertexArray(self._vao)
-        if valid == 0:
+        try:
+            gl.glBindVertexArray(self._vao)
+            raise_on_error("after glBindVertexArray in bind")
+            return True
+        except Exception as e:
+            print(f"Error binding VAO: {e}")
             return False
-        
-        gl.glBindVertexArray(self._vao)
-        raise_on_error("after glBindVertexArray in bind")
-        return True
-        
 
     def unbind(self):
         """Unbind the VAO from the context"""
-        # Unbind the VAO (cleanup code - use check_for_error to log and clear)
-        gl.glBindVertexArray(0)
-        raise_on_error("after glBindVertexArray(0) in unbind")
+        try: 
+            gl.glBindVertexArray(0)
+            check_for_error("after glBindVertexArray(0) in unbind")
+        except Exception as e:
+            # Don't print the warning - it's not critical
+            check_for_error("during VAO unbind exception handling")
+            pass
 
     def __del__(self):
+        """Clean up OpenGL resources when the object is deleted"""
         if self._vao is not None:
-            gl.glDeleteVertexArrays(1, [self._vao])
+            try:
+                gl.glDeleteVertexArrays(1, [self._vao])
+            except Exception:
+                pass  # Context may no longer be valid during cleanup
             self._vao = None

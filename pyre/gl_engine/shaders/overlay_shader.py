@@ -14,6 +14,7 @@ from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader, bind_texture
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
+from pyre.gl_engine.overlaytype import OverlayType
 
 # Define vertices for a full-screen quad
 full_screen_vertices = np.array([
@@ -58,12 +59,6 @@ _overlay_channel_mix_texture_fragment_shader_program = """
                                  source_tex_color.a + target_tex_color.a), 0, 1);
     }
 """
-
-
-class OverlayType(Enum):
-    Tween = 0,  # Blend the textures using the tween value
-    ChannelDodge = 1,  # Put textures into separate channels
-    Difference = 2,  # Subtract one texture from another
 
 
 class OverlayShader(BaseShader):

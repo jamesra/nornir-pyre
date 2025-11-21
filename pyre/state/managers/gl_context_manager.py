@@ -15,17 +15,13 @@ and for enabling resource sharing between contexts.
 
 Classes:
     GLContextManager: Manages OpenGL contexts and notifies subscribers when new contexts are created.
-
-Functions:
-    diagnose_gl_context_sharing: Diagnoses whether OpenGL contexts are properly shared.
 """
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtGui import QOpenGLContext
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtOpenGL import QOpenGLTexture
 import OpenGL.GL as gl
 
+import nornir_imageregistration
 from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces import IEventManager
 from pyre.interfaces.managers.gl_context_manager import GLContextCreatedCallback, IGLContextManager
@@ -46,25 +42,32 @@ class GLContextManager(IGLContextManager):
     Attributes:
         _GLContextAddedEventListeners: Event manager for context creation callbacks
         _known_contexts: List of known OpenGL contexts
+        _context_to_widget: Mapping from context to widget for making contexts current
     """
 
     _GLContextAddedEventListeners: IEventManager[GLContextCreatedCallback]
     _known_contexts: list[QOpenGLContext]
+    _context_to_widget: dict[QOpenGLContext, QOpenGLWidget]
 
     def __init__(self):
         self._GLContextAddedEventListeners = QtEventManager[GLContextCreatedCallback]()
         self._known_contexts = list()
+        self._context_to_widget = {}
 
-    def add_context(self, context: QOpenGLContext):
+    def add_context(self, context: QOpenGLContext, widget: QOpenGLWidget = None):
         """
         Add a context to the manager and notify subscribers.
 
         This method adds the provided OpenGL context to the list of known contexts
-        if it's not already present. It then invokes the diagnose_gl_context_sharing
-        function to check context sharing and notifies all subscribers about the new context.
+        if it's not already present. It stores the widget reference for making the
+        context current when needed. It then notifies all subscribers about the new context.
+
+        The context is made current before notifying subscribers to ensure they can create
+        OpenGL objects safely.
 
         Args:
             context: The OpenGL context to add to the manager
+            widget: The OpenGL widget associated with this context (optional but recommended)
 
         Returns:
             None
@@ -73,9 +76,73 @@ class GLContextManager(IGLContextManager):
             print(f"Adding context {context}")
 
             self._known_contexts.append(context)
+            if widget is not None:
+                self._context_to_widget[context] = widget
 
-            diagnose_gl_context_sharing()
-            self._GLContextAddedEventListeners.invoke(context)  # Notify all subscribers
+            # Ensure context is current before invoking callbacks
+            # This is critical - callbacks will create OpenGL objects that require a current context
+            # Note: When called from initializeGL, Qt should already have made the context current
+            if widget is not None:
+                current_before_invoke = QOpenGLContext.currentContext()
+                if current_before_invoke == context:
+                    # Context is already current (e.g., from initializeGL) - no need to make it current
+                    context_was_restored = False
+                else:
+                    # Try to make the context current
+                    # Note: makeCurrent() may fail if widget is not visible yet
+                    if widget.makeCurrent():
+                        # Verify it's actually current now
+                        current_context = QOpenGLContext.currentContext()
+                        if current_context != context:
+                            # Context mismatch - restore and skip callbacks for now
+                            widget.doneCurrent()
+                            print(f"Warning: Context mismatch in add_context. "
+                                  f"Widget visible: {widget.isVisible()}, Context valid: {context.isValid()}. "
+                                  f"Callbacks will be invoked when widget becomes visible.")
+                            return  # Skip callback invocation - they'll be called when widget is visible
+                        context_was_restored = True  # Track that we made it current
+                    else:
+                        # makeCurrent() failed - this can happen if widget is not visible yet
+                        # Don't fail, just skip callbacks for now - they'll be invoked when visible
+                        print(f"Warning: Failed to make context current in add_context. "
+                              f"Widget visible: {widget.isVisible()}, Context valid: {context.isValid()}. "
+                              f"Callbacks will be invoked when widget becomes visible.")
+                        return  # Skip callback invocation
+            else:
+                # No widget provided - this shouldn't happen during initialization
+                raise RuntimeError(
+                    f"Cannot make context current: no widget provided in add_context. "
+                    f"Context: {context}, Current: {QOpenGLContext.currentContext()}"
+                )
+            
+            # Check for any OpenGL errors before invoking callbacks
+            # We should have a current context at this point
+            # Use raise_on_error to find the source of any errors, not just clear them
+            from pyre.gl_engine.helpers import raise_on_error
+            raise_on_error("before invoking context-added callbacks in add_context - checking for prior errors")
+            
+            # Validate the context is actually functional by trying a simple operation
+            # This ensures we don't invoke callbacks with a broken context
+            try:
+                import OpenGL.GL as gl
+                # Try a simple query that requires a valid context
+                version = gl.glGetString(gl.GL_VERSION)
+                if version is None:
+                    raise RuntimeError("Context appears non-functional: glGetString(GL_VERSION) returned None")
+            except Exception as e:
+                raise RuntimeError(
+                    f"Context validation failed before invoking callbacks: {e}. "
+                    f"Context may be in an error state or not properly initialized."
+                ) from e
+            
+            try:
+                # Invoke callbacks - context must be current for OpenGL operations in callbacks
+                self._GLContextAddedEventListeners.invoke(context)  # Notify all subscribers
+            finally:
+                # Only release if we made it current (either from diagnostic restore or before invoke)
+                # Don't release if it was already current from initializeGL
+                if context_was_restored and widget is not None:
+                    widget.doneCurrent()
 
     def add_glcontext_added_event_listener(self, func: GLContextCreatedCallback):
         """
@@ -83,7 +150,8 @@ class GLContextManager(IGLContextManager):
 
         Registers a callback function to be invoked when a new OpenGL context is created.
         If any contexts already exist when this method is called, the callback will be
-        immediately invoked for each existing context.
+        immediately invoked for each existing context. The context is made current before
+        invoking the callback to ensure OpenGL operations can be performed safely.
 
         Args:
             func: Callback function to be invoked when a context is created.
@@ -95,7 +163,27 @@ class GLContextManager(IGLContextManager):
         self._GLContextAddedEventListeners.add(func)
         print(f"Adding context event listener {func}")
         for context in self._known_contexts:
-            func(context)
+            # Make the context current before invoking the callback
+            widget = self._context_to_widget.get(context)
+            if widget is None:
+                print(f"Warning: No widget for context {context}, callback may fail")
+                func(context)
+                continue
+                
+            # Check if context is already current
+            current_context = QOpenGLContext.currentContext()
+            was_current = (current_context == context)
+            
+            if not was_current:
+                print(f"Making context current for existing context callback")
+                widget.makeCurrent()
+            
+            try:
+                func(context)
+            finally:
+                # Only release if we made it current (not if it was already current)
+                if not was_current:
+                    widget.doneCurrent()
 
     def remove_glcontext_added_event_listener(self, func: GLContextCreatedCallback):
         """
@@ -113,80 +201,3 @@ class GLContextManager(IGLContextManager):
             None
         """
         self._GLContextAddedEventListeners.remove(func)
-
-
-def diagnose_gl_context_sharing():
-    """
-    Diagnose whether OpenGL contexts in the application are properly shared.
-
-    This function performs a series of tests to determine if OpenGL contexts
-    across different widgets are properly sharing resources. It:
-
-    1. Finds all OpenGL widgets in the application
-    2. Checks each widget's context and prints information about it
-    3. Creates a test texture in each context to verify resource creation
-    4. Tests cross-context resource access by creating a texture in one context
-       and attempting to access it from other contexts
-
-    This is useful for debugging OpenGL context sharing issues, which can cause
-    resources to be duplicated or inaccessible across different parts of the application.
-
-    Returns:
-        None: Results are printed to the console
-    """
-    gl_widgets = []
-
-    # Find all OpenGL widgets in the application
-    for widget in QApplication.allWidgets():
-        if isinstance(widget, QOpenGLWidget):
-            gl_widgets.append(widget)
-
-    print(f"Found {len(gl_widgets)} OpenGL widgets")
-
-    if len(gl_widgets) < 2:
-        return  # Not enough widgets to check sharing
-
-    # Check each widget's context
-    contexts = []
-    for i, widget in enumerate(gl_widgets):
-        widget.makeCurrent()
-        context = QOpenGLContext.currentContext()
-        contexts.append(context)
-
-        # Print context info
-        print(f"Widget {i}: Context {context}, share context: {context.shareContext()}")
-
-        # Test by creating a resource
-        try:
-            texture_id = QOpenGLTexture()
-            texture_id.textureId()
-            print(f"  Created texture {texture_id.textureId()} in context {context}")
-            del texture_id  # Clean up
-        except Exception as e:
-            print(f"  Failed to create texture: {e}")
-
-        widget.doneCurrent()
-
-    # Try to access resources across contexts
-    if len(contexts) > 1:
-        print("\nTesting cross-context resource access:")
-        # Create test texture in first context
-        gl_widgets[0].makeCurrent()
-        test_texture = QOpenGLTexture()
-        test_texture.bind()
-        gl_widgets[0].doneCurrent()
-
-        # Try to use texture in other contexts
-        for i, widget in enumerate(gl_widgets[1:], 1):
-            widget.makeCurrent()
-            try:
-                test_texture.bind()
-                print(f"  Success: Widget {i} can access texture from Widget 0")
-            except Exception as e:
-                print(f"  Failure: Widget {i} cannot access texture from Widget 0: {e}")
-            widget.doneCurrent()
-
-        # Clean up
-        gl_widgets[0].makeCurrent()
-        del test_texture  # Clean up the test texture
-        gl_widgets[0].doneCurrent()

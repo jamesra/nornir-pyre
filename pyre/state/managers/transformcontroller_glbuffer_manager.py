@@ -81,6 +81,12 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
                         transform_controller.points)
                     buffer_collection[BufferType.Selection].data = np.zeros((len(transform_controller.points), 1),
                                                                             dtype=np.uint16)
+        
+        # After buffers are initialized, notify any listeners that were waiting for buffers
+        # This allows create_objects callbacks that were deferred to retry
+        # Note: We don't directly invoke context callbacks here, but the fact that buffers are now
+        # initialized means that when create_objects is called again (e.g., when widget becomes visible),
+        # it will succeed
 
     def _initialize_buffer_collection(self) -> GLBufferCollection:
         """Initialize the buffer for the transform controller"""

@@ -206,10 +206,17 @@ class PyreWindowBase(QMainWindow):
     
     def closeEvent(self, event: QCloseEvent):
         """Handle the close event"""
-        self.setVisible(not self.isVisible())
+        # Hide the window (don't toggle - if it's being closed, hide it)
+        self.hide()
+        
+        # Check if all windows are now hidden
         if not self._window_manager.any_visible_windows:
+            # All windows are hidden, exit the application
             self.onExit()
-        event.ignore()  # Don't actually close the window, just hide it
+            event.accept()  # Accept the close event to allow application to exit
+        else:
+            # Other windows are still visible, just hide this one
+            event.accept()  # Accept the close event (window is hidden, not destroyed)
     
     def onExit(self):
         """Exit the application"""

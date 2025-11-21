@@ -8,6 +8,7 @@ from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 import numpy
 from numpy.typing import NDArray
 import scipy.spatial
+from pyre.gl_engine.helpers import raise_on_error
 
 from .compositetransformview import CompositeTransformView
 from .pointview import PointView
@@ -86,7 +87,7 @@ def DrawRectangle(rect, color):
 
     LineIndicies = [0, 1, 1, 2, 2, 3, 3, 0]
 
-    gl.glDisable(gl.GL_TEXTURE_2D)
+    # gl.glDisable(gl.GL_TEXTURE_2D)  # Deprecated in OpenGL 3.0+ - causes GL_INVALID_ENUM
     pyglet.gl.glColor4f(color[0], color[1], color[2], color[3])
     pyglet.graphics.draw_indexed(len(vertarray) / 3,
                                  gl.GL_LINES,
@@ -114,7 +115,7 @@ def SetDrawTextureState(funcs: QOpenGLFunctions):
 
 
 def SetDrawMosaicState():
-    gl.glEnable(gl.GL_TEXTURE_2D)
+    # gl.glEnable(gl.GL_TEXTURE_2D)  # Deprecated in OpenGL 3.0+ - causes GL_INVALID_ENUM
     gl.glDisable(gl.GL_CULL_FACE)
     gl.glEnable(gl.GL_DEPTH_TEST)
 
@@ -131,8 +132,11 @@ def ClearDrawTextureState(funcs: QOpenGLFunctions):
     """Reset the GL device from drawing textures"""
 
     funcs.glBlendEquation(gl.GL_FUNC_ADD)
+    raise_on_error("after glBlendEquation in ClearDrawTextureState")
     funcs.glClearColor(1.0, 1.0, 1.0, 1.0)
+    raise_on_error("after glClearColor in ClearDrawTextureState")
     funcs.glDisable(gl.GL_BLEND)
+    raise_on_error("after glDisable in ClearDrawTextureState")
 
 
 def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FUNC_ADD):

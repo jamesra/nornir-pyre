@@ -32,49 +32,66 @@ class FrameBuffer:
 
     def get_or_create_fbo(self, client_size: tuple[int, int]) -> int:
         """Create a frame buffer if the size has changed.  Otherwise use the existing frame buffer"""
-        if client_size != self.size:
+        if client_size != self.size or self._fbo is None:
             self.free_fbo()
 
             self.size = client_size
 
-            self._fbo = self.gl_funcs.glGenBuffers(1)
-            self.gl_funcs.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
+            # Clear any previous errors before creating framebuffer
+            from pyre.gl_engine.helpers import check_for_error
+            check_for_error("before glGenFramebuffers in get_or_create_fbo")
+            
+            # Qt's QOpenGLFunctions may not have glGenFramebuffers, use raw OpenGL
+            # glGenFramebuffers(1) returns a single integer (numpy.uintc), convert to int
+            fbo_id = gl.glGenFramebuffers(1)
+            if fbo_id is None or fbo_id == 0:
+                raise RuntimeError("Failed to generate framebuffer")
+            self._fbo = int(fbo_id)  # Convert numpy.uintc to int for compatibility
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
 
             self._fbo_texture = self._create_frame_buffer_texture(self.size)
-            self.gl_funcs.glFramebufferTexture2D(gl.GL_FRAMEBUFFER,
-                                                 gl.GL_COLOR_ATTACHMENT0,
-                                                 gl.GL_TEXTURE_2D,
-                                                 self._fbo_texture,
-                                                 0)
+            # Use raw OpenGL for framebuffer operations
+            gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER,
+                                      gl.GL_COLOR_ATTACHMENT0,
+                                      gl.GL_TEXTURE_2D,
+                                      self._fbo_texture,
+                                      0)
 
-            if self.gl_funcs.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
+            if gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) != gl.GL_FRAMEBUFFER_COMPLETE:
                 raise RuntimeError("Framebuffer is not complete")
 
             # Unbind the frame buffer
-            self.gl_funcs.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
 
         return self._fbo
 
     def free_fbo(self):
         """Free the frame buffer and texture resources"""
         if self._fbo_texture is not None:
-            self.gl_funcs.glDeleteTextures([self._fbo_texture])
+            # PyQt6's glDeleteTextures expects (n, textures) like glDeleteBuffers
+            self.gl_funcs.glDeleteTextures(1, [self._fbo_texture])
             self._fbo_texture = None
 
         if self._fbo is not None:
-            self.gl_funcs.glDeleteBuffers(1, [self._fbo])
+            # Use raw OpenGL for framebuffer deletion
+            gl.glDeleteFramebuffers(1, [self._fbo])
             self._fbo = None
 
     def _create_frame_buffer_texture(self, size: tuple[int, int]) -> int:
         """Create a texture the size of our window that we can render onto"""
         height, width = size
 
-        source_fbo_texture = self.gl_funcs.glGenTextures(1)
-        self.gl_funcs.glBindTexture(gl.GL_TEXTURE_2D, source_fbo_texture)
-        self.gl_funcs.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, width, height, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                                   None)
-        self.gl_funcs.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
-        self.gl_funcs.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        # Use raw OpenGL for texture creation (Qt's wrapper may have issues)
+        # glGenTextures(1) returns a single integer (numpy.uintc), convert to int
+        texture_id = gl.glGenTextures(1)
+        if texture_id is None or texture_id == 0:
+            raise RuntimeError("Failed to generate framebuffer texture")
+        source_fbo_texture = int(texture_id)  # Convert numpy.uintc to int for compatibility
+        gl.glBindTexture(gl.GL_TEXTURE_2D, source_fbo_texture)
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, width, height, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
+                       None)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
         return source_fbo_texture
 
     def __del__(self):

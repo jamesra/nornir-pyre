@@ -5,6 +5,7 @@ Created on Feb 6, 2015
 """
 from abc import abstractmethod
 
+import PyQt6.QtOpenGLWidgets
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, QSize, QPoint, pyqtSignal
@@ -21,7 +22,7 @@ from pyre.controllers.transformcontroller import TransformController
 from pyre.container import IContainer
 
 
-class ImageTransformPanelBase(QWidget):
+class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
     """
     Contains a GLContext and a camera to render a scene
     """
@@ -61,6 +62,11 @@ class ImageTransformPanelBase(QWidget):
         if value is not None:
             assert (isinstance(value, Camera))
             value.AddOnChangeEventListener(self.onCameraChanged)
+
+    @property
+    def glcanvas(self):
+        """Alias for _glpanel for backwards compatibility"""
+        return self._glpanel
 
     @property
     def transform_controller(self) -> TransformController:
@@ -152,7 +158,7 @@ class ImageTransformPanelBase(QWidget):
             self.camera.focus(_height, _width)
 
     def getCorrectedMousePosition(self, event: QMouseEvent) -> tuple[float, float]:
-        """QT inverts the mouse position compared to wxPython, flip it back"""
+        """QT uses a different coordinate system, flip the Y coordinate"""
         x, y = event.position().x(), event.position().y()
         return self.height() - y, x
 

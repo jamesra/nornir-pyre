@@ -31,6 +31,8 @@ Command-line Arguments:
 from __future__ import annotations
 import sys
 import atexit
+import io
+from datetime import datetime
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QTimer
@@ -44,18 +46,18 @@ import os
 from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Provider
 
-# Set the backend to WXAgg before importing pyplot
 import matplotlib
-
 import nornir_imageregistration
 
-matplotlib.use('WebAgg')
+# Use Qt backend for matplotlib (compatible with PyQt6)
+matplotlib.use('QtAgg')
 
 import nornir_shared.misc
 from pyre.interfaces.managers import IImageViewModelManager, IWindowManager
 from pyre.interfaces.managers.image_manager import IImageManager
 import pyre.ui
 import pyre.gl_engine.shaders as shaders
+import pyre.gl_engine.shaders_qt as shaders_qt
 import pyre.resources
 from pyre.interfaces.viewtype import ViewType
 from . import resource_paths
@@ -67,6 +69,141 @@ from pyre.settings import AppSettings
 
 from pyre.ui.windows.mosaicwindow import MosaicWindow
 from pyre.ui.windows.stoswindow import StosWindow
+
+
+class TeeOutput:
+    """A class that writes to both console and a file"""
+
+    def __init__(self, file_path: str, original_stream):
+        self.file = open(file_path, 'w', encoding='utf-8', buffering=1)  # Line buffered
+        self.original_stream = original_stream
+
+    def write(self, text: str):
+        self.original_stream.write(text)
+        self.file.write(text)
+        self.file.flush()  # Ensure it's written immediately
+
+    def flush(self):
+        self.original_stream.flush()
+        self.file.flush()
+
+    def close(self):
+        if self.file:
+            self.file.close()
+
+
+class TeeStderr:
+    """A class that writes stderr to both console and a file"""
+
+    def __init__(self, file_path: str, original_stderr, shared_file=None):
+        # Use shared file if provided (from stdout), otherwise open our own
+        if shared_file:
+            self.file = shared_file
+            self.own_file = False
+        else:
+            self.file = open(file_path, 'a', encoding='utf-8', buffering=1)  # Append mode
+            self.own_file = True
+        self.original_stderr = original_stderr
+
+    def write(self, text: str):
+        self.original_stderr.write(text)
+        self.file.write(text)
+        self.file.flush()  # Ensure it's written immediately
+
+    def flush(self):
+        self.original_stderr.flush()
+        self.file.flush()
+
+    def close(self):
+        # Only close if we own the file (not if it's shared with stdout)
+        if self.own_file and self.file:
+            self.file.close()
+
+
+_console_log_file = None
+_console_stderr_file = None
+_original_stdout = None
+_original_stderr = None
+_original_excepthook = None
+
+
+def _exception_handler(exc_type, exc_value, exc_traceback):
+    """Custom exception handler that ensures exceptions are logged to file"""
+    global _console_log_file, _original_excepthook
+
+    # Write exception to log file if available
+    if _console_log_file and _console_log_file.file:
+        import traceback
+        try:
+            _console_log_file.file.write("\n" + "=" * 80 + "\n")
+            _console_log_file.file.write("UNHANDLED EXCEPTION:\n")
+            _console_log_file.file.write("=" * 80 + "\n")
+            traceback.print_exception(exc_type, exc_value, exc_traceback, file=_console_log_file.file)
+            _console_log_file.file.write("=" * 80 + "\n")
+            _console_log_file.file.flush()  # Ensure it's written immediately
+        except Exception:
+            pass  # Don't fail if we can't write to the log
+
+    # Call original exception handler
+    if _original_excepthook:
+        _original_excepthook(exc_type, exc_value, exc_traceback)
+    else:
+        # Fallback to default behavior
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+
+def _setup_console_logging():
+    """Setup console logging to duplicate all output to a log file"""
+    global _console_log_file, _console_stderr_file, _original_stdout, _original_stderr, _original_excepthook
+
+    # Save original streams and exception handler
+    _original_stdout = sys.stdout
+    _original_stderr = sys.stderr
+    _original_excepthook = sys.excepthook
+
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.join(os.curdir, "PyreLogs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Create log file with timestamp
+    timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
+    log_file_path = os.path.join(log_dir, f'pyre-console-{timestamp}.log')
+
+    # Create tee output that writes to both console and file
+    # Share the same file handle between stdout and stderr
+    _console_log_file = TeeOutput(log_file_path, _original_stdout)
+    _console_stderr_file = TeeStderr(log_file_path, _original_stderr, shared_file=_console_log_file.file)
+    sys.stdout = _console_log_file
+    sys.stderr = _console_stderr_file
+
+    # Install custom exception handler to capture unhandled exceptions
+    sys.excepthook = _exception_handler
+
+    # Register cleanup on exit
+    def cleanup():
+        global _console_log_file, _console_stderr_file, _original_stdout, _original_stderr, _original_excepthook
+        # Flush before closing
+        if _console_log_file:
+            _console_log_file.flush()
+        if _console_stderr_file:
+            _console_stderr_file.flush()
+        # Restore original streams
+        if _console_log_file:
+            _console_log_file.close()
+            sys.stdout = _original_stdout
+        if _console_stderr_file:
+            _console_stderr_file.close()
+            sys.stderr = _original_stderr
+        # Restore original exception handler
+        if _original_excepthook:
+            sys.excepthook = _original_excepthook
+
+    atexit.register(cleanup)
+
+    # Write initial message using original stdout to avoid recursion
+    _original_stdout.write(f"Console output being logged to: {log_file_path}\n")
+    _console_log_file.file.write(f"Console output being logged to: {log_file_path}\n")
+    _console_log_file.file.flush()
 
 
 def ProcessArgs():
@@ -146,6 +283,7 @@ def build_container() -> IContainer:
     # Ensure we intialize the shaders and textures before anyone can subscribe to context creation events
     glcontext_manager = stos_container.glcontext_manager()
     glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders())
+    glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders_qt.InitializeShaders())
     glcontext_manager.add_glcontext_added_event_listener(
         lambda context: pyre.resources.point_textures.PointTextures.LoadTextures())
 
@@ -156,8 +294,7 @@ def build_container() -> IContainer:
     # f = stos_container.transform_control_point_action_maps()
     # result = f[nornir_imageregistration.transforms.TransformType.GRID]
 
-    # stos_container.selected_points = pyre.observable.oset.ObservableSet[int](initial_set=None,
-    #                                                                         call_wrapper=wx.CallAfter)
+    # Note: ObservableSet no longer needs a call_wrapper with Qt's signal/slot mechanism
 
     container_interface.check_dependencies()
     container_interface.wire(modules=[__name__], packages=['pyre'])
@@ -202,8 +339,12 @@ def DefineDefaultSurface():
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
         imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
         stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
-    # Build the container first
+    # Build the container first (before setting up logging to avoid pickling issues)
     container = build_container()
+
+    # Setup console logging to duplicate all output to a log file
+    # Done after container build to avoid dependency injection pickling issues
+    _setup_console_logging()
 
     # Get the required services from the container
     image_manager = container.image_manager()
@@ -237,8 +378,12 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     DefineDefaultSurface()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
-    # Create the QT application
-    app = QApplication(sys.argv)
+    # Create the QT application (or get existing instance)
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    else:
+        print("Warning: QApplication instance already exists, reusing it")
 
     # Create the windows
     # mosaic_window = MosaicWindow(None, 1, "Mosaic Viewer")

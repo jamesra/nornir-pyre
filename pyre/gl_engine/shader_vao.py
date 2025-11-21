@@ -4,8 +4,9 @@ import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
 
+import pyre.gl_engine
 import pyre.gl_engine.helpers
-from pyre.gl_engine.helpers import check_for_error
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
@@ -16,6 +17,7 @@ class ShaderVAO:
     _index_buffer: ctypes.c_uint | None
     _vao: ctypes.c_uint | None = None
     _num_elements: int = 0
+    _is_bound: bool = False
 
     @property
     def num_elements(self) -> int:
@@ -37,13 +39,20 @@ class ShaderVAO:
 
         try:
             check_for_error()
-            self._vao = gl.glGenVertexArrays(1)
+            # glGenVertexArrays(1) returns a single integer (numpy.uintc), convert to int
+            vao_id = gl.glGenVertexArrays(1)
+            if vao_id is None or vao_id == 0:
+                raise RuntimeError("Failed to generate VAO")
+            self._vao = int(vao_id)
             check_for_error()
             gl.glBindVertexArray(self._vao)
             check_for_error()
 
-            # self._vertex_buffer.bind()
-            self._vertex_buffer = gl.glGenBuffers(1)
+            # glGenBuffers(1) returns a single integer (numpy.uintc), convert to int
+            vertex_buffer_id = gl.glGenBuffers(1)
+            if vertex_buffer_id is None or vertex_buffer_id == 0:
+                raise RuntimeError("Failed to generate vertex buffer")
+            self._vertex_buffer = int(vertex_buffer_id)
             check_for_error()
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self._vertex_buffer)
             check_for_error()
@@ -52,7 +61,10 @@ class ShaderVAO:
             gl.glBufferData(gl.GL_ARRAY_BUFFER, flat_verts, gl.GL_STATIC_DRAW)
             check_for_error()
 
-            self._index_buffer = gl.glGenBuffers(1)
+            index_buffer_id = gl.glGenBuffers(1)
+            if index_buffer_id is None or index_buffer_id == 0:
+                raise RuntimeError("Failed to generate index buffer")
+            self._index_buffer = int(index_buffer_id)
             check_for_error()
             gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer)
             check_for_error()
@@ -68,19 +80,41 @@ class ShaderVAO:
     def bind(self) -> bool:
         """Bind the VAO to the context for rendering.
         Returns true if bind was successful"""
+        # Clear any previous errors before binding
+        pyre.gl_engine.helpers.check_for_error("before glBindVertexArray in VAO.bind")
+
         valid = gl.glIsVertexArray(self._vao)
         if not valid:
             # Log the problem but don't crash
             print(f"Warning: VAO {self._vao} is not valid in the current context")
             return False
+        # Try to bind the VAO directly
+        # If the VAO is invalid, glBindVertexArray will generate an error
+        try:
+            # Ensure we have a valid VAO ID
+            if self._vao is None or self._vao == 0:
+                return False
 
-        gl.glBindVertexArray(self._vao)
-        pyre.gl_engine.helpers.check_for_error()
-        return True
+            gl.glBindVertexArray(self._vao)
+            # Check for errors after binding - if there's an error, the bind failed
+            raise_on_error("after glBindVertexArray in VAO.bind")
+
+            self._is_bound = True
+            return True
+        except Exception as e:
+            # If glBindVertexArray raises an exception, the VAO is invalid
+            # Clear any errors that might have been set
+            pyre.gl_engine.helpers.check_for_error("after exception in VAO.bind")
+            return False
 
     def unbind(self):
+        if not self._is_bound:
+            # Warn that we are unbinding an unbound VAO
+            print("Warning: unbinding an unbound VAO")
+            return
         gl.glBindVertexArray(0)
-        pyre.gl_engine.helpers.check_for_error()
+        pyre.gl_engine.raise_on_error("after glBindVertexArray(0) in unbind")
+        self._is_bound = False
 
     def __del__(self):
         if self._vao is not None:

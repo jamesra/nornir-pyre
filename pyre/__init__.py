@@ -33,7 +33,8 @@ vector3 = NDArray[np.floating]  # A 3 element vector
 vector2 = NDArray[np.floating]  # A 2 element vector
 
 import pyre.gl_engine as gl_engine
-from pyre.gl_engine.shaders import ColorShader, InitializeShaders, TextureShader
+from pyre.gl_engine.shaders import ColorShader, TextureShader, InitializeShaders
+from pyre.gl_engine.shaders_qt import InitializeShadersQt
 from pyre.space import Space
 from pyre.command_interfaces import ICommand, CommandStatus, CommandResult
 

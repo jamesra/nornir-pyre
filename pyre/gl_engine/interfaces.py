@@ -58,6 +58,13 @@ class IVAO(ABC):
             None
         """
         raise NotImplementedError()
+     
+    @abstractmethod
+    def num_elements(self) -> int:
+        """
+        Get the number of elements in the VAO.
+        """
+        raise NotImplementedError()
 
 
 class IIndexBuffer(ABC):

@@ -15,7 +15,7 @@ class ObservableList(list, Generic[T]):
     def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable = None):
         """
                 :param initial_list: Populates the list with initial values
-                :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+                :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread
                 """
         super().__init__(initial_list if initial_list is not None else [])
         self._observers: list[ListObserverCallable[T]] = []

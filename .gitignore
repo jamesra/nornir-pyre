@@ -37,3 +37,7 @@ nosetests.xml
 .pydevproject
 /Logs/
 /__pycache__/
+
+# Logs
+pyre-console*.log
+

@@ -83,12 +83,12 @@ class StosWindow(PyreWindowBase):
 
         imagename_space_mapping = {}
         if view_type == ViewType.Composite:
-            imagename_space_mapping[ViewType.Source] = Space.Source
-            imagename_space_mapping[ViewType.Target] = Space.Target
+            imagename_space_mapping[ViewType.Source.value] = Space.Source
+            imagename_space_mapping[ViewType.Target.value] = Space.Target
         elif view_type == ViewType.Source:
-            imagename_space_mapping[ViewType.Source] = Space.Source
+            imagename_space_mapping[ViewType.Source.value] = Space.Source
         elif view_type == ViewType.Target:
-            imagename_space_mapping[ViewType.Target] = Space.Target
+            imagename_space_mapping[ViewType.Target.value] = Space.Target
         else:
             raise NotImplementedError("Unknown ViewType")
 

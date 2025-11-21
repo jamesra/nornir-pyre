@@ -13,8 +13,8 @@ from dependency_injector.wiring import Provide, inject
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
-from pyre.gl_engine import FrameBuffer
-import pyre.gl_engine.shaders as shaders
+from pyre.gl_engine import FrameBuffer, raise_on_error 
+import pyre.gl_engine.shaders_qt as shaders_qt
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import IImageViewModelManager
 from pyre.space import Space
@@ -23,6 +23,7 @@ from pyre.controllers.transformcontroller import TransformController
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 import pyre.qt_eventmanager
+from pyre.gl_engine.shaders.overlay_shader import OverlayType
 
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 
@@ -291,8 +292,9 @@ class CompositeTransformView(IImageTransformView):
     def setup_composite_rendering(self):
 
         # gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        # gl.glBlendColor(1.0,1.0,1.0,1.0)
+        # gl.glBlendColor(1.0,1.0,1.0,1.0) 
         gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
+        raise_on_error("after glBlendFunc in clear_composite_rendering")
         return
 
     def clear_composite_rendering(self):
@@ -307,46 +309,92 @@ class CompositeTransformView(IImageTransformView):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
         :param client_size: Size of the client area in pixels. (height, width)"""
-
+ 
         # Rough idea:
         # 1. Render each image to a FrameBufferObject
         # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
         if self._source_image_view is not None and self._target_image_view is not None:
 
+            height, width = client_size
+            
             source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
-            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, source_fbo)
+            # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
+            from pyre.gl_engine.helpers import check_for_error
+            raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
+            
+            # Set viewport to match framebuffer size
+            gl.glViewport(0, 0, width, height)
+            raise_on_error("after glViewport(source) in compositetransformview.draw")
 
-            self.gl.glClearDepth(10000.0)
-            self.gl.glClearColor(0, 0.1, 0, 1)
-            self.gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            # Use glClearDepthf (not glClearDepth) - QOpenGLFunctions_4_1_Core uses the 'f' suffix
+            gl.glClearDepthf(10000.0)
+            raise_on_error("after glClearDepthf(source) in compositetransformview.draw")
+            gl.glClearColor(0, 0.1, 0, 1)
+            raise_on_error("after glClearColor(source) in compositetransformview.draw")
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            raise_on_error("after glClear(source) in compositetransformview.draw")
 
             self._source_image_view.draw(view_proj, space, client_size, bounding_box)
 
             target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
-            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, target_fbo)
+            # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(target_fbo))
+            raise_on_error("after glBindFramebuffer(target) in compositetransformview.draw")
+            
+            # Set viewport to match framebuffer size
+            gl.glViewport(0, 0, width, height)
+            raise_on_error("after glViewport(target) in compositetransformview.draw")
 
-            self.gl.glClearDepth(10000.0)
-            self.gl.glClearColor(0, 0.1, 0, 1)
-            self.gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            # Use raw OpenGL for clear operations
+            gl.glClearDepthf(10000.0)
+            raise_on_error("after glClearDepthf(target) in compositetransformview.draw")
+            gl.glClearColor(0, 0.1, 0, 1)
+            raise_on_error("after glClearColor(target) in compositetransformview.draw")
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            raise_on_error("after glClear(target) in compositetransformview.draw")
 
             self._target_image_view.draw(view_proj, space, client_size, bounding_box)
 
-            self.gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            # Unbind framebuffer and restore viewport to window size
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+            raise_on_error("after glBindFramebuffer(0) in compositetransformview.draw")
+            
+            # Restore viewport to window size (not framebuffer size)
+            # client_size is (height, width), viewport expects (x, y, width, height)
+            gl.glViewport(0, 0, width, height)
+            raise_on_error("after glViewport(restore) in compositetransformview.draw")
+            
             # OK, we have two textures with the rendered+transformed images of source and target images.
             # Inject textures into an overlay renderer and blend the images
             # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
             #                                                                -1, 1,
             #                                                                -1, 1)
 
-            ortho_projection = np.identity(4)
+            # Create orthographic projection matrix for full-screen quad
+            # This maps from [-1,1] to [0,1] for texture coordinates
+            ortho_projection = np.identity(4, dtype=np.float32)
             ortho_projection[0, 0] = 2.0
             ortho_projection[1, 1] = 2.0
-            shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
+            
+            # Validate framebuffer textures are valid
+            if self._source_frame_buffer.fbo_texture == 0 or self._target_frame_buffer.fbo_texture == 0:
+                print(f"Warning: Invalid framebuffer textures - source: {self._source_frame_buffer.fbo_texture}, target: {self._target_frame_buffer.fbo_texture}")
+                return
+            
+            # Ensure overlay shader is initialized
+            # Check if shader is initialized using the _initialized flag
+            if not hasattr(shaders_qt.overlay_shader_qt, '_initialized') or not shaders_qt.overlay_shader_qt._initialized:
+                # Shaders not initialized yet, skip drawing
+                return
+             
+            shaders_qt.overlay_shader_qt.draw(model_view_proj_matrix=ortho_projection,
                                         source_texture=self._source_frame_buffer.fbo_texture,
                                         target_texture=self._target_frame_buffer.fbo_texture,
-                                        overlay_type=None,
-                                        source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0]),
-                                        target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0]))
+                                        overlay_type=shaders_qt.OverlayType.Tween,
+                                        source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
+                                        target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
+            
 
         elif self._source_image_view is not None:
             self._source_image_view.draw(view_proj, space, client_size, bounding_box)
@@ -361,9 +409,13 @@ class CompositeTransformView(IImageTransformView):
 
         glFunc = gl.GL_FUNC_ADD
 
-        self.gl.glEnable(gl.GL_BLEND)
-        self.gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
-        self.gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        from pyre.gl_engine.helpers import check_for_error
+        gl.glEnable(gl.GL_BLEND)
+        raise_on_error("after glEnable(GL_BLEND) in draw_textures")
+        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
+        raise_on_error("after glBlendFunc(SRC_COLOR) in draw_textures")
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        raise_on_error("after glBlendFunc(SRC_ALPHA) in draw_textures")
 
         if self._source_image_array is not None:
             FixedColor = None
@@ -381,11 +433,13 @@ class CompositeTransformView(IImageTransformView):
                                  tween=1.0)
 
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
+        raise_on_error("after glClear(DEPTH) in clear_composite_rendering")
 
         if self._target_image_array is not None:
             WarpedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 gl.glBlendEquation(glFunc)
+                raise_on_error("after glBlendEquation in clear_composite_rendering")
                 WarpedColor = (0, 1.0, 0, 1)
 
             self.DrawWarpedImage(view_proj, self._target_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,
@@ -393,5 +447,6 @@ class CompositeTransformView(IImageTransformView):
                                  glFunc=glFunc,
                                  tween=1)
 
-        self.gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
+        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
+        raise_on_error("after glClear(DEPTH) in clear_composite_rendering")
         self.clear_composite_rendering()

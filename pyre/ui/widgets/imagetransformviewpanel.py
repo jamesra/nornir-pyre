@@ -189,14 +189,16 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._image_transform_view = None
 
         self.DebugTickCounter = 0
-        self.timer.start(100)
+        # Use singleShot timer that reschedules itself instead of repeating timer
+        # This works around a Qt issue where repeating timers stop firing
+        QTimer.singleShot(100, self.on_timer_singleshot)
 
         self.statusbar.space = self.space
 
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
-        # Use QTimer to call these methods after the widget is fully initialized
-        QTimer.singleShot(0, lambda: self.subscribe_context_activation(self._glcontext_manager))
+        # Subscribe directly to context activation events
+        self.subscribe_context_activation(self._glcontext_manager)
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
 
@@ -234,7 +236,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._command = self._command_queue.get()
         if self._command is None:
             bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.width(), self.height()))
-            self._command = command_factory[ControlPointAction.NONE](parent=self.glcanvas,
+            self._command = command_factory[ControlPointAction.NONE](parent=self,
                                                                      completed_func=None,
                                                                      commandqueue=self._command_queue,
                                                                      camera=self.camera,
@@ -272,8 +274,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 print('\tAdding CompositeTransformView')
                 self._image_transform_view = CompositeTransformView(display_space=Space.Target,
                                                                     activate_context=self.glcanvas.activate_context,
-                                                                    source_image_name=ViewType.Source,
-                                                                    target_image_name=ViewType.Target,
+                                                                    source_image_name=ViewType.Source.value,
+                                                                    target_image_name=ViewType.Target.value,
                                                                     transform_controller=self.transform_controller,
                                                                     gl_funcs=self._glpanel._gl_funcs)
             else:
@@ -296,7 +298,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._image_transform_view = None
 
     def create_objects(self, context: PyQt6.QtGui.QOpenGLContext):
-        """create opengl objects when opengl is initialized"""
+        """create opengl objects when opengl is initialized
+        
+        Args:
+            context: The OpenGL context that was just created and is now current
+        """
         if self._image_transform_view is not None:
             self._image_transform_view.create_objects()
 
@@ -305,9 +311,23 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             BinarySelectionMapper(self._selected_points,
                                   lambda: getattr(self._transform_controller_view, 'selected'),
                                   lambda value: setattr(self._transform_controller_view, 'selected', value))
-            QTimer.singleShot(0, self.activate_command)
+            # Activate command directly - no need to defer as context is already active
+            self.activate_command()
+
+    def on_timer_singleshot(self):
+        """Timer callback that reschedules itself - workaround for repeating timer issues"""
+        try:
+            self.DebugTickCounter += 1
+            self.glcanvas.update()
+            # Reschedule the timer
+            QTimer.singleShot(100, self.on_timer_singleshot)
+        except Exception as e:
+            print(f"ERROR in on_timer_singleshot for {self.view_type.value}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def on_timer(self):
+        """Legacy timer callback - kept for compatibility"""
         self.DebugTickCounter += 1
         self.glcanvas.update()
         return

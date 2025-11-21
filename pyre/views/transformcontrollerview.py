@@ -85,13 +85,38 @@ class TransformControllerView:
         # pyre.state.currentStosConfig.AddOnTransformControllerChangeEventListener(self._OnTransformControllerChange)
 
     def create_objects(self, context: QOpenGLContext):
-        """"Creates opengl objects when opengl is initialized"""
+        """"Creates opengl objects when opengl is initialized
+        
+        Args:
+            context: The OpenGL context that was just created. This should already be current
+                    when this method is called thanks to GLContextManager ensuring context activation.
+        """
         if self._initialized:
             return True
 
-        context = QOpenGLContext.currentContext()
-        if not context.isValid():
+        # Validate the provided context (it should already be current)
+        if not context or not context.isValid():
             raise RuntimeError("OpenGL context is not valid")
+
+        # Verify context is current (should be guaranteed by GLContextManager)
+        current = QOpenGLContext.currentContext()
+        if current != context:
+            print(f"Warning: Expected context {context} but current is {current}")
+
+        # Check if buffers are initialized - they may not be ready yet if context was just created
+        if self._transform_controller is None:
+            print("Warning: Transform controller is None, cannot create objects")
+            return False
+            
+        # Check if buffers are initialized
+        if self._transform_controller not in self._transformglbuffer_manager:
+            print(f"Warning: Transform controller {self._transform_controller} not in buffer manager yet")
+            return False
+            
+        buffers = self._transformglbuffer_manager[self._transform_controller]
+        if buffers is None:
+            print(f"Warning: Buffers not initialized for transform controller {self._transform_controller}, deferring object creation")
+            return False
 
         self._initialized = True
         self._gl_context_manager.remove_glcontext_added_event_listener(self.create_objects)

@@ -300,6 +300,9 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
 
     ix, iy = grid_coords
     render_data = get_or_create_tile_globjects(ix, iy)
+    # Skip if render_data is None (shaders not initialized yet)
+    if render_data is None:
+        return
     render_data.vertex_buffer.data = vertarray
     render_data.index_buffer.data = indicies
 

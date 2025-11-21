@@ -5,7 +5,7 @@ try:
     import PyQt6.QtCore
     from PyQt6.QtCore import Qt
 except:
-    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
+    print("Import failure during documentation generation (expected)")
 
 import pyre.commands.uicommandbase as uicommand_base
 

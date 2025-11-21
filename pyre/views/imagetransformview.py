@@ -218,7 +218,8 @@ class ImageTransformView(IImageTransformView):
 
     @classmethod
     def _create_tile_globjects(cls) -> TileGLObjects:
-        """Create buffers and populate them with the vertex and index data"""
+        """Create buffers and populate them with the vertex and index data.
+        Assumes shaders are already initialized (caller should check)."""
 
         # Generate the buffers for the VAO
         vertex_buffer = GLBuffer(layout=shaders.texture_shader.vertex_layout,
@@ -234,9 +235,14 @@ class ImageTransformView(IImageTransformView):
 
         return TileGLObjects(vertex_buffer=vertex_buffer, index_buffer=index_buffer, vao=vertex_array_object)
 
-    def get_or_create_tile_globjects(self, ix: int, iy: int) -> TileGLObjects:
-        """Return the tile buffers for a grid coordinate, creating them if they do not exist"""
+    def get_or_create_tile_globjects(self, ix: int, iy: int) -> TileGLObjects | None:
+        """Return the tile buffers for a grid coordinate, creating them if they do not exist.
+        Returns None if shaders are not initialized yet."""
         if (ix, iy) not in self._tile_render_data:
+            # Check if shaders are initialized before creating GL objects
+            if not hasattr(shaders.texture_shader, '_initialized') or not shaders.texture_shader._initialized:
+                # Shaders not ready yet, return None to skip this tile
+                return None
             self._tile_render_data[(ix, iy)] = self._create_tile_globjects()
 
         return self._tile_render_data[(ix, iy)]
@@ -271,13 +277,48 @@ class ImageTransformView(IImageTransformView):
         if image_viewmodel is None:
             return
 
+        # Ensure ImageArray is created (this will create textures if needed)
+        # If textures can't be created yet (no context), ImageArray will be empty
+        try:
+            image_array = image_viewmodel.ImageArray
+        except Exception as e:
+            # If texture creation fails, skip drawing this frame
+            if "No valid OpenGL context" in str(e):
+                return
+            raise
+
+        # If ImageArray is empty, textures haven't been created yet - skip drawing
+        if not image_array or len(image_array) == 0:
+            return
+
         tween = space
 
         for ix in range(0, image_viewmodel.NumCols):
-            column = image_viewmodel.ImageArray[ix]
+            column = image_array[ix]
             for iy in range(0, image_viewmodel.NumRows):
                 texture = column[iy]
+                
+                # Skip if texture is invalid
+                if texture == 0:
+                    continue
 
                 render_data = self.get_or_create_tile_globjects(ix, iy)
+                
+                # Skip if shaders aren't initialized yet (render_data will be None)
+                if render_data is None:
+                    continue
 
-                shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween)
+                # Check if shaders are initialized before using them
+                try:
+                    shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween)
+                except ValueError as e:
+                    if "Shaders have not been initialized" in str(e):
+                        # Shaders not ready yet, skip this frame
+                        return
+                    raise
+                except RuntimeError as e:
+                    if "Invalid texture ID" in str(e) or "Failed to bind texture" in str(e):
+                        # Texture is invalid, skip this tile
+                        print(f"Warning: Skipping invalid texture {texture} at ({ix}, {iy})")
+                        continue
+                    raise

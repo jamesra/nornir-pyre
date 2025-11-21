@@ -82,7 +82,24 @@ class ImageViewModel:
     def ImageArray(self) -> list[list[int]]:
         """Array of textures for the full image"""
         if self._ImageArray is None:
-            self._ImageArray = self.CreateImageArray()
+            try:
+                self._ImageArray = self.CreateImageArray()
+            except RuntimeError as e:
+                if "No valid OpenGL context" in str(e):
+                    # Context not ready yet - return empty array
+                    # Textures will be created when context becomes available
+                    self._ImageArray = []
+                    return []
+                raise
+        # If ImageArray was set to empty list due to context not being ready, try again
+        if self._ImageArray == []:
+            try:
+                self._ImageArray = self.CreateImageArray()
+            except RuntimeError as e:
+                if "No valid OpenGL context" in str(e):
+                    # Still not ready
+                    return []
+                raise
         return self._ImageArray
 
     @property
@@ -217,9 +234,16 @@ class ImageViewModel:
                 else:
                     temp = self.Image[iY:end_iY, iX:end_iX]
 
-                texture = gl_engine.textures.create_grayscale_texture(temp)
-                del temp
-                columnTextures.append(texture)
+                try:
+                    texture = gl_engine.textures.create_grayscale_texture(temp)
+                    del temp
+                    columnTextures.append(texture)
+                except RuntimeError as e:
+                    if "No valid OpenGL context" in str(e):
+                        # Context not ready yet - return empty array, will be created later
+                        Logger.warning(f"OpenGL context not available when creating textures, deferring creation: {e}")
+                        return []  # Return empty array - textures will be created when context is available
+                    raise
 
             texture_grid.append(columnTextures)
 
@@ -245,4 +269,6 @@ class ImageViewModel:
             return
 
         textures = [texture for row in self._ImageArray for texture in row]
-        gl.glDeleteTextures(textures)
+        if textures:
+            # OpenGL glDeleteTextures expects (n, textures) format
+            gl.glDeleteTextures(len(textures), textures)

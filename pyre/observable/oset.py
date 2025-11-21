@@ -26,7 +26,7 @@ class ObservableSet(set, Generic[T]):
     def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable = None):
         """
         :param initial_set:
-        :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+        :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread
         """
 
         super(ObservableSet, self).__init__(initial_set if initial_set is not None else [])

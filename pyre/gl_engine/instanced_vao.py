@@ -17,13 +17,13 @@ Classes:
 import ctypes
 
 from OpenGL import GL as gl
-from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 import PyQt6.QtOpenGL as QtOpenGL
+from PyQt6.QtGui import QOpenGLContext
 import numpy as np
 from numpy._typing import NDArray
 
 import pyre.gl_engine
-from pyre.gl_engine import check_for_error
+from pyre.gl_engine import raise_on_error, check_for_error
 from pyre.gl_engine.interfaces import IBuffer
 
 
@@ -62,25 +62,6 @@ class InstancedVAO:
     _initialized: bool = False
     _index_buffer: int | None = None  # The index buffer
 
-    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
-
-    @property
-    def gl_funcs(self) -> QOpenGLFunctions:
-        """
-        Get the OpenGL functions object.
-
-        This property provides access to the OpenGL functions used to create and
-        manage the VAO. If no OpenGL functions object has been set, a new one is
-        created and initialized.
-
-        Returns:
-            QOpenGLFunctions: The OpenGL functions object
-        """
-        if self._gl_funcs is None:
-            self._gl_funcs = QOpenGLFunctions()
-            self._gl_funcs.initializeOpenGLFunctions()
-        return self._gl_funcs
-
     @property
     def num_elements(self) -> int:
         """
@@ -92,9 +73,12 @@ class InstancedVAO:
         Returns:
             int: The number of indices in the VAO
         """
+        if self._indicies is None:
+            return 0
+        
         return len(self._indicies)
 
-    def __init__(self, gl_funcs: QOpenGLFunctions = None):
+    def __init__(self):
         """
         Initialize a new InstancedVAO.
 
@@ -105,8 +89,7 @@ class InstancedVAO:
         Args:
             gl_funcs (QOpenGLFunctions, optional): OpenGL functions to use.
                 If None, a new QOpenGLFunctions object will be created when needed.
-        """
-        self._gl_funcs = gl_funcs
+        """ 
 
     def begin_init(self):
         """
@@ -118,17 +101,45 @@ class InstancedVAO:
 
         Raises:
             ValueError: If the VAO is already initialized or initializing
+            RuntimeError: If no valid OpenGL context is current
         """
         if self._initialized:
             raise ValueError("VAO already initialized")
         if self._intializing:
             raise ValueError("VAO already initializing")
 
+        # Validate that we have an active OpenGL context before creating VAO
+        
+        context = QOpenGLContext.currentContext()
+        if not context or not context.isValid():
+            raise RuntimeError(
+                "InstancedVAO.begin_init() requires an active OpenGL context. "
+                "This error often manifests as 'Out of Memory' in PyQt6. "
+                "Ensure the context is current before creating VAO objects."
+            )
+
         self._intializing = True
 
         self._buffers = set()
-        self._vao = QtOpenGL.QOpenGLVertexArrayObject(None)
-        self._vao.bind()
+
+        # For PyQt6 with OpenGL 4.1+ Core Profile, use raw OpenGL VAO directly
+        # QOpenGLVertexArrayObject has issues with context sharing in some configurations
+        try:
+            self._vao = gl.glGenVertexArrays(1)
+            if self._vao == 0:
+                raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
+            raise_on_error("after glGenVertexArrays in begin_init", RuntimeError("glGenVertexArrays failed"))
+            
+            gl.glBindVertexArray(self._vao)
+            raise_on_error("after glBindVertexArray in begin_init")
+                
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to create VAO using glGenVertexArrays: {e}. "
+                f"This usually indicates no valid OpenGL context is current, "
+                f"or the OpenGL driver is in an error state."
+            ) from e
+
         # Commented code preserved for reference
         # self.gl_funcs.glBufferData(
         #     gl.GL_ELEMENT_ARRAY_BUFFER,
@@ -161,11 +172,13 @@ class InstancedVAO:
         self._intializing = False
         self._initialized = True
 
-        valid = self.gl_funcs.glIsVertexArray(self._vao)
-        if not valid:
-            raise ValueError("VAO is not valid")
-
-        self.gl_funcs.glBindVertexArray(0)
+        # Unbind the VAO (cleanup code - use check_for_error to log and clear)
+        try:
+            gl.glBindVertexArray(0)
+            check_for_error("after glBindVertexArray(0) in end_init")
+        except Exception as e:
+            print(f"Warning: Error unbinding VAO: {e}")
+            check_for_error("during VAO unbind exception handling in end_init")
 
     def add_index_buffer(self, indicies: NDArray[np.uint16]):
         """
@@ -182,18 +195,20 @@ class InstancedVAO:
         Raises:
             ValueError: If the VAO is not initializing or is already initialized
         """
+        raise_on_error("before glGenBuffers in add_index_buffer")
         if not self._intializing:
             raise ValueError("VAO not initializing")
         if self._initialized:
             raise ValueError("VAO already initialized")
 
         self._indicies = indicies
-        self._index_buffer = self.gl_funcs.glGenBuffers(1)
-        check_for_error()
-        self.gl_funcs.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer)
-        check_for_error()
-        self.gl_funcs.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indicies, gl.GL_STATIC_DRAW)
-        check_for_error()
+        self._index_buffer = gl.glGenBuffers(1)
+        raise_on_error("after glGenBuffers in add_index_buffer")
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer)
+        raise_on_error("after glBindBuffer(GL_ELEMENT_ARRAY_BUFFER) in add_index_buffer")
+        # Convert numpy array to bytes for PyQt's OpenGL functions  
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indicies, gl.GL_STATIC_DRAW)
+        raise_on_error("after glBufferData in add_index_buffer")
 
     def add_buffer(self, buffer: IBuffer):
         """
@@ -211,6 +226,7 @@ class InstancedVAO:
             ValueError: If the VAO is not initializing, is already initialized,
                        or if the buffer has already been added
         """
+        raise_on_error("before glGenBuffers in add_buffer")
         if not self._intializing:
             raise ValueError("VAO not initializing")
         if self._initialized:
@@ -220,27 +236,26 @@ class InstancedVAO:
             raise ValueError("Buffer already added to VAO")
 
         self._buffers.add(buffer)
-        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, buffer.buffer)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, buffer.buffer)
         buffer.layout.add_vertex_attributes()
-        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
     def bind(self) -> bool:
         """
         Bind the VAO to the current OpenGL context for rendering.
 
         This method makes the VAO active for subsequent rendering operations.
-        It first checks if the VAO is valid before binding it.
 
         Returns:
             bool: True if the VAO was successfully bound, False otherwise
         """
-        valid = self.gl_funcs.glIsVertexArray(self._vao)
-        if not valid:
+        try:
+            gl.glBindVertexArray(self._vao)
+            raise_on_error("after glBindVertexArray in bind")
+            return True
+        except Exception as e:
+            print(f"Error binding VAO: {e}")
             return False
-
-        self.gl_funcs.glBindVertexArray(self._vao)
-        pyre.gl_engine.helpers.check_for_error()
-        return True
 
     def unbind(self):
         """
@@ -249,8 +264,15 @@ class InstancedVAO:
         This method deactivates the VAO for subsequent rendering operations
         by binding VAO 0 (no VAO).
         """
-        self.gl_funcs.glBindVertexArray(0)
-        pyre.gl_engine.helpers.check_for_error()
+        # Handle QOpenGLVertexArrayObject differently than raw VAO IDs
+        if isinstance(self._vao, QtOpenGL.QOpenGLVertexArrayObject):
+            self._vao.release()
+        else:
+            try:
+                gl.glBindVertexArray(0)
+            except Exception as e:
+                print(f"Warning: Error unbinding VAO: {e}")
+        pyre.gl_engine.helpers.raise_on_error()
 
     def __del__(self):
         """
@@ -261,9 +283,16 @@ class InstancedVAO:
         resource leaks.
         """
         if self._vao is not None:
-            gl.glDeleteVertexArrays(1, [self._vao])
+            # Handle QOpenGLVertexArrayObject differently than raw VAO IDs
+            if isinstance(self._vao, QtOpenGL.QOpenGLVertexArrayObject):
+                self._vao.destroy()
+            else:
+                gl.glDeleteVertexArrays(1, [self._vao])
+            raise_on_error("after glDeleteVertexArrays in __del__")
             self._vao = None
+            
 
         if self._index_buffer is not None:
             self.gl_funcs.glDeleteBuffers(1, [self._index_buffer])
+            raise_on_error("after glDeleteVertexArrays in __del__")
             self._index_buffer = None
