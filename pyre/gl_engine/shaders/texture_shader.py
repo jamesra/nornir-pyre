@@ -59,13 +59,14 @@ class TextureShader(BaseShader):
         global _texture_vertex_shader_program
         global _texture_fragment_shader_program
 
+
+        self._vertex_shader = VertexShader(_texture_vertex_shader_program)
+        self._fragment_shader = FragmentShader(_texture_fragment_shader_program)
+        
         self._vertex_layout = VertexArrayLayout(
             [VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.source_pos_location, "vertex_source_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.texture_coord_location, "vertex_texture_coordinate", 2, gl.GL_FLOAT)])
-
-        self._vertex_shader = VertexShader(_texture_vertex_shader_program)
-        self._fragment_shader = FragmentShader(_texture_fragment_shader_program)
 
     def initialize_gl_objects(self):
         super().initialize_gl_objects()
@@ -74,6 +75,7 @@ class TextureShader(BaseShader):
     def source_pos_location(self) -> int:
         if self._source_pos_location is None:
             self._source_pos_location = gl.glGetAttribLocation(self.program, "vertex_source_position")
+            raise_on_error("after glGetAttribLocation(vertex_source_position) in texture_shader")
             if self._source_pos_location == -1:
                 raise ValueError("Could not find attribute")
         return self._source_pos_location
@@ -82,6 +84,7 @@ class TextureShader(BaseShader):
     def target_pos_location(self) -> int:
         if self._target_pos_location is None:
             self._target_pos_location = gl.glGetAttribLocation(self.program, "vertex_target_position")
+            raise_on_error("after glGetAttribLocation(vertex_target_position) in texture_shader")
             if self._target_pos_location == -1:
                 raise ValueError("Could not find attribute")
         return self._target_pos_location
@@ -90,6 +93,7 @@ class TextureShader(BaseShader):
     def texture_coord_location(self) -> int:
         if self._texture_coord_location is None:
             self._texture_coord_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
+            raise_on_error("after glGetAttribLocation(texture_coord_location) in texture_shader")
             if self._texture_coord_location == -1:
                 raise ValueError("Could not find texture coordinate attribute")
         return self._texture_coord_location
@@ -98,6 +102,7 @@ class TextureShader(BaseShader):
     def texture_location(self):
         if self._texture_location is None:
             self._texture_location = gl.glGetUniformLocation(self.program, "texture_sampler")
+            raise_on_error("after glGetUniformLocation(texture_sampler) in texture_shader")  
             if self._texture_location == -1:
                 raise ValueError("Could not find texture_sampler attribute")
         return self._texture_location
@@ -106,6 +111,7 @@ class TextureShader(BaseShader):
     def tween_location(self) -> int:
         if self._tween_location is None:
             self._tween_location = gl.glGetUniformLocation(self.program, "tween")
+            raise_on_error("after glGetUniformLocation(tween) in texture_shader")
             if self._tween_location == -1:
                 raise ValueError("Could not find attribute")
         return self._tween_location

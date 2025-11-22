@@ -9,7 +9,7 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine import check_for_error
+from pyre.gl_engine import raise_on_error
 from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader, bind_texture
 from pyre.gl_engine.vertex_attribute import VertexAttribute
@@ -189,31 +189,39 @@ class OverlayShader(BaseShader):
         :param vertex_tween: The fractional amount of the tween between source and target space for verticies
         :param texture_tween: The fractional amount of the tween between source and target textures
         """
+        if self._vao is None:
+            raise ValueError("Overlay shader VAO is not initialized")
+        
+        bound_vao = False
         try:
-            if overlay_type is None:
-                gl.glUseProgram(self.program)
-            else:
-                gl.glUseProgram(self._programs[overlay_type])
+            # if overlay_type is None:
+            gl.glUseProgram(self.program)
+            # else:
+            #     gl.glUseProgram(self._programs[overlay_type])
 
-            check_for_error()
-            self._vao.bind()
+            raise_on_error("after glUseProgram in draw")
+            bound_vao = self._vao.bind()
 
             bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
             bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
 
             gl.glUniform4fv(self.source_channel_blend_location, 1, source_channel_mix.astype(np.float32, copy=False))
-            check_for_error()
+            raise_on_error("after glUniform4fv(source_channel_blend) in draw")
             gl.glUniform4fv(self.target_channel_blend_location, 1, target_channel_mix.astype(np.float32, copy=False))
-            check_for_error()
+            raise_on_error("after glUniform4fv(target_channel_blend) in draw")
             gl.glUniformMatrix4fv(self.model_view_projection_matrix_location, 1, False,
                                   model_view_proj_matrix.astype(np.float32, copy=False))
-            check_for_error()
+            raise_on_error("after glUniformMatrix4fv in draw")
 
             if self._vao.num_elements == 0:
                 warnings.warn("No elements to draw")
+                
             gl.glDrawElements(gl.GL_TRIANGLES, self._vao.num_elements, gl.GL_UNSIGNED_SHORT, None)
-            check_for_error()
+            raise_on_error("after glDrawElements in draw")
         finally:
-            check_for_error()
-            self._vao.unbind()
+            raise_on_error("in draw finally block")
+            if bound_vao:
+                self._vao.unbind()
+                raise_on_error("after unbind in draw finally block")
             gl.glUseProgram(0)
+            raise_on_error("after glUseProgram(0) in draw finally block")

@@ -13,17 +13,17 @@ from dependency_injector.wiring import Provide, inject
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
-from pyre.gl_engine import FrameBuffer, raise_on_error 
-import pyre.gl_engine.shaders_qt as shaders_qt
+from pyre.gl_engine import FrameBuffer, raise_on_error  
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import IImageViewModelManager
 from pyre.space import Space
-import pyre.viewmodels
 from pyre.controllers.transformcontroller import TransformController
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 import pyre.qt_eventmanager
+from pyre.gl_engine import shaders
 from pyre.gl_engine.shaders.overlay_shader import OverlayType
+
 
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 
@@ -375,7 +375,7 @@ class CompositeTransformView(IImageTransformView):
             # This maps from [-1,1] to [0,1] for texture coordinates
             ortho_projection = np.identity(4, dtype=np.float32)
             ortho_projection[0, 0] = 2.0
-            ortho_projection[1, 1] = 2.0
+            ortho_projection[1, 1] = 2.0    
             
             # Validate framebuffer textures are valid
             if self._source_frame_buffer.fbo_texture == 0 or self._target_frame_buffer.fbo_texture == 0:
@@ -384,14 +384,14 @@ class CompositeTransformView(IImageTransformView):
             
             # Ensure overlay shader is initialized
             # Check if shader is initialized using the _initialized flag
-            if not hasattr(shaders_qt.overlay_shader_qt, '_initialized') or not shaders_qt.overlay_shader_qt._initialized:
+            if not shaders.overlay_shader.initialized:
                 # Shaders not initialized yet, skip drawing
                 return
              
-            shaders_qt.overlay_shader_qt.draw(model_view_proj_matrix=ortho_projection,
+            shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
                                         source_texture=self._source_frame_buffer.fbo_texture,
                                         target_texture=self._target_frame_buffer.fbo_texture,
-                                        overlay_type=shaders_qt.OverlayType.Tween,
+                                        overlay_type=shaders.OverlayType.Tween,
                                         source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
                                         target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
             

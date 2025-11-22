@@ -19,7 +19,8 @@ Classes:
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtGui import QOpenGLContext
-import OpenGL.GL as gl
+import OpenGL.GL as gl 
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
 
 import nornir_imageregistration
 from pyre.qt_eventmanager import QtEventManager
@@ -117,16 +118,15 @@ class GLContextManager(IGLContextManager):
             
             # Check for any OpenGL errors before invoking callbacks
             # We should have a current context at this point
-            # Use raise_on_error to find the source of any errors, not just clear them
-            from pyre.gl_engine.helpers import raise_on_error
+            # Use raise_on_error to find the source of any errors, not just clear them 
             raise_on_error("before invoking context-added callbacks in add_context - checking for prior errors")
             
             # Validate the context is actually functional by trying a simple operation
             # This ensures we don't invoke callbacks with a broken context
             try:
-                import OpenGL.GL as gl
                 # Try a simple query that requires a valid context
                 version = gl.glGetString(gl.GL_VERSION)
+                check_for_error("after glGetString in add_context context validation")
                 if version is None:
                     raise RuntimeError("Context appears non-functional: glGetString(GL_VERSION) returned None")
             except Exception as e:

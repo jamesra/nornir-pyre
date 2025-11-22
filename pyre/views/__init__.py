@@ -117,15 +117,24 @@ def SetDrawTextureState(funcs: QOpenGLFunctions):
 def SetDrawMosaicState():
     # gl.glEnable(gl.GL_TEXTURE_2D)  # Deprecated in OpenGL 3.0+ - causes GL_INVALID_ENUM
     gl.glDisable(gl.GL_CULL_FACE)
+    raise_on_error("after glDisable(GL_CULL_FACE) in SetDrawMosaicState")
     gl.glEnable(gl.GL_DEPTH_TEST)
+    raise_on_error("after glEnable(GL_DEPTH_TEST) in SetDrawMosaicState")
 
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
+    raise_on_error("after glTexParameteri(WRAP_S) in SetDrawMosaicState")
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
+    raise_on_error("after glTexParameteri(WRAP_T) in SetDrawMosaicState")
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
+    raise_on_error("after glTexParameteri(MAG_FILTER) in SetDrawMosaicState")
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+    raise_on_error("after glTexParameteri(MIN_FILTER) in SetDrawMosaicState")
     gl.glEnable(gl.GL_BLEND)
+    raise_on_error("after glEnable(GL_BLEND) in SetDrawMosaicState")
     gl.glBlendFunc(gl.GL_ONE, gl.GL_ZERO)
+    raise_on_error("after glBlendFunc in SetDrawMosaicState")
     gl.glDepthFunc(gl.GL_LESS)
+    raise_on_error("after glDepthFunc in SetDrawMosaicState")
 
 
 def ClearDrawTextureState(funcs: QOpenGLFunctions):
@@ -144,8 +153,11 @@ def DrawTexture(texture, vertarray, texarray, verts, color=None, glFunc=gl.GL_FU
         color = (1.0, 1.0, 1.0, 1.0)
 
     gl.glBlendEquation(glFunc)
+    raise_on_error("after glBlendEquation in DrawTexture")
     gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
+    raise_on_error("after glBindTexture in DrawTexture")
     gl.glColor4f(color[0], color[1], color[2], color[3])
+    raise_on_error("after glColor4f in DrawTexture")
 
     #     pyglet.graphics.draw_indexed(len(vertarray) / 3,
     #                                   gl.GL_TRIANGLES,
@@ -168,12 +180,16 @@ def DrawTextureWithBuffers(texture, vertex_buffer: vbo.VBO, texture_buffer: vbo.
     try:
 
         gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+        raise_on_error("after glEnableClientState(VERTEX_ARRAY) in DrawTextureWithBuffers")
         vertex_buffer.bind()
         gl.EnableClientState(gl.GL_INDEX_ARRAY)
+        raise_on_error("after EnableClientState(INDEX_ARRAY) in DrawTextureWithBuffers")
         index_buffer.bind()
 
         gl.glVertexPointer(vertex_buffer)
+        raise_on_error("after glVertexPointer in DrawTextureWithBuffers")
         gl.glIndexPointer(index_buffer)
+        raise_on_error("after glIndexPointer in DrawTextureWithBuffers")
 
     finally:
         vertex_buffer.unbind()
@@ -252,6 +268,7 @@ def draw_indexed_custom(size, mode, indices, *data):
 
     """
     glPushClientAttrib(GL_CLIENT_VERTEX_ARRAY_BIT)
+    raise_on_error("after glPushClientAttrib in draw_indexed_custom")
 
     size = int(size)
 
@@ -279,9 +296,12 @@ def draw_indexed_custom(size, mode, indices, *data):
 
     index_array = (index_c_type * len(indices))(*indices)
     glDrawElements(mode, len(indices), index_type, index_array)
+    raise_on_error("after glDrawElements in draw_indexed_custom")
     glFlush()
+    raise_on_error("after glFlush in draw_indexed_custom")
 
     glPopClientAttrib()
+    raise_on_error("after glPopClientAttrib in draw_indexed_custom")
 
 
 def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vbo.VBO, mode: int = gl.GL_TRIANGLES):
@@ -299,6 +319,7 @@ def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vb
 
     """
     gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
+    raise_on_error("after glPushClientAttrib in draw_indexed_from_buffer")
 
     for attribute, buffer in vertex_buffer:
         # attribute.enable()
@@ -316,6 +337,9 @@ def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vb
 
     index_array = (index_c_type * len(index_buffer))(*index_buffer)
     gl.glDrawElements(mode, len(index_buffer), index_type, index_array)
+    raise_on_error("after glDrawElements in draw_indexed_from_buffer")
     gl.glFlush()
+    raise_on_error("after glFlush in draw_indexed_from_buffer")
 
     gl.glPopClientAttrib()
+    raise_on_error("after glPopClientAttrib in draw_indexed_from_buffer")

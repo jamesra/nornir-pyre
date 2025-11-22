@@ -56,8 +56,7 @@ import nornir_shared.misc
 from pyre.interfaces.managers import IImageViewModelManager, IWindowManager
 from pyre.interfaces.managers.image_manager import IImageManager
 import pyre.ui
-import pyre.gl_engine.shaders as shaders
-import pyre.gl_engine.shaders_qt as shaders_qt
+import pyre.gl_engine.shaders as shaders 
 import pyre.resources
 from pyre.interfaces.viewtype import ViewType
 from . import resource_paths
@@ -282,8 +281,7 @@ def build_container() -> IContainer:
 
     # Ensure we intialize the shaders and textures before anyone can subscribe to context creation events
     glcontext_manager = stos_container.glcontext_manager()
-    glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders())
-    glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders_qt.InitializeShaders())
+    glcontext_manager.add_glcontext_added_event_listener(lambda context: shaders.InitializeShaders()) 
     glcontext_manager.add_glcontext_added_event_listener(
         lambda context: pyre.resources.point_textures.PointTextures.LoadTextures())
 

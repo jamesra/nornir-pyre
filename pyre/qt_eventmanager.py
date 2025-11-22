@@ -2,15 +2,27 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, TypeVar
 
+from dependency_injector.wiring import Provide
 from PyQt6.QtCore import QObject, QEvent, QCoreApplication, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from pyre.interfaces import EventCallbackType, IEventManager
+from pyre.container import IContainer
 
 
-def qt_post_to_main(callback: Callable, *args, **kwargs):
-    """Call a function on the main thread"""
-    QTimer.singleShot(0, lambda: callback(*args, **kwargs))
+def qt_post_to_main(callback: Callable, *args, activate_context: Callable[[], None] | None = None, **kwargs) -> None:
+    """Call a function on the main thread, optionally activating OpenGL context first.
+    
+    :param callback: The function to call on the main thread
+    :param *args: Positional arguments to pass to the callback
+    :param activate_context: Optional function to call before the callback to activate OpenGL context (keyword-only)
+    :param **kwargs: Keyword arguments to pass to the callback
+    """
+    def wrapped():
+        if activate_context is not None:
+            activate_context()
+        callback(*args, **kwargs)
+    QTimer.singleShot(0, wrapped)
 
 
 class QtInvokeOnMainThreadEvent(QEvent):
@@ -67,8 +79,6 @@ class QtEventManager(QObject, IEventManager[EventCallbackType]):
 
         # Try to get debug setting from config
         try:
-            from dependency_injector.wiring import Provide
-            from pyre.container import IContainer
             config = Provide[IContainer.config]
             if "debug" in config:
                 self._debug = bool(config["debug"])

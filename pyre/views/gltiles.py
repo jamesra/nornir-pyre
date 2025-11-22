@@ -288,7 +288,7 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
                          grid_coords: tuple[int, int],
                          texture_size: tuple[int, int],
                          image_space: Space,
-                         get_or_create_tile_globjects: Callable[[int, int], TileGLObjects]):
+                         get_or_create_tile_globjects: Callable[[int, int], TileGLObjects | None]):
     """Create/Update the GL buffers for a given tile.
     :param get_or_create_tile_globjects: Function to get or create the TileGLObjects for a tile
     """

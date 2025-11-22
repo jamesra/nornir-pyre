@@ -141,10 +141,13 @@ class ImageTransformView(IImageTransformView):
 
         self.Debug = False
 
-        qt_post_to_main(self.create_objects)
+        qt_post_to_main(self.create_objects, activate_context=self._activate_context)
 
     def create_objects(self):
         """Initialize GL objects"""
+        # Ensure we have a valid context before proceeding
+        self._activate_context()
+        
         if not self._gl_initialized:
             self._gl_initialized = True
 
@@ -188,8 +191,8 @@ class ImageTransformView(IImageTransformView):
         except gl.GLError as e:
             # If we still get GL errors, it means the context isn't ready yet
             print(f"GL not ready yet, will retry: {e}")
-            # Schedule a retry
-            qt_post_to_main(self.update_all_tile_buffers)
+            # Schedule a retry with context activation
+            qt_post_to_main(self.update_all_tile_buffers, activate_context=self._activate_context)
 
     def draw_lines(self, draw_in_fixed_space: bool):
         """
@@ -240,7 +243,7 @@ class ImageTransformView(IImageTransformView):
         Returns None if shaders are not initialized yet."""
         if (ix, iy) not in self._tile_render_data:
             # Check if shaders are initialized before creating GL objects
-            if not hasattr(shaders.texture_shader, '_initialized') or not shaders.texture_shader._initialized:
+            if not shaders.texture_shader.initialized:
                 # Shaders not ready yet, return None to skip this tile
                 return None
             self._tile_render_data[(ix, iy)] = self._create_tile_globjects()

@@ -17,6 +17,7 @@ import scipy.ndimage
 import nornir_imageregistration
 from nornir_shared.mathhelper import NearestPowerOfTwo
 import pyre.gl_engine as gl_engine
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
 
 Logger = logging.getLogger("ImageArray")
 
@@ -251,6 +252,7 @@ class ImageViewModel:
             print('\nTexture creation complete\n')
 
         Logger.info("Completed CreateImageArray")
+        raise_on_error("after CreateImageArray")
         return texture_grid
 
     def generate_grid_indicies(self) -> Generator[tuple[int, int], None, None]:
@@ -272,3 +274,4 @@ class ImageViewModel:
         if textures:
             # OpenGL glDeleteTextures expects (n, textures) format
             gl.glDeleteTextures(len(textures), textures)
+            check_for_error("after glDeleteTextures in ImageViewModel.__del__")

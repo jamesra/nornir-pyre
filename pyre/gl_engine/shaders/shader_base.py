@@ -78,6 +78,9 @@ class BaseShader(ABC):
     _program: int | None = None
 
     _vertex_layout: VertexArrayLayout
+    
+    def initialized(self) -> bool:
+        return self._program is not None
 
     def initialize_gl_objects(self):
         """Compile the shaders and programs.  Override for different behavior"""

@@ -4,7 +4,7 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine.helpers import check_for_error
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
 from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
@@ -154,7 +154,7 @@ class GLIndexBuffer(IIndexBuffer):
         """Create the buffer object.  This will break any VAO's that use this buffer."""
         check_for_error()
         self._buffer = gl.glGenBuffers(1)
-        check_for_error()
+        raise_on_error()
 
         if data is not None:
             self._update_buffer_data(data)

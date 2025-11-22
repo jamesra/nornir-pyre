@@ -203,28 +203,32 @@ class GLPanel(QOpenGLWidget):
 
         if self._gl_funcs is None:
             return
+        
+        
+        # Check for errors from previous operations - this will raise if there's an error
+        # This helps us find what's causing GL_INVALID_ENUM at the start of paintGL
+        check_for_error("at start of paintGL - checking for prior errors")
 
         # Activate context and verify it's current
         self.activate_context()
+        raise_on_error("after activate_context in paintGL")
         
         # Verify context is actually current
         current_context = QOpenGLContext.currentContext()
+        raise_on_error("after get current context in paintGL")
         if not current_context or current_context != self.context():
             print(f"WARNING: Context not current in paintGL. Expected {self.context()}, got {current_context}")
             return
 
-        # This should be set by resizeGL, but ensure it's correct
-        extents = self.GetGLExtents()
-        pixel_ratio = self.devicePixelRatio()
+        # # This should be set by resizeGL, but ensure it's correct
+        # extents = self.GetGLExtents()
+        # pixel_ratio = self.devicePixelRatio()
 
-        physical_width = int(extents.width() * pixel_ratio)
-        physical_height = int(extents.height() * pixel_ratio)
+        # physical_width = int(extents.width() * pixel_ratio)
+        # physical_height = int(extents.height() * pixel_ratio)
 
         # Create/get OpenGL functions for this context
 
-        # Check for errors from previous operations - this will raise if there's an error
-        # This helps us find what's causing GL_INVALID_ENUM at the start of paintGL
-        raise_on_error("at start of paintGL - checking for prior errors")
 
         # Use the QOpenGLFunctions interface directly
         # Note: Some of these might not be valid in all OpenGL contexts
@@ -251,7 +255,10 @@ class GLPanel(QOpenGLWidget):
 
     def activate_context(self):
         """Set this widgets GL context as the current context"""
+        
+        raise_on_error("before makeCurrent in activate_context - checking for prior errors")
         self.makeCurrent()
+        raise_on_error("after makeCurrent in activate_context")
 
     def clear(self): 
         self._gl_funcs.glClearDepthf(1)
