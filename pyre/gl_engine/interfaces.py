@@ -32,6 +32,12 @@ class IVAO(ABC):
 
     Implementations of this interface are responsible for managing the lifecycle
     of the VAO, including creation, binding, and deletion.
+
+    Supports context manager protocol for automatic bind/unbind:
+        with vao:
+            # VAO is bound here
+            # ... rendering code ...
+        # VAO is automatically unbound here
     """
 
     @abstractmethod
@@ -58,13 +64,41 @@ class IVAO(ABC):
             None
         """
         raise NotImplementedError()
-     
+
     @abstractmethod
     def num_elements(self) -> int:
         """
         Get the number of elements in the VAO.
+
+        Returns:
+            int: The number of elements in the VAO
         """
         raise NotImplementedError()
+
+    def __enter__(self):
+        """
+        Context manager entry: bind the VAO.
+
+        Returns:
+            IVAO: This VAO instance
+        """
+        self.bind()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Context manager exit: unbind the VAO.
+
+        Args:
+            exc_type: Exception type (if any)
+            exc_val: Exception value (if any)
+            exc_tb: Exception traceback (if any)
+
+        Returns:
+            bool: False to propagate exceptions
+        """
+        self.unbind()
+        return False
 
 
 class IIndexBuffer(ABC):

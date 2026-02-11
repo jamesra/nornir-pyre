@@ -5,7 +5,7 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine import IVAO, check_for_error
+from pyre.gl_engine import IVAO, check_for_error, raise_on_error
 from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout

@@ -17,7 +17,6 @@ Classes:
 import ctypes
 
 from OpenGL import GL as gl
-import PyQt6.QtOpenGL as QtOpenGL
 from PyQt6.QtGui import QOpenGLContext
 import numpy as np
 from numpy._typing import NDArray
@@ -25,9 +24,10 @@ from numpy._typing import NDArray
 import pyre.gl_engine
 from pyre.gl_engine import raise_on_error, check_for_error
 from pyre.gl_engine.interfaces import IBuffer
+from pyre.gl_engine.context_aware_vao import ContextAwareVAOHelper
 
 
-class InstancedVAO:
+class InstancedVAO(ContextAwareVAOHelper):
     """
     Manages Vertex Array Objects (VAOs) for instanced rendering.
 
@@ -44,39 +44,16 @@ class InstancedVAO:
     After initialization, the VAO can be bound for rendering using the bind() method
     and unbound using the unbind() method.
 
-    Attributes:
-        _buffers (set[IBuffer]): Set of buffers associated with this VAO
-        _indicies (NDArray[np.uint16] | None): Index data for indexed rendering
-        _vao (int | None): OpenGL VAO object ID
-        _num_elements (int): Number of elements in the VAO
-        _intializing (bool): Flag indicating if the VAO is being initialized
-        _initialized (bool): Flag indicating if the VAO has been initialized
-        _index_buffer (int | None): OpenGL index buffer object ID
-        _gl_funcs (QOpenGLFunctions | None): OpenGL functions
+    This class is context-aware and will automatically create VAOs for each OpenGL context
+    that uses it. The configuration is stored after the first initialization and reused
+    for lazy VAO creation in other contexts.
+
+    Supports context manager protocol:
+        with vao:
+            # VAO is bound here
+            # ... rendering code ...
+        # VAO is automatically unbound here
     """
-    _buffers: set[IBuffer]
-    _indicies: NDArray[np.uint16] | None = None
-    _vao: int | None = None
-    _num_elements: int = 0
-    _intializing: bool = False
-    _initialized: bool = False
-    _index_buffer: int | None = None  # The index buffer
-
-    @property
-    def num_elements(self) -> int:
-        """
-        Get the number of elements (indices) in the VAO.
-
-        This property returns the number of indices in the index buffer,
-        which determines how many elements will be rendered when the VAO is drawn.
-
-        Returns:
-            int: The number of indices in the VAO
-        """
-        if self._indicies is None:
-            return 0
-        
-        return len(self._indicies)
 
     def __init__(self):
         """
@@ -85,92 +62,59 @@ class InstancedVAO:
         Creates a new Vertex Array Object for instanced rendering. The VAO is not
         fully initialized until begin_init(), add_buffer(), add_index_buffer(),
         and end_init() have been called in sequence.
-
-        Args:
-            gl_funcs (QOpenGLFunctions, optional): OpenGL functions to use.
-                If None, a new QOpenGLFunctions object will be created when needed.
-        """ 
+        """
+        super().__init__()
 
     def begin_init(self):
         """
         Begin the initialization process for the VAO.
 
         This method must be called before adding any buffers to the VAO.
-        It creates a new OpenGL Vertex Array Object and prepares it for
-        buffer attachment.
+        It validates the OpenGL context and prepares for buffer attachment.
+        On first call, it creates a VAO for the current context. On subsequent
+        calls, it allows re-initialization for additional contexts.
 
         Raises:
-            ValueError: If the VAO is already initialized or initializing
+            ValueError: If the VAO is already initializing
             RuntimeError: If no valid OpenGL context is current
         """
-        if self._initialized:
-            raise ValueError("VAO already initialized")
-        if self._intializing:
-            raise ValueError("VAO already initializing")
+        # Call parent to set up state
+        super().begin_init()
 
-        # Validate that we have an active OpenGL context before creating VAO
-        
-        context = QOpenGLContext.currentContext()
-        if not context or not context.isValid():
-            raise RuntimeError(
-                "InstancedVAO.begin_init() requires an active OpenGL context. "
-                "This error often manifests as 'Out of Memory' in PyQt6. "
-                "Ensure the context is current before creating VAO objects."
-            )
+        # If this is the first initialization, create a VAO for the current context
+        if not self.is_initialized:
+            context = QOpenGLContext.currentContext()
+            try:
+                vao_id = gl.glGenVertexArrays(1)
+                if vao_id == 0:
+                    raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
+                raise_on_error("after glGenVertexArrays in begin_init", RuntimeError("glGenVertexArrays failed"))
 
-        self._intializing = True
+                self._context_vaos[context] = vao_id
+                gl.glBindVertexArray(vao_id)
+                raise_on_error("after glBindVertexArray in begin_init")
 
-        self._buffers = set()
-
-        # For PyQt6 with OpenGL 4.1+ Core Profile, use raw OpenGL VAO directly
-        # QOpenGLVertexArrayObject has issues with context sharing in some configurations
-        try:
-            self._vao = gl.glGenVertexArrays(1)
-            if self._vao == 0:
-                raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
-            raise_on_error("after glGenVertexArrays in begin_init", RuntimeError("glGenVertexArrays failed"))
-            
-            gl.glBindVertexArray(self._vao)
-            raise_on_error("after glBindVertexArray in begin_init")
-                
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to create VAO using glGenVertexArrays: {e}. "
-                f"This usually indicates no valid OpenGL context is current, "
-                f"or the OpenGL driver is in an error state."
-            ) from e
-
-        # Commented code preserved for reference
-        # self.gl_funcs.glBufferData(
-        #     gl.GL_ELEMENT_ARRAY_BUFFER,
-        #     self._indicies,
-        #     gl.GL_STATIC_DRAW
-        # )
-        # self.gl_funcs.glBindVertexArray(self._vao)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to create VAO using glGenVertexArrays: {e}. "
+                    f"This usually indicates no valid OpenGL context is current, "
+                    f"or the OpenGL driver is in an error state."
+                ) from e
 
     def end_init(self):
         """
         Complete the initialization process for the VAO.
 
         This method must be called after adding all buffers to the VAO.
-        It finalizes the VAO configuration and validates that all required
-        buffers have been added.
+        It finalizes the VAO configuration and stores it for lazy creation
+        in other contexts.
 
         Raises:
-            ValueError: If the VAO is not initializing, is already initialized,
-                       has no index buffer, has no buffers, or is not valid
+            ValueError: If the VAO is not initializing, has no index buffer,
+                       or has no buffers
         """
-        if not self._intializing:
-            raise ValueError("VAO not initializing")
-        if self._initialized:
-            raise ValueError("VAO already initialized")
-        if not self._index_buffer:
-            raise ValueError("Index buffer not added to VAO")
-        if len(self._buffers) == 0:
-            raise ValueError("No buffers added to VAO")
-
-        self._intializing = False
-        self._initialized = True
+        # Call parent to finalize initialization
+        super().end_init()
 
         # Unbind the VAO (cleanup code - use check_for_error to log and clear)
         try:
@@ -193,20 +137,21 @@ class InstancedVAO:
                                           in the vertex buffer
 
         Raises:
-            ValueError: If the VAO is not initializing or is already initialized
+            ValueError: If the VAO is not initializing
         """
         raise_on_error("before glGenBuffers in add_index_buffer")
-        if not self._intializing:
+        if not self._initializing:
             raise ValueError("VAO not initializing")
-        if self._initialized:
-            raise ValueError("VAO already initialized")
 
-        self._indicies = indicies
-        self._index_buffer = gl.glGenBuffers(1)
+        # Store indices for lazy VAO creation
+        self._indices = indicies
+
+        # Create index buffer
+        self._index_buffer_id = gl.glGenBuffers(1)
         raise_on_error("after glGenBuffers in add_index_buffer")
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer_id)
         raise_on_error("after glBindBuffer(GL_ELEMENT_ARRAY_BUFFER) in add_index_buffer")
-        # Convert numpy array to bytes for PyQt's OpenGL functions  
+        # Convert numpy array to bytes for PyQt's OpenGL functions
         gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indicies, gl.GL_STATIC_DRAW)
         raise_on_error("after glBufferData in add_index_buffer")
 
@@ -223,14 +168,11 @@ class InstancedVAO:
                              per-instance data.
 
         Raises:
-            ValueError: If the VAO is not initializing, is already initialized,
-                       or if the buffer has already been added
+            ValueError: If the VAO is not initializing or if the buffer has already been added
         """
-        raise_on_error("before glGenBuffers in add_buffer")
-        if not self._intializing:
+        raise_on_error("before add_buffer")
+        if not self._initializing:
             raise ValueError("VAO not initializing")
-        if self._initialized:
-            raise ValueError("VAO already initialized")
 
         if buffer in self._buffers:
             raise ValueError("Buffer already added to VAO")
@@ -240,59 +182,46 @@ class InstancedVAO:
         buffer.layout.add_vertex_attributes()
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
 
-    def bind(self) -> bool:
+    def _create_vao_for_context(self, context: QOpenGLContext) -> int:
         """
-        Bind the VAO to the current OpenGL context for rendering.
+        Create a VAO for the specified context using stored configuration.
 
-        This method makes the VAO active for subsequent rendering operations.
+        This method creates and configures a VAO for a specific context using
+        the stored buffer and index configuration.
+
+        Args:
+            context (QOpenGLContext): The OpenGL context to create the VAO for
 
         Returns:
-            bool: True if the VAO was successfully bound, False otherwise
-        """
-        try:
-            gl.glBindVertexArray(self._vao)
-            raise_on_error("after glBindVertexArray in bind")
-            return True
-        except Exception as e:
-            print(f"Error binding VAO: {e}")
-            return False
+            int: The OpenGL VAO ID
 
-    def unbind(self):
+        Raises:
+            RuntimeError: If VAO creation fails
         """
-        Unbind the VAO from the current OpenGL context.
+        # Create VAO
+        vao_id = gl.glGenVertexArrays(1)
+        if vao_id == 0:
+            raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
+        raise_on_error("after glGenVertexArrays in _create_vao_for_context")
 
-        This method deactivates the VAO for subsequent rendering operations
-        by binding VAO 0 (no VAO).
-        """
-        # Handle QOpenGLVertexArrayObject differently than raw VAO IDs
-        if isinstance(self._vao, QtOpenGL.QOpenGLVertexArrayObject):
-            self._vao.release()
-        else:
-            try:
-                gl.glBindVertexArray(0)
-            except Exception as e:
-                print(f"Warning: Error unbinding VAO: {e}")
-        pyre.gl_engine.helpers.raise_on_error()
+        # Bind and configure the VAO
+        gl.glBindVertexArray(vao_id)
+        raise_on_error("after glBindVertexArray in _create_vao_for_context")
 
-    def __del__(self):
-        """
-        Clean up OpenGL resources when the object is deleted.
+        # Add all buffers from stored configuration
+        if self._vao_config:
+            for buffer in self._vao_config['buffers']:
+                gl.glBindBuffer(gl.GL_ARRAY_BUFFER, buffer.buffer)
+                raise_on_error("after glBindBuffer in _create_vao_for_context")
+                buffer.layout.add_vertex_attributes()
 
-        This destructor ensures that the VAO and index buffer are properly
-        deleted when the object is garbage collected, preventing OpenGL
-        resource leaks.
-        """
-        if self._vao is not None:
-            # Handle QOpenGLVertexArrayObject differently than raw VAO IDs
-            if isinstance(self._vao, QtOpenGL.QOpenGLVertexArrayObject):
-                self._vao.destroy()
-            else:
-                gl.glDeleteVertexArrays(1, [self._vao])
-            raise_on_error("after glDeleteVertexArrays in __del__")
-            self._vao = None
-            
+        # Bind index buffer (shared across contexts)
+        if self._index_buffer_id is not None:
+            gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer_id)
+            raise_on_error("after glBindBuffer(GL_ELEMENT_ARRAY_BUFFER) in _create_vao_for_context")
 
-        if self._index_buffer is not None:
-            self.gl_funcs.glDeleteBuffers(1, [self._index_buffer])
-            raise_on_error("after glDeleteVertexArrays in __del__")
-            self._index_buffer = None
+        # Unbind
+        gl.glBindVertexArray(0)
+        check_for_error("after glBindVertexArray(0) in _create_vao_for_context")
+
+        return vao_id

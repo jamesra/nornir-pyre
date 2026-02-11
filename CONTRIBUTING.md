@@ -112,6 +112,10 @@ When working with OpenGL components:
 2. Use the GLContextManager for managing OpenGL contexts
 3. Follow the established patterns for shader and texture management
 4. Test on multiple platforms and graphics hardware when possible
+5. **IMPORTANT**: Follow the OpenGL error handling rules in `OPENGL_ERROR_HANDLING_RULES.md`
+   - Never add loops that clear errors without reporting them
+   - Use `raise_on_error()` for critical operations
+   - Use `check_for_error()` for cleanup/error handlers
 
 ## Documentation
 
