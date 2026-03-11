@@ -4,7 +4,7 @@ from dependency_injector import containers
 
 from nornir_imageregistration import PointLike
 from typing import Callable
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.selection_event_data import InputModifiers, SelectionEventData, InputEvent
 from pyre.settings import AppSettings, UISettings
 from pyre.viewmodels.controlpointmap import ControlPointMap

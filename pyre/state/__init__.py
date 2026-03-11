@@ -6,7 +6,8 @@ from dependency_injector.wiring import Provide, inject
 
 from pyre.state.managers.image_manager import ImageManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
-from pyre.state.managers.transformcontroller_glbuffer_manager import TransformControllerGLBufferManager
+from pyre.controllers import TransformController
+from pyre.state.managers.transform_controller_glbuffer_manager import TransformControllerGLBufferManager
 from .events import *
 from .imageloader import ImageLoader
 from .managers import *
@@ -19,9 +20,31 @@ from ..settings import ImageAndMaskPath
 
 # The global gl_context_manager
 
-
+# Module-level state; prefer get_current_stos_config/set_current_stos_config (and mosaic) for testability.
 currentStosConfig = None  # type: StosState
 currentMosaicConfig = None  # type: MosaicState
+
+
+def get_current_stos_config() -> StosState | None:
+    """Return the current STOS config. Use set_current_stos_config() in tests to inject a mock."""
+    return currentStosConfig
+
+
+def set_current_stos_config(config: StosState | None) -> None:
+    """Set the current STOS config. Used by launcher and tests."""
+    global currentStosConfig
+    currentStosConfig = config
+
+
+def get_current_mosaic_config() -> MosaicState | None:
+    """Return the current mosaic config. Use set_current_mosaic_config() in tests to inject a mock."""
+    return currentMosaicConfig
+
+
+def set_current_mosaic_config(config: MosaicState | None) -> None:
+    """Set the current mosaic config. Used by launcher and tests."""
+    global currentMosaicConfig
+    currentMosaicConfig = config
 
 
 def init():

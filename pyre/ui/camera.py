@@ -194,8 +194,8 @@ class Camera(IReadOnlyCamera):
     def translate(self, delta: nornir_imageregistration.PointLike):
         """translate the camera by the specified amount"""
         # print("Translate X: %g Y: %g" % (delta[1], delta[0]))
-        delta = nornir_imageregistration.EnsureArray(delta, int)
-        self.lookat += delta
+        delta = nornir_imageregistration.EnsureArray(delta, float)
+        self.lookat = self.lookat + delta
 
     @property
     def lookat(self) -> NDArray[float]:
@@ -229,8 +229,7 @@ class Camera(IReadOnlyCamera):
         return self._view_proj
 
     def focus(self, win_width: int, win_height: int):
-
-        self.WindowSize = (win_height, win_width)
+        self.window_size = (win_height, win_width)
 
         aspect = self.aspect
 

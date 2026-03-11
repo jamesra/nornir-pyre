@@ -15,8 +15,7 @@ from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet
 from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair, SelectionEventKey
-from pyre.command_interfaces import ICommand, IInstantCommand
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import ICommand, IInstantCommand, StatusChangeCallback
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IControlPointMapManager, \
     IControlPointActionMap, ControlPointManagerKey
 from pyre.controllers import TransformController

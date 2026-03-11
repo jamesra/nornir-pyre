@@ -24,7 +24,8 @@ The nornir-pyre package is organized into several key modules:
 * **pyre.gl_engine**: OpenGL rendering engine for high-performance image visualization
 * **pyre.ui**: User interface components built with PyQt6
 * **pyre.views**: View implementations for different visualization modes
-* **pyre.state**: State management and controllers
+* **pyre.state**: State management and manager implementations
+* **pyre.controllers**: Active transform (and similar) state/behavior used by the UI and commands (e.g. TransformController)
 * **pyre.commands**: Command pattern implementations for operations
 * **pyre.interfaces**: Interface definitions for dependency injection
 

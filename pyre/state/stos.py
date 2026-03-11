@@ -1,6 +1,9 @@
 import concurrent.futures
 from dataclasses import dataclass
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 import numpy
 import numpy as np
@@ -38,14 +41,15 @@ def LoadImage(imageFullPath: str) -> ImageViewModel | None:
         return ImageViewModel(imageFullPath)
     except IOError as e:
         if not os.path.isfile(imageFullPath):
-            print("Image passed to load image does not exist: " + imageFullPath)
+            logger.error("Image passed to load image does not exist: %s", imageFullPath)
         else:
-            print(f"Exception opening {imageFullPath}:\n{e}")
+            logger.exception("Exception opening %s", imageFullPath)
 
         return None
 
 
 def param_to_stosfile(input: str | StosFile) -> StosFile:
+    """Return a StosFile from a path string or pass through an existing StosFile. Raises ValueError for other types."""
     if isinstance(input, str):
         return StosFile.Load(input)
     elif isinstance(input, StosFile):
@@ -115,7 +119,7 @@ class StosState(StateEventsImpl):
 
     @property
     def TransformController(self) -> TransformController:
-        """The stos transform we are editting."""
+        """The stos transform we are editing."""
         return self._transform_controller
 
     @property

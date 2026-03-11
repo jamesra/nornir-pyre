@@ -222,14 +222,24 @@ def _texture_coordinates(points_yx: NDArray[np.floating],
                          bounding_rect: nornir_imageregistration.Rectangle) -> NDArray[np.floating]:
     """
     Given a set of points inside a bounding rectangle that represents the texture space,
-     return the texture coordinates for each point
+     return the texture coordinates for each point.
+    Uses a half-texel offset so we sample texel centers instead of edges; avoids corner
+    artifacts (noise at tile boundaries) when filtering with LINEAR or MIPMAP.
+    Coordinates are inset so we never sample exactly on 0 or 1, reducing visible seams
+    between adjacent tiles at low zoom.
     :param points_yx: Points to generate texture coordinates for
     :param bounding_rect: Bounding rectangle for the texture space
     :return: texture coordinates for a rectangle in fixed (source) space
     """
-    texture_points = (points_yx - np.array(bounding_rect.BottomLeft)) / bounding_rect.Size
-
-    # Need to convert texture coordinates to X,Y coordinates
+    size = np.array(bounding_rect.Size, dtype=np.float64)
+    # +0.5 so the first texel center is at (0.5/w, 0.5/h) instead of sampling at (0,0) edge
+    texture_points = (points_yx - np.array(bounding_rect.BottomLeft) + 0.5) / size
+    # Keep UVs strictly inside [0,1] by a half-texel inset to avoid sampling tile edges
+    # (shared boundaries between tiles can produce seams with CLAMP_TO_BORDER at low zoom)
+    half_texel = 0.5 / size
+    np.clip(texture_points[:, 0], half_texel[0], 1.0 - half_texel[0], out=texture_points[:, 0])
+    np.clip(texture_points[:, 1], half_texel[1], 1.0 - half_texel[1], out=texture_points[:, 1])
+    # Need to convert texture coordinates to X,Y coordinates (u, v) for the shader
     texture_points = np.fliplr(texture_points)
     return texture_points
 
@@ -240,9 +250,9 @@ def _render_data_for_transform_point_pairs(point_pairs: NDArray[np.floating],
                                            z: float | None = None,
                                            ) -> tuple[NDArray[np.floating], NDArray[np.uint16]]:
     """
-    Generate verticies (source, target and texture coordinates) for a set of transform points and the
-    indicies to render them as triangles
-    :return: Verts3D, indicies, Verts3d is Source (X,Y,Z), Target (X,Y,Z), Texture (U,V)
+    Generate vertices (source, target and texture coordinates) for a set of transform points and the
+    indices to render them as triangles
+    :return: Verts3D, indices, Verts3d is Source (X,Y,Z), Target (X,Y,Z), Texture (U,V)
     """
 
     fixed_points_yx, warped_points_yx = np.hsplit(point_pairs, 2)
@@ -312,7 +322,7 @@ def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,
                                 texture_size: tuple[int, int],
                                 space: Space) -> tuple[NDArray[np.floating], NDArray[np.integer]]:
     """
-    Given a grid coordinate, return the verticies and indicies to render the tile.
+    Given a grid coordinate, return the vertices and indices to render the tile.
     These are usually fed into a GLBuffer.
     """
     ix, iy = grid_coords
@@ -340,7 +350,7 @@ def collect_verticies_within_bounding_box(
         transform: nornir_imageregistration.ITransform,
         image_space: Space) -> NDArray[np.floating]:
     """
-    Given a bounding rectangle defined in the "space" parameter, return all verticies that we want to use for rendering.
+    Given a bounding rectangle defined in the "space" parameter, return all vertices that we want to use for rendering.
     This should be the boundaries of the box, control points falling within the box, and
     a regular grid of points across the box to ensure any distortion from a non-linear transform
     is properly represented.
@@ -372,7 +382,7 @@ def collect_vertex_locations_within_bounding_box_after_transformation(
         forward_transform: bool) \
         -> NDArray[np.floating]:
     """
-    Given a bounding box rectangle, return all verticies that we want to use for rendering.
+    Given a bounding box rectangle, return all vertices that we want to use for rendering.
     This should be the boundaries of the box, control points falling within the box, and
     a regular grid of points across the box to ensure any distortion from a non-linear transform
     is properly represented.

@@ -4,7 +4,7 @@ from typing import Sequence, TypeVar, Generic, Callable, Iterable
 
 T = TypeVar('T')
 
-"""The observer function signature.  It does its best to notify which action was taken and which indicies were affected if relevant"""
+"""The observer function signature.  It does its best to notify which action was taken and which indices were affected if relevant"""
 ListObserverCallable = Callable[['ObservableList[T]', ObservedAction, Iterable[int] | None], None]
 
 

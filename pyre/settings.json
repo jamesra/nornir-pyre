@@ -12,7 +12,7 @@
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": null,
+        "stos_filename": "Y:/Volumes/RC2/TEM/Grid16/406-407_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -34,7 +34,13 @@
                 "angle_step_size": 1.0
             }
         },
-        "source_image": null,
-        "target_image": null
+        "source_image": {
+            "image_fullpath": "y:/Volumes/rc2/TEM/0406/TEM/Leveled/Images/016\\0406_TEM_Leveled.png",
+            "mask_fullpath": "y:\\Volumes\\rc2\\TEM\\0406\\TEM\\Mask\\Images\\016\\0406_TEM_Mask.png"
+        },
+        "target_image": {
+            "image_fullpath": "y:/Volumes/rc2/TEM/0407/TEM/Leveled/Images/016\\0407_TEM_Leveled.png",
+            "mask_fullpath": "y:\\Volumes\\rc2\\TEM\\0407\\TEM\\Mask\\Images\\016\\0407_TEM_Mask.png"
+        }
     }
 }

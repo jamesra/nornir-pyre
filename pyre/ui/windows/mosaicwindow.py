@@ -70,6 +70,9 @@ class MosaicWindow(PyreWindowBase):
         dialog.setNameFilter("Mosaic files (*.mosaic)")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
+        mosaic_config = state.get_current_mosaic_config()
+        if mosaic_config is None:
+            return
         if dialog.exec() == QFileDialog.DialogCode.Accepted:
             # Get selected file
             selected_files = dialog.selectedFiles()
@@ -80,7 +83,7 @@ class MosaicWindow(PyreWindowBase):
                 MosaicWindow.mosaicfilename = filename
 
                 # Load mosaic
-                ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(filepath)
+                ImageTransformViewList = mosaic_config.LoadMosaic(filepath)
                 if ImageTransformViewList is None:
                     # Prompt for UI to choose tiles directory
                     tiles_dir_dialog = QFileDialog(self)
@@ -92,7 +95,7 @@ class MosaicWindow(PyreWindowBase):
                         selected_dirs = tiles_dir_dialog.selectedFiles()
                         if selected_dirs:
                             tiles_dir = selected_dirs[0]
-                            ImageTransformViewList = state.currentMosaicConfig.LoadMosaic(filepath, tiles_dir=tiles_dir)
+                            ImageTransformViewList = mosaic_config.LoadMosaic(filepath, tiles_dir=tiles_dir)
 
                 # Set the image transform view list
                 self.mosaicpanel.ImageTransformViewList = ImageTransformViewList

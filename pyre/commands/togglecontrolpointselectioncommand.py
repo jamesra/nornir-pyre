@@ -13,7 +13,7 @@ from pyre.observable import SetOperation
 import nornir_imageregistration
 import pyre
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, UICommandBase, NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ControlPointManagerKey, \
     IControlPointMapManager

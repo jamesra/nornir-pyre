@@ -41,7 +41,7 @@ class BinarySelectionMapper:
         if np.any(index >= length):
             raise ValueError("index is out of bounds")
 
-        # Set the values at the indicies to true
+        # Set the values at the indices to true
         selected[index] = True
         self._setter(selected)
 
@@ -185,9 +185,9 @@ class TransformControllerView:
         if value.dtype == np.integer:
             if max(value) >= self._controlpoint_view.num_textures:
                 raise ValueError(
-                    "Selected array of integer values contains indicies larger than the number of textures in texture array")
+                    "Selected array of integer values contains indices larger than the number of textures in texture array")
             if min(value) < 0:
-                raise ValueError("Selected array of integer values contains indicies that are negative")
+                raise ValueError("Selected array of integer values contains indices that are negative")
 
         self._controlpoint_view.texture_index = value.astype(np.uint16)
 

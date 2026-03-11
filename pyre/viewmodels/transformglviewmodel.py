@@ -17,7 +17,7 @@ class TransformGLViewModel:
 
     @property
     def TransformModel(self) -> nornir_imageregistration.ITransform:
-        """The transform this controller is editting"""
+        """The transform this controller is editing"""
         return self._transform_model
 
     @TransformModel.setter

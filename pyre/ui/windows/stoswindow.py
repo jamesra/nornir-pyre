@@ -283,28 +283,34 @@ class StosWindow(PyreWindowBase):
 
     def onClearAllPoints(self):
         """Handle Clear All Points action"""
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
         sourceImageView = self._imageviewmodel_manager[ViewType.Source]
         targetImageView = self._imageviewmodel_manager[ViewType.Target]
         self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(
-            pyre.state.currentStosConfig.TransformType,
+            config.TransformType,
             sourceImageView.Image.shape,
             targetImageView.Image.shape)
 
     def onClearMaskedPoints(self):
         """Handle Clear Masked Points action"""
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
         if not (
-                pyre.state.currentStosConfig.FixedImageMaskViewModel is None or pyre.state.currentStosConfig.WarpedImageMaskViewModel is None):
+                config.FixedImageMaskViewModel is None or config.WarpedImageMaskViewModel is None):
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image,
-                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
+                                          config.FixedImageMaskViewModel.Image,
+                                          config.WarpedImageMaskViewModel.Image)
 
-        elif not pyre.state.currentStosConfig.FixedImageMaskViewModel is None:
+        elif config.FixedImageMaskViewModel is not None:
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image, None)
+                                          config.FixedImageMaskViewModel.Image, None)
 
-        elif not pyre.state.currentStosConfig.WarpedImageMaskViewModel is None:
+        elif config.WarpedImageMaskViewModel is not None:
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,
-                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
+                                          config.WarpedImageMaskViewModel.Image)
 
     def onFlipImage(self):
         """Handle Flip Image action"""
@@ -351,9 +357,11 @@ class StosWindow(PyreWindowBase):
         if dialog.exec() == QFileDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                filename = selected_files[0]
-                StosWindow.imagedirname = os.path.dirname(filename)
-                pyre.state.currentStosConfig.LoadFixedImage(filename)
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.LoadFixedImage(filename)
 
     def onOpenWarpedImage(self):
         """Handle Open Warped Image action"""
@@ -366,9 +374,11 @@ class StosWindow(PyreWindowBase):
         if dialog.exec() == QFileDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                filename = selected_files[0]
-                StosWindow.imagedirname = os.path.dirname(filename)
-                pyre.state.currentStosConfig.LoadWarpedImage(filename)
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.LoadWarpedImage(filename)
 
     def onOpenFixedImageMask(self):
         """Handle Open Fixed Image Mask action"""
@@ -381,10 +391,11 @@ class StosWindow(PyreWindowBase):
         if dialog.exec() == QFileDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                filename = selected_files[0]
-                StosWindow.imagedirname = os.path.dirname(filename)
-                pyre.state.currentStosConfig.FixedImageMaskViewModel = state.currentStosConfig.LoadFixedMaskImage(
-                    filename)
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)
 
     def onOpenWarpedImageMask(self):
         """Handle Open Warped Image Mask action"""
@@ -397,14 +408,16 @@ class StosWindow(PyreWindowBase):
         if dialog.exec() == QFileDialog.DialogCode.Accepted:
             selected_files = dialog.selectedFiles()
             if selected_files:
-                filename = selected_files[0]
-                StosWindow.imagedirname = os.path.dirname(filename)
-                pyre.state.currentStosConfig.WarpedImageMaskViewModel = state.currentStosConfig.LoadWarpedMaskImage(
-                    filename)
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)
 
     def onOpenStos(self):
         """Handle Open Stos File action"""
-        dirname = pyre.state.currentStosConfig.stosdirname
+        config = pyre.state.get_current_stos_config()
+        dirname = config.stosdirname if config is not None else ''
         dialog = QFileDialog(self)
         dialog.setWindowTitle("Choose a file")
         dialog.setDirectory(dirname)
@@ -444,8 +457,10 @@ class StosWindow(PyreWindowBase):
 
     def onSaveWarpedImage(self):
         """Handle Save Warped Image action"""
-        if not (
-                pyre.state.currentStosConfig.FixedImageViewModel is None or pyre.state.currentStosConfig.WarpedImageViewModel is None):
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
+        if not (config.FixedImageViewModel is None or config.WarpedImageViewModel is None):
             dialog = QFileDialog(self)
             dialog.setWindowTitle("Choose a Directory")
             dialog.setDirectory(StosWindow.imagedirname)
@@ -457,14 +472,14 @@ class StosWindow(PyreWindowBase):
                 if selected_files:
                     StosWindow.imagedirname = os.path.dirname(selected_files[0])
                     self.filename = os.path.basename(selected_files[0])
-                    pyre.state.currentStosConfig.OutputImageFullPath = selected_files[0]
+                    config.OutputImageFullPath = selected_files[0]
 
                     pool = pools.GetGlobalThreadPool()
-                    pool.add_task("Save " + pyre.state.currentStosConfig.OutputImageFullPath,
+                    pool.add_task("Save " + config.OutputImageFullPath,
                                   pyre.common.SaveRegisteredWarpedImage,
-                                  pyre.state.currentStosConfig.OutputImageFullPath,
-                                  pyre.state.currentStosConfig.Transform,
-                                  pyre.state.currentStosConfig.WarpedImageViewModel.Image)
+                                  config.OutputImageFullPath,
+                                  config.Transform,
+                                  config.WarpedImageViewModel.Image)
 
     def onSaveStos(self):
         """Handle Save Stos File action"""

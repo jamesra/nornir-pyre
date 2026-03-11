@@ -51,9 +51,11 @@ class IImageTransformView(ABC):
              view_proj: NDArray[np.floating],
              space: Space,
              client_size: tuple[int, int],
-             bounding_box: nornir_imageregistration.Rectangle | None = None):
+             bounding_box: nornir_imageregistration.Rectangle | None = None,
+             default_fbo: int | None = None):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param client_size: Size of the client area in pixels. (height, width)
+        :param default_fbo: Widget's default framebuffer (QOpenGLWidget uses an internal FBO; pass widget.defaultFramebufferObject() so overlay draws to screen).
         """
         raise NotImplementedError()

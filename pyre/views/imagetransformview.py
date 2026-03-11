@@ -254,13 +254,15 @@ class ImageTransformView(IImageTransformView):
              view_proj: NDArray[np.floating],
              space: pyre.Space,
              client_size: tuple[int, int],
-             bounding_box: nornir_imageregistration.Rectangle | None = None):
+             bounding_box: nornir_imageregistration.Rectangle | None = None,
+             default_fbo: int | None = None):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param view_proj:
         :param space:
         :param client_size:
         :param bounding_box: Size of the client area in pixels. (height, width)
+        :param default_fbo: Ignored for single-image views; used by composite view for overlay target.
         :return:
         """
 

@@ -96,7 +96,7 @@ action_command_dp_map = providers.Dict({
 })
 
 # This map determines which actions can be taken for a mouse position given the current transform type
-# transfom_control_point_action_maps: providers.Aggregate[providers.Factory[IControlPointActionMap]] = \
+# transform_control_point_action_maps: providers.Aggregate[providers.Factory[IControlPointActionMap]] = \
 #     providers.Aggregate({
 #         TransformType.GRID: providers.Factory(GridTransformActionMap),
 #         TransformType.MESH: providers.Factory(TriangulationTransformActionMap),

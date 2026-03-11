@@ -10,7 +10,7 @@ import nornir_imageregistration
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback, ICommand
+from pyre.interfaces import StatusChangeCallback, ICommand
 from pyre.commands import NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer

@@ -3,7 +3,11 @@ Created on Oct 16, 2012
 
 @author: u0490822
 '''
+import logging
+import tempfile
 from typing import Iterable
+
+logger = logging.getLogger(__name__)
 
 from dependency_injector.wiring import Provide, inject
 import numpy
@@ -19,56 +23,55 @@ from pyre.container import IContainer
 from pyre.interfaces.managers import IImageManager
 from pyre.interfaces.managers.command_history import ICommandHistory
 from pyre.controllers.transformcontroller import TransformController
+from pyre.interfaces.viewtype import ViewType
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistration.ITransform, warpedImage: NDArray):
-    # registeredImage = assemble.WarpedImageToFixedSpace(transform, Config.FixedImageArray.Image.shape, Config.WarpedImageArray.Image)
+    """Save the warped image registered into fixed space to a file. Uses current STOS config for fixed shape."""
+    config = pyre.state.get_current_stos_config()
+    if config is None:
+        raise RuntimeError("No current STOS config")
     registeredImage = AssembleHugeRegisteredWarpedImage(transform,
-                                                        pyre.state.currentStosConfig.FixedImageViewModel.Image.shape,
-                                                        pyre.state.currentStosConfig.WarpedImageViewModel.Image)
+                                                        config.FixedImageViewModel.Image.shape,
+                                                        config.WarpedImageViewModel.Image)
 
-    nornir_imageregistration.ImageSave(fileFullPath, registeredImage)
+    nornir_imageregistration.SaveImage(fileFullPath, registeredImage)
 
 
 def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray,
                                       warpedImage: NDArray):
-    '''Cut image into tiles, assemble small chunks'''
-
+    """Apply transform to warped image and assemble into fixed space. Cuts image into tiles for large data."""
     return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
 
 
-def SyncWindows(LookAt, scale: float):
-    '''Make all windows look at the same spot with the same magnification, LookAt point should be in fixed space'''
-    #    Config.CompositeWin.camera.x = LookAt[0]
-    #    Config.CompositeWin.camera.y = LookAt[1]
-    #    Config.CompositeWin.camera.scale = scale
-    pyre.Windows['Composite'].imagepanel.camera.x = LookAt[0]
-    pyre.Windows['Composite'].imagepanel.camera.y = LookAt[1]
-    pyre.Windows['Composite'].imagepanel.camera.scale = scale
+def _apply_lookat_to_window(window, lookat, scale: float):
+    """Set a window's camera to the given lookat point and scale."""
+    window.imagepanel.camera.x = lookat[0]
+    window.imagepanel.camera.y = lookat[1]
+    window.imagepanel.camera.scale = scale
 
-    #    Config.FixedWindow.camera.x = LookAt[0]
-    #    Config.FixedWindow.camera.y = LookAt[1]
-    #    Config.FixedWindow.camera.scale = scale
-    pyre.Windows['Fixed'].imagepanel.camera.x = LookAt[0]
-    pyre.Windows['Fixed'].imagepanel.camera.y = LookAt[1]
-    pyre.Windows['Fixed'].imagepanel.camera.scale = scale
 
-    #    warpedLookAt = LookAt
-    #    if(not Config.WarpedWindow.ShowWarped):
-    #        warpedLookAt = Config.CurrentTransform.InverseTransform([LookAt])
-    #        warpedLookAt = warpedLookAt[0]
-
-    warpedLookAt = LookAt
-    if pyre.Windows['Warped'].IsShown():
-        warpedLookAt = pyre.state.currentStosConfig._TransformViewModel.InverseTransform([LookAt])
-        warpedLookAt = warpedLookAt[0]
-
-    #    Config.WarpedWindow.camera.x = warpedLookAt[0]
-    #    Config.WarpedWindow.camera.y = warpedLookAt[1]
-    #    Config.WarpedWindow.camera.scale = scale
-    pyre.Windows['Warped'].imagepanel.camera.x = LookAt[0]
-    pyre.Windows['Warped'].imagepanel.camera.y = LookAt[1]
-    pyre.Windows['Warped'].imagepanel.camera.scale = scale
+def SyncWindows(LookAt, scale: float, window_manager=None):
+    '''Make all windows look at the same spot with the same magnification, LookAt point should be in fixed space.
+    If window_manager is provided, uses ViewType-keyed windows; otherwise uses legacy pyre.Windows.'''
+    if window_manager is not None and ViewType.Composite in window_manager and ViewType.Source in window_manager and ViewType.Target in window_manager:
+        composite_win = window_manager[ViewType.Composite]
+        source_win = window_manager[ViewType.Source]
+        target_win = window_manager[ViewType.Target]
+        for win in (composite_win, source_win, target_win):
+            _apply_lookat_to_window(win, LookAt, scale)
+        if target_win.IsShown():
+            config = pyre.state.get_current_stos_config()
+            if config is not None and config._TransformViewModel is not None:
+                config._TransformViewModel.InverseTransform([LookAt])
+        return
+    # Legacy path: pyre.Windows
+    for key in ("Composite", "Fixed", "Warped"):
+        _apply_lookat_to_window(pyre.Windows[key], LookAt, scale)
+    if pyre.Windows["Warped"].IsShown():
+        config = pyre.state.get_current_stos_config()
+        if config is not None and config._TransformViewModel is not None:
+            config._TransformViewModel.InverseTransform([LookAt])
 
 
 @inject
@@ -77,6 +80,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                settings: nornir_imageregistration.settings.StosBruteSettings,
                                LimitImageSize: bool = False,
                                image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
+    """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
@@ -110,41 +114,48 @@ def RotateTranslateWarpedImage(source_image_key: str,
 
 
 def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefinement | None):
+    """Refine the current STOS transform using grid refinement. Updates TransformController.TransformModel in place."""
     if settings is None:
         return
-
+    config = pyre.state.get_current_stos_config()
+    if config is None:
+        return
     try:
         updatedTransform = nornir_imageregistration.RefineTransform(
-            pyre.state.currentStosConfig.TransformController.TransformModel,
+            config.TransformController.TransformModel,
             settings=settings,
             SaveImages=False,
             SavePlots=True,
-            outputDir="C:\\Temp")
+            outputDir=tempfile.gettempdir())
 
-        pyre.state.currentStosConfig.TransformController.TransformModel = updatedTransform
+        config.TransformController.TransformModel = updatedTransform
         # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,
     #                               pyre.state.currentStosConfig._transform_controller.points)
     except Exception as e:
-        print(f"Exception running grid refinement:\n{e}")
+        logger.exception("Exception running grid refinement")
         raise
 
 
 @inject
 def LinearBlendTransform(blend_factor: float,
                          command_history: ICommandHistory = Provide[IContainer.command_history]):
-    if not isinstance(pyre.state.currentStosConfig.Transform, nornir_imageregistration.transforms.IControlPoints):
-        print("Linear blend requires control point based transform")
+    """Blend the current control-point transform toward linear by blend_factor; saves state for undo."""
+    config = pyre.state.get_current_stos_config()
+    if config is None:
+        return
+    if not isinstance(config.Transform, nornir_imageregistration.transforms.IControlPoints):
+        logger.warning("Linear blend requires control point based transform")
         return
 
-    command_history.SaveState(pyre.state.currentStosConfig.TransformController.__setattr__,
+    command_history.SaveState(config.TransformController.__setattr__,
                               'TransformModel',
-                              pyre.state.currentStosConfig.TransformController.TransformModel)
+                              config.TransformController.TransformModel)
 
     updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(
-        pyre.state.currentStosConfig.Transform,
+        config.Transform,
         blend_factor, ignore_rotation=False)
 
-    pyre.state.currentStosConfig.TransformController.TransformModel = updated_transform
+    config.TransformController.TransformModel = updated_transform
     print(f"Linear blend completed for blend value {blend_factor}")
 
 
@@ -187,6 +198,7 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
                            target_controlpoint,
                            alignmentArea: NDArray | tuple[float, float],
                            anglesToSearch: Iterable[float]):
+    """Start an async alignment attempt for one control point. Returns None if ROI is masked; otherwise returns the task."""
     if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
         return None
 
@@ -196,7 +208,6 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
         else:
             pool = nornir_pools.GetGlobalLocalMachinePool()
 
-    '''Try to use the Composite view to render the two tiles we need for alignment'''
     task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,
                                                                                        task_description,
                                                                                        transform=transform,

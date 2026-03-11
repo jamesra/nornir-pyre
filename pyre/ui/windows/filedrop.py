@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 
 from pyre import state
+from pyre.interfaces.viewtype import ViewType
 
 
 class FileDrop:
@@ -44,24 +45,30 @@ class FileDrop:
     
     def processDroppedFiles(self, filenames):
         """Process the dropped files"""
+        config = state.get_current_stos_config()
+        if config is None:
+            QMessageBox.warning(self.window, "Not ready", "No STOS session is active.")
+            return True
         for fullpath in filenames:
             try:
                 dirname, filename = os.path.split(fullpath)
                 root, extension = os.path.splitext(fullpath)
                 
                 if extension == ".stos":
-                    state.currentStosConfig.stosdirname = dirname
-                    state.currentStosConfig.stosfilename = filename
-                    state.currentStosConfig.LoadStos(fullpath)
+                    config.stosdirname = dirname
+                    config.stosfilename = filename
+                    config.LoadStos(fullpath)
                 elif extension == ".mosaic":
-                    state.currentStosConfig.stosdirname = dirname
-                    state.currentStosConfig.stosfilename = filename
-                    state.currentStosConfig.LoadMosaic(fullpath)
+                    config.stosdirname = dirname
+                    config.stosfilename = filename
+                    config.LoadMosaic(fullpath)
                 else:
-                    if self.window.ID == "Fixed":
-                        state.currentStosConfig.LoadFixedImage(fullpath)
-                    elif self.window.ID == "Warped":
-                        state.currentStosConfig.LoadWarpedImage(fullpath)
+                    # Prefer ViewType (StosWindow has _view_type or ID); fallback to legacy string ID
+                    view_type = getattr(self.window, '_view_type', None) or getattr(self.window, 'ID', None)
+                    if view_type in (ViewType.Source, ViewType.Fixed) or self.window.ID == "Fixed":
+                        config.LoadFixedImage(fullpath)
+                    elif view_type in (ViewType.Target, ViewType.Warped) or self.window.ID == "Warped":
+                        config.LoadWarpedImage(fullpath)
             
             except IOError as error:
                 QMessageBox.critical(self.window, "Error", f"Error opening file\n{str(error)}")

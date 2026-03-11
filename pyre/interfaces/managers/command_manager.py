@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 
 from nornir_imageregistration import PointLike
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.selection_event_data import SelectionEventData
 from pyre.interfaces.managers import IRegion
 from pyre.interfaces.action import ControlPointActionResult

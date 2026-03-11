@@ -8,7 +8,7 @@ from abc import abstractmethod
 import PyQt6.QtOpenGLWidgets
 import numpy as np
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
-from PyQt6.QtCore import Qt, QSize, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, QPoint, pyqtSignal, QTimer
 from PyQt6.QtGui import QResizeEvent, QMouseEvent
 
 from pyre.interfaces.managers import IGLContextManager
@@ -98,6 +98,8 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
         # Create the OpenGL panel
         self._glpanel = glpanel.GLPanel(parent=self,
                                         draw_method=self.draw)
+        # Need mouse move events without a button pressed for cursor updates and hit-testing over control points
+        self._glpanel.setMouseTracking(True)
 
         # Create layout
         self.layout = QVBoxLayout(self)
@@ -144,18 +146,26 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
         return self.camera.ImageCoordsForMouse(y, x)
 
     def on_resize(self, event: QResizeEvent):
-        """Handle resize event"""
-        # Update size after the resize is complete
-        self.update_size()
+        """Handle resize event. Defer update_size so layout has resized _glpanel first."""
+        QTimer.singleShot(0, self.update_size)
 
     def update_size(self):
         """Update the size of the camera and the camera's view of the world"""
         _width, _height = self._glpanel.width(), self._glpanel.height()
-        # self._parent.setFixedSize(_width, _height)
+        # #region agent log
+        try:
+            import json
+            import time
+            from pathlib import Path
+            _logpath = Path(__file__).resolve().parent.parent.parent.parent / "debug-f136c0.log"
+            with open(_logpath, "a", encoding="utf-8") as _f:
+                _f.write(json.dumps({"sessionId": "f136c0", "hypothesisId": "resize", "location": "imagetransformpanelbase.update_size", "message": "glpanel size", "data": {"w": _width, "h": _height}, "timestamp": int(time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         if self.camera is not None and _width > 0 and _height > 0:
-            print(f"Setting window size to {_height}h x {_width}w")
             self.camera.window_size = np.array((_height, _width))
-            self.camera.focus(_height, _width)
+            self.camera.focus(_width, _height)
 
     def getCorrectedMousePosition(self, event: QMouseEvent) -> tuple[float, float]:
         """QT uses a different coordinate system, flip the Y coordinate"""

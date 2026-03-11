@@ -8,7 +8,7 @@ from pyre.observable import ObservableSet, ObservedAction
 import nornir_imageregistration
 import pyre
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase, InstantCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager

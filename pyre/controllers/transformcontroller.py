@@ -170,7 +170,7 @@ class TransformController:
 
     @property
     def TransformModel(self) -> nornir_imageregistration.ITransform:
-        """The transform this controller is editting"""
+        """The transform this controller is editing"""
         return self._TransformModel
 
     @TransformModel.setter
@@ -354,7 +354,7 @@ class TransformController:
         """
         Flip the target points
         """
-        if isinstance(self.TransformModel, nornir_imageregistration.ITransfomFlip):
+        if isinstance(self.TransformModel, nornir_imageregistration.ITransformFlip):
             self.TransformModel.Flip()
         else:
             print("Transform does not support flipping")

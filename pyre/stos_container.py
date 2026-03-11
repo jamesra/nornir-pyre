@@ -9,13 +9,13 @@ from pyre.commands.stos.rigidtransformactionmap import RigidTransformActionMap
 from pyre.interfaces.managers import (ControlPointManagerKey, BufferType)
 from pyre.state.managers.gl_context_manager import GLContextManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
-from pyre.state.managers.mousepositionhistorymanager import MousePositionHistoryManager
+from pyre.state.managers.mouse_position_history_manager import MousePositionHistoryManager
 from pyre.state.managers.region_manager import RegionMap
-from pyre.state.managers.transformcontroller_glbuffer_manager import TransformControllerGLBufferManager
+from pyre.state.managers.transform_controller_glbuffer_manager import TransformControllerGLBufferManager
 from pyre.state.managers.command_history import CommandHistory
 from pyre.state.managers.image_manager import ImageManager
 from pyre.state.managers.window_manager import WindowManager
-from pyre.state.managers.controlpointmapmanager import ControlPointMapManager
+from pyre.state.managers.control_point_map_manager import ControlPointMapManager
 from pyre.state.imageloader import ImageLoader
 from pyre.state import TransformController
 from pyre.observable.oset import ObservableSet
@@ -69,7 +69,7 @@ class StosContainer(containers.DeclarativeContainer):
 
     action_command_map = pyre.commands.container_overrides.action_command_dp_map
     # transform_control_point_action_maps: providers.Aggregate[providers.AbstractFactory[
-    #        IControlPointActionMap]] = pyre.commands.container_overrides.transfom_control_point_action_maps
+    #        IControlPointActionMap]] = pyre.commands.container_overrides.transform_control_point_action_maps
 
     # Friday PM to Monday Morning self:
     # You just figured out you could hand out a provider to a factory to get the dictionary provider to work

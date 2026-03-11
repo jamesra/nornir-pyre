@@ -256,7 +256,7 @@ class ImageViewModel:
         return texture_grid
 
     def generate_grid_indicies(self) -> Generator[tuple[int, int], None, None]:
-        """Yields all of the grid indicies that cover the image"""
+        """Yields all of the grid indices that cover the image"""
         for ix in range(0, self.NumCols):
             for iy in range(0, self.NumRows):
                 yield ix, iy

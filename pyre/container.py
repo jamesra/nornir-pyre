@@ -1,8 +1,11 @@
 from __future__ import annotations
 import abc
+import logging
 import os
 import sys
 import pydantic
+
+logger = logging.getLogger(__name__)
 from typing import Generator
 from importlib import resources
 
@@ -17,7 +20,7 @@ from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, I
                                       IWindowManager, IControlPointMapManager, ControlPointManagerKey, IActionMap)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
-from pyre.command_interfaces import ICommand, IInstantCommand
+from pyre.interfaces import ICommand, IInstantCommand
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
 from pyre.settings import AppSettings
 from pyre.space import Space
@@ -34,47 +37,31 @@ def find_file_in_syspath(filename) -> Generator[str, None, None]:
     return None
 
 
-def load_yaml_settings() -> object:
-    try:
-        current_directory = os.path.dirname(__file__)
-        cwd_config = resources.files('pyre').joinpath('config.yaml')
-        with open(cwd_config, 'r') as file:
-            return yaml.load(file, Loader=yaml.FullLoader)
-    except:
-        print("Failed to load configuration file: " + cwd_config)
-
-    for configuration in find_file_in_syspath('config.yaml'):
-        try:
-            with open(configuration, 'r') as file:
-                return yaml.load(file, Loader=yaml.FullLoader)
-        except:
-            print("Failed to load configuration file: " + configuration)
-
-    print(f"Failed to find config.yaml configuration file in {sys.path}")
-    return AppSettings()
-
-
 def load_json_settings() -> AppSettings:
     try:
-        current_directory = os.path.dirname(__file__)
         cwd_config = resources.files('pyre').joinpath('settings.json')
-        return AppSettings.model_validate_json(cwd_config)
-
+        json_str = cwd_config.read_text(encoding='utf-8')
+        return AppSettings.model_validate_json(json_str)
     except Exception as e:
-        print(f"Failed to load configuration file: {cwd_config}\n{e}")
+        logger.exception("Failed to load configuration file: %s", cwd_config)
 
     for configuration in find_file_in_syspath('settings.json'):
         try:
-            return AppSettings.parse_file(cwd_config)
-        except:
-            print("Failed to load configuration file: " + configuration)
+            with open(configuration, encoding='utf-8') as f:
+                return AppSettings.model_validate_json(f.read())
+        except Exception:
+            logger.warning("Failed to load configuration file: %s", configuration)
 
-    print(f"Failed to find settings.json configuration file in {sys.path}")
+    logger.error("Failed to find settings.json configuration file in %s", sys.path)
     return AppSettings()
 
 
 class IContainer(containers.DeclarativeContainer):
-    """Interface to the dependency injection container for the application components."""
+    """Interface to the dependency injection container for the application components.
+
+    config: dependency_injector Configuration (container-level configuration).
+    settings: Application settings loaded from settings.json (AppSettings, canonical format).
+    """
     config: providers.Configuration = providers.Configuration()
     logger: providers.Resource = None
 

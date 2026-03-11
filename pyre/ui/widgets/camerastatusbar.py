@@ -8,7 +8,7 @@ import nornir_imageregistration
 from pyre.space import Space
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
 import pyre.controllers.transformcontroller
-from pyre.interfaces.managers.mousepositionhistorymanager import IMousePositionHistoryManager
+from pyre.interfaces.managers.mouse_position_history_manager import IMousePositionHistoryManager
 from pyre.container import IContainer
 
 

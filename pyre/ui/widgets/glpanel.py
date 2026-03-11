@@ -203,11 +203,10 @@ class GLPanel(QOpenGLWidget):
 
         if self._gl_funcs is None:
             return
-        
-        
-        # Check for errors from previous operations - this will raise if there's an error
-        # This helps us find what's causing GL_INVALID_ENUM at the start of paintGL
-        check_for_error("at start of paintGL - checking for prior errors")
+
+        # Clear any stale errors from previous frame so we don't report or carry them
+        while gl.glGetError() != gl.GL_NO_ERROR:
+            pass
 
         # Activate context and verify it's current
         self.activate_context()
@@ -251,14 +250,22 @@ class GLPanel(QOpenGLWidget):
 
         # draw objects - wrap in error handling 
         self._draw_method()
-         
+
+        # Reset GL state so Qt's swapBuffers() does not see an invalid state (avoids GL_INVALID_ENUM on some drivers)
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+
+        # Pinpoint whether GL_INVALID_ENUM is from our draw or from Qt (e.g. swapBuffers) after we return
+        check_for_error("at end of paintGL after draw")
 
     def activate_context(self):
         """Set this widgets GL context as the current context"""
-        
-        raise_on_error("before makeCurrent in activate_context - checking for prior errors")
+        # Log and clear any stale GL errors (e.g. GL_INVALID_ENUM from driver/Qt) instead of raising,
+        # so callbacks (e.g. OnTransformChanged -> update_all_tile_buffers) do not crash the app.
+        check_for_error("before makeCurrent in activate_context")
         self.makeCurrent()
-        raise_on_error("after makeCurrent in activate_context")
+        check_for_error("after makeCurrent in activate_context")
 
     def clear(self): 
         self._gl_funcs.glClearDepthf(1)

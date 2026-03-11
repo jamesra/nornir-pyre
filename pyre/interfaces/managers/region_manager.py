@@ -5,7 +5,7 @@ import abc
 
 import nornir_imageregistration
 from nornir_imageregistration import PointLike
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.selection_event_data import SelectionEventData
 
 

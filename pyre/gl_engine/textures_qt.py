@@ -189,13 +189,22 @@ def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
     # Configure texture parameters
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
+    # Explicit border (0,0,0,1) so out-of-bounds samples are black; avoids bright dot artifacts
+    # when UVs or LOD sampling touch the border (undefined border is driver-dependent).
+    border_color = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+    gl.glTexParameterfv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_BORDER_COLOR, border_color)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR)
     raise_on_error("after texture parameter configuration in create_grayscale_texture")
 
+    # Explicit row length and alignment avoid top-left pixel artifact (driver stride assumptions).
+    gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, width)
+    gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
     # Upload texture data using glTexImage2D - this accepts numpy arrays directly
     gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RED, width, height,
                     0, gl.GL_RED, gl.GL_UNSIGNED_BYTE, image)
+    gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
+    gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
     raise_on_error("after glTexImage2D in create_grayscale_texture")
 
     # Configure and generate mipmaps
@@ -262,9 +271,14 @@ def create_rgba_texture(image: NDArray[np.uint8]) -> int:
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR)
     raise_on_error("after texture parameter configuration in create_rgba_texture")
 
+    # Explicit row length and alignment avoid top-left pixel artifact (driver stride assumptions).
+    gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, width)
+    gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
     # Upload texture data using glTexImage2D - this accepts numpy arrays directly
     gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, width, height,
                     0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, image)
+    gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
+    gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
     raise_on_error("after glTexImage2D in create_rgba_texture")
 
     # Configure and generate mipmaps
@@ -387,18 +401,31 @@ def create_rgba_texture_array(images: NDArray[np.uint8]) -> int:
     # Allocate storage
     texture.allocateStorage()
 
-    # Add each image to the texture array
-    for z in range(z_size):
-        image_slice = images[z]
-        # Ensure array is contiguous
-        if not image_slice.flags['C_CONTIGUOUS']:
-            image_slice = np.ascontiguousarray(image_slice)
-        # Use the correct overload of setData for 2D array textures with numpy array directly
-        data_ptr = image_slice.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
-        texture.setData(0, z, QOpenGLTexture.PixelFormat.RGBA, QOpenGLTexture.PixelType.UInt8, data_ptr)
-
-    # Get the OpenGL texture ID
     texture_id = texture.textureId()
+    gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, texture_id)
+    try:
+        # Upload each layer with raw glTexSubImage3D so GL_UNPACK_* is respected
+        # (Qt's setData can ignore it, causing first-texel artifact = grid of dots on control points).
+        for z in range(z_size):
+            image_slice = images[z]
+            if not image_slice.flags['C_CONTIGUOUS']:
+                image_slice = np.ascontiguousarray(image_slice)
+            gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, x_size)
+            gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
+            try:
+                data_ptr = image_slice.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
+                gl.glTexSubImage3D(
+                    gl.GL_TEXTURE_2D_ARRAY, 0,
+                    0, 0, z,
+                    x_size, y_size, 1,
+                    gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
+                    data_ptr
+                )
+            finally:
+                gl.glPixelStorei(gl.GL_UNPACK_ROW_LENGTH, 0)
+                gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 4)
+    finally:
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, 0)
 
     # Store the texture object in a global dictionary to prevent it from being garbage collected
     if not hasattr(create_rgba_texture_array, "_textures"):

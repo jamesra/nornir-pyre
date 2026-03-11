@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from pyre.interfaces.managers.mousepositionhistorymanager import IMousePositionHistoryManager, \
+from pyre.interfaces.managers.mouse_position_history_manager import IMousePositionHistoryManager, \
     MousePositionHistoryChangedCallbackEvent
 from pyre.space import Space
 
@@ -26,7 +26,7 @@ class MousePositionHistoryManager(IMousePositionHistoryManager):
     def update_positions(self, positions: dict[Space, NDArray[np.floating]]):
         """Replace the dictionary of values in one call"""
         self._last_positions = positions
-        for k, v in positions.values():
+        for k, v in positions.items():
             self.fire_change_event(k, v)
 
     def __getitem__(self, item: Space) -> NDArray[np.floating]:

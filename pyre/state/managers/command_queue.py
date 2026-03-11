@@ -1,7 +1,7 @@
 from dependency_injector.wiring import Provide, inject
 import logging
 import threading
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces.managers.command_queue import ICommandQueue
 from pyre.container import IContainer
 

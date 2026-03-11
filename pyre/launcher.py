@@ -288,7 +288,7 @@ def build_container() -> IContainer:
     # Set the default commands for stos files
     # container_interface.action_command_map = pyre.commands.action_command_map
     # container_interface.transform_control_point_action_maps.override(pyre.commands.transform_control_point_action_maps)
-    # container_interface.transform_control_point_action_maps = pyre.commands.transfom_control_point_action_maps
+    # container_interface.transform_control_point_action_maps = pyre.commands.transform_control_point_action_maps
     # f = stos_container.transform_control_point_action_maps()
     # result = f[nornir_imageregistration.transforms.TransformType.GRID]
 
@@ -354,10 +354,10 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir, "PyreLogs"), Level=logging.WARNING)
 
-    pyre.state.currentStosConfig = pyre.state.StosState(transform_controller=stos_transform_controller,
-                                                        image_manager=image_manager,
-                                                        imageviewmodel_manager=imageviewmodel_manager)
-    pyre.state.currentMosaicConfig = pyre.state.MosaicState()
+    pyre.state.set_current_stos_config(pyre.state.StosState(transform_controller=stos_transform_controller,
+                                                             image_manager=image_manager,
+                                                             imageviewmodel_manager=imageviewmodel_manager))
+    pyre.state.set_current_mosaic_config(pyre.state.MosaicState())
 
     readmetxt = resource_paths.README()
     print(readmetxt)
@@ -394,6 +394,12 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     window_manager.add(ViewType.Source, source_window)
     window_manager.add(ViewType.Target, target_window)
     window_manager.add(ViewType.Composite, composite_window)
+
+    # Keep pyre.Windows in sync with window_manager for legacy code (state/stos, common.SyncWindows).
+    # Prefer IWindowManager and ViewType for new code.
+    pyre.Windows["Fixed"] = source_window
+    pyre.Windows["Warped"] = target_window
+    pyre.Windows["Composite"] = composite_window
 
     def process_arguments():
         pyre.state.UpdateSettingsFromArguments(arg_values)

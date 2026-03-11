@@ -2,7 +2,7 @@ from typing import NamedTuple
 from pyre.space import Space
 from pyre.controllers.transformcontroller import TransformController
 from pyre.viewmodels.controlpointmap import ControlPointMap
-from pyre.interfaces.managers.controlpointmapmanager import IControlPointMapManager, ControlPointManagerKey
+from pyre.interfaces.managers.control_point_map_manager import IControlPointMapManager, ControlPointManagerKey
 
 
 class ControlPointMapManager(IControlPointMapManager):

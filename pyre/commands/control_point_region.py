@@ -1,4 +1,4 @@
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces.managers.region_manager import IRegion, SelectionEventData
 
 import nornir_imageregistration

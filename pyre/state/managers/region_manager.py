@@ -1,5 +1,6 @@
-"""Tracks selectable objects in a view
+"""Region manager module: tracks selectable objects in a view.
 
+The filename "region_manager" refers to this module's role; the main implementation class is RegionMap (implements IRegionMap).
 A manager contains objects that listen to input events in a specific region.
 The manager will identify the objects with a possible user interaction when an event occurs in their region.
 objects report the distance to the input event, and the manager will select the object with the smallest distance.
@@ -16,7 +17,7 @@ import numpy as np
 import rtree
 
 import nornir_imageregistration
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces.managers.region_manager import IRegion, IRegionMap
 from pyre.selection_event_data import SelectionEventData
 from pyre.interfaces.managers.command_manager import IControlPointActionMap

@@ -27,7 +27,7 @@ class ImageLoadResult(NamedTuple):
 
     @property
     def original_image_dirname(self) -> str:
-        """Original path to image before path substition applied"""
+        """Original path to image before path substitution applied"""
         return os.path.dirname(self.image_original_fullpath)
 
     @property
@@ -37,7 +37,7 @@ class ImageLoadResult(NamedTuple):
 
     @property
     def original_mask_dirname(self) -> str | None:
-        """Original path to mask before path substition applied"""
+        """Original path to mask before path substitution applied"""
         return os.path.dirname(self.mask_original_fullpath)
 
     @property

@@ -253,3 +253,4 @@ class ControlPointSetShader(BaseShader):
             check_for_error()
             vao.unbind()
             gl.glUseProgram(0)
+            check_for_error("after glUseProgram(0) in controlpointset_shader draw")

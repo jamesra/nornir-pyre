@@ -17,7 +17,7 @@ import abc
 import pyre
 from pyre.selection_event_data import PointPair
 import pyre.ui
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands.uicommandbase import UICommandBase, InstantCommandBase
 from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
@@ -245,7 +245,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 mouse_position_after_scale = self.get_world_positions(e)
                 delta = mouse_position_after_scale[self.space] - mouse_position[self.space]
 
-                self.camera.lookat -= delta
+                self.camera.lookat = self.camera.lookat - delta
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
 
@@ -306,7 +306,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             #    LookAt = self._transform_controller.transform([LookAt])
             #    LookAt = LookAt[0]
 
-            pyre.state.currentStosConfig.WindowsLookAtFixedPoint(look_at, self.camera.scale)
+            config = pyre.state.get_current_stos_config()
+            if config is not None:
+                config.WindowsLookAtFixedPoint(look_at, self.camera.scale)
             # pyre.SyncWindows(LookAt, self.camera.scale)
 
         elif symbol == 'z' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:

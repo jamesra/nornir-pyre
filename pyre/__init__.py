@@ -21,7 +21,8 @@ Project Structure:
 * pyre.views: View implementations for different visualization modes
 * pyre.state: State management and controllers
 * pyre.commands: Command pattern implementations for operations
-* pyre.interfaces: Interface definitions for dependency injection
+* pyre.interfaces: Interface definitions (commands, view types, managers, etc.) for dependency injection
+* pyre.space: Space enum (source/target) at package root for historical use; also re-exported via pyre.Space
 """
 
 __all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common', 'Space']
@@ -35,6 +36,7 @@ vector2 = NDArray[np.floating]  # A 2 element vector
 import pyre.gl_engine as gl_engine
 from pyre.gl_engine.shaders import ColorShader, TextureShader, InitializeShaders 
 from pyre.space import Space
-from pyre.command_interfaces import ICommand, CommandStatus, CommandResult
+from pyre.interfaces import ICommand, CommandStatus, CommandResult
 
+# Legacy: dict of window title -> window. Kept in sync with IWindowManager in launcher. Prefer IWindowManager + ViewType.
 Windows = {}

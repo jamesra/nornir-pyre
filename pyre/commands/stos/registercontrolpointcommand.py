@@ -12,7 +12,7 @@ import math
 import nornir_imageregistration
 import pyre
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IImageManager
 from pyre.interfaces.controlpointselection import SetSelectionCallable
@@ -101,7 +101,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         # self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.indicies_to_register)
         self.align_points(source, target, self._selected_points)
 
-        # Do not clear the selected indicies in case we want to re-run
+        # Do not clear the selected indices in case we want to re-run
         super().execute()
 
     def activate(self):
@@ -112,7 +112,7 @@ class RegisterControlPointCommand(InstantCommandBase):
                      sourceimage: ImagePermutationHelper,
                      targetimage: ImagePermutationHelper,
                      i_points: Sequence[int]) -> None:
-        """Attemps to align the specified point indicies"""
+        """Attempts to align the specified point indices"""
         # from pyre.state import currentStosConfig
 
         # if (currentStosConfig.FixedImageViewModel is None or

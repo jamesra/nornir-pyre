@@ -305,11 +305,12 @@ class CompositeTransformView(IImageTransformView):
              view_proj: NDArray[np.floating],
              space: Space,
              client_size: tuple[int, int],
-             bounding_box: nornir_imageregistration.Rectangle | None = None):
+             bounding_box: nornir_imageregistration.Rectangle | None = None,
+             default_fbo: int | None = None):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
-        :param client_size: Size of the client area in pixels. (height, width)"""
- 
+        :param client_size: Size of the client area in pixels. (height, width)
+        :param default_fbo: Widget's default framebuffer; must use this instead of 0 so overlay draws to QOpenGLWidget's internal FBO (Qt does not use FBO 0 for the widget)."""
         # Rough idea:
         # 1. Render each image to a FrameBufferObject
         # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
@@ -320,7 +321,6 @@ class CompositeTransformView(IImageTransformView):
             source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
             # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
-            from pyre.gl_engine.helpers import check_for_error
             raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
             
             # Set viewport to match framebuffer size
@@ -356,9 +356,11 @@ class CompositeTransformView(IImageTransformView):
 
             self._target_image_view.draw(view_proj, space, client_size, bounding_box)
 
-            # Unbind framebuffer and restore viewport to window size
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
-            raise_on_error("after glBindFramebuffer(0) in compositetransformview.draw")
+            # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
+            # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
+            draw_fbo = int(default_fbo) if default_fbo is not None else 0
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, draw_fbo)
+            raise_on_error("after glBindFramebuffer(draw target) in compositetransformview.draw")
             
             # Restore viewport to window size (not framebuffer size)
             # client_size is (height, width), viewport expects (x, y, width, height)
@@ -371,30 +373,40 @@ class CompositeTransformView(IImageTransformView):
             #                                                                -1, 1,
             #                                                                -1, 1)
 
-            # Create orthographic projection matrix for full-screen quad
-            # This maps from [-1,1] to [0,1] for texture coordinates
+            # Use identity so the full-screen quad (vertices in [-1,1]) is drawn 1:1 in NDC and fills the viewport.
+            # A non-identity scale (e.g. 2.0) would clip the quad and show only a central rectangle that can
+            # appear to move at a different rate than the intended overlay.
             ortho_projection = np.identity(4, dtype=np.float32)
-            ortho_projection[0, 0] = 2.0
-            ortho_projection[1, 1] = 2.0    
-            
+
             # Validate framebuffer textures are valid
             if self._source_frame_buffer.fbo_texture == 0 or self._target_frame_buffer.fbo_texture == 0:
                 print(f"Warning: Invalid framebuffer textures - source: {self._source_frame_buffer.fbo_texture}, target: {self._target_frame_buffer.fbo_texture}")
                 return
             
-            # Ensure overlay shader is initialized
-            # Check if shader is initialized using the _initialized flag
-            if not shaders.overlay_shader.initialized:
-                # Shaders not initialized yet, skip drawing
+            # Ensure overlay shader is initialized in this context (e.g. composite context added after first).
+            # BaseShader.initialized is a method, not a property - must call it.
+            if not shaders.overlay_shader.initialized():
+                try:
+                    shaders.overlay_shader.initialize_gl_objects()
+                except Exception:
+                    pass
+            if not shaders.overlay_shader.initialized():
                 return
-             
-            shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
-                                        source_texture=self._source_frame_buffer.fbo_texture,
-                                        target_texture=self._target_frame_buffer.fbo_texture,
-                                        overlay_type=shaders.OverlayType.Tween,
-                                        source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
-                                        target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
-            
+
+            # Depth test is only needed for tile overlap (Fixed/Warped). For the composite overlay
+            # we draw a single full-screen blend on top, so disable depth so it always draws on top.
+            gl.glDisable(gl.GL_DEPTH_TEST)
+            gl.glDepthMask(gl.GL_FALSE)
+            try:
+                shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
+                                            source_texture=self._source_frame_buffer.fbo_texture,
+                                            target_texture=self._target_frame_buffer.fbo_texture,
+                                            overlay_type=shaders.OverlayType.Tween,
+                                            source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
+                                            target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
+            finally:
+                gl.glDepthMask(gl.GL_TRUE)
+                gl.glEnable(gl.GL_DEPTH_TEST)
 
         elif self._source_image_view is not None:
             self._source_image_view.draw(view_proj, space, client_size, bounding_box)

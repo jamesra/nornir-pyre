@@ -31,7 +31,7 @@ class ControlPointActionResult(NamedTuple):
     point_indicies: set[int] | None  # Control points that triggered the action, if any
 
     def __str__(self):
-        return f"{self.action} indicies={self.point_indicies})"
+        return f"{self.action} indices={self.point_indicies})"
 
     def __repr__(self):
-        return f"{self.action} indicies={self.point_indicies})"
+        return f"{self.action} indices={self.point_indicies})"

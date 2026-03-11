@@ -19,19 +19,18 @@ from dependency_injector.wiring import Provide, inject
 from dependency_injector.providers import Factory, Dict
 import nornir_imageregistration
 from nornir_imageregistration import ITransform
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces import ControlPointAction
 
 from pyre.observable import ObservableSet
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import ICommandQueue, IGLContextManager
 from pyre.interfaces.managers.image_viewmodel_manager import IImageViewModelManager
-from pyre.interfaces.managers.transformcontroller_glbuffer_manager import ITransformControllerGLBufferManager, \
+from pyre.interfaces.managers.transform_controller_glbuffer_manager import ITransformControllerGLBufferManager, \
     BufferType
 import pyre.interfaces.managers.gl_context_manager
 from pyre.settings import AppSettings
 from pyre.space import Space
-from pyre.state import ViewType
 from pyre.state.managers.command_queue import CommandQueue
 
 from pyre.ui.widgets import imagetransformpanelbase
@@ -235,8 +234,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]
         self._command = self._command_queue.get()
         if self._command is None:
-            bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.width(), self.height()))
-            self._command = command_factory[ControlPointAction.NONE](parent=self,
+            # Use GL panel as parent so mouse events and resize use GL viewport coordinates
+            gl_w, gl_h = self._glpanel.width(), self._glpanel.height()
+            bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (gl_w, gl_h))
+            self._command = command_factory[ControlPointAction.NONE](parent=self._glpanel,
                                                                      completed_func=None,
                                                                      commandqueue=self._command_queue,
                                                                      camera=self.camera,
@@ -278,9 +279,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                     target_image_name=ViewType.Target.value,
                                                                     transform_controller=self.transform_controller,
                                                                     gl_funcs=self._glpanel._gl_funcs)
+                # Force repaint after view's async setup (posted callbacks set source/target views)
+                QTimer.singleShot(50, self._glpanel.update)
+                QTimer.singleShot(150, self._glpanel.update)
             else:
-                # The CompositeTransformView should exist and be subscribed so this ViewModel should be added by the View
-                pass
+                # Second add (Target) - request repaint so overlay draws once both views are set
+                self._glpanel.update()
         else:
             print(f'\tAdding ImageTransformView {name} in space {self.space.value}')
             self._image_transform_view = ImageTransformView(space=self.space,
@@ -313,6 +317,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                   lambda value: setattr(self._transform_controller_view, 'selected', value))
             # Activate command directly - no need to defer as context is already active
             self.activate_command()
+            if self.view_type == ViewType.Composite:
+                QTimer.singleShot(0, self._glpanel.update)
 
     def on_timer_singleshot(self):
         """Timer callback that reschedules itself - workaround for repeating timer issues"""
@@ -380,7 +386,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if self.width() == 0 or self.height() == 0:
             return
 
-        self.camera.focus(self.width(), self.height())
+        self.camera.focus(self._glpanel.width(), self._glpanel.height())
 
         self._glpanel.activate_context()
 
@@ -389,11 +395,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
             SetDrawTextureState(self._glpanel._gl_funcs)
 
-            # Draw an image if we can
+            # Use GL panel size so viewport/FBO match the actual drawing surface.
+            # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
+            gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+            default_fbo = self._glpanel.defaultFramebufferObject()
             self._image_transform_view.draw(self.camera.view_proj,
                                             space=self.space,
-                                            client_size=(self.height(), self.width()),
-                                            bounding_box=bounding_box)
+                                            client_size=(gl_h, gl_w),
+                                            bounding_box=bounding_box,
+                                            default_fbo=default_fbo)
 
             ClearDrawTextureState(self._glpanel._gl_funcs)
 

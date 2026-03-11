@@ -66,7 +66,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         super(MosaicTransformPanel, self).__init__(parent, transform_controller=transform_controller, **kwargs)
 
-        state.currentMosaicConfig.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
+        mosaic_config = state.get_current_mosaic_config()
+        if mosaic_config is not None:
+            mosaic_config.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
         self._imageTransformViewList = imageTransformViewList
 
         self.LastMousePosition = None
@@ -78,7 +80,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.Command = None
 
     def OnMosaicChanged(self):
-        self.ImageTransformViewList = state.currentMosaicConfig.ImageTransformViewList
+        mosaic_config = state.get_current_mosaic_config()
+        if mosaic_config is not None:
+            self.ImageTransformViewList = mosaic_config.ImageTransformViewList
         self.center_camera()
 
     def _bind_mouse_events(self):
@@ -131,7 +135,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
-            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.glcanvas, self.on_rectange_command_completed,
+            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.glcanvas, self.on_rectangle_command_completed,
                                                                       self.camera, (ImageY, ImageX))
 
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -191,6 +195,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.glcanvas.update()
 
-    def on_rectange_command_completed(self, RectangleCommand):
+    def on_rectangle_command_completed(self, RectangleCommand):
         self.Command = None
         return
