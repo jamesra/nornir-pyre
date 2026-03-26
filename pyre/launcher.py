@@ -34,12 +34,11 @@ import atexit
 import io
 from datetime import datetime
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QSurfaceFormat
 
 import argparse
-import atexit
 import logging
 import os
 
@@ -258,12 +257,9 @@ def ProcessArgs():
 
 
 def readme(path) -> str:
-    fullpath = os.path.join(os.path.dirname(__file__), path)
-    try:
-        with open(fullpath, 'r') as file:
-            return file.read()
-    except FileNotFoundError:
-        return "README file not found at " + fullpath
+    """Load bundled help text; matches resource_paths (prefers repo README.rst)."""
+    import pyre.resource_paths as resource_paths
+    return resource_paths.readme_text_with_fallback(path)
 
 
 def build_container() -> IContainer:
@@ -403,7 +399,26 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
 
     def process_arguments():
         pyre.state.UpdateSettingsFromArguments(arg_values)
-        pyre.state.InitializeStateFromSettings(stos_transform_controller)
+        try:
+            pyre.state.InitializeStateFromSettings(stos_transform_controller)
+        except FileNotFoundError as e:
+            QMessageBox.warning(
+                None,
+                "File Not Found",
+                f"The saved STOS file could not be found (the drive may be unmounted):\n\n{e}"
+                f"\n\nPyre will start with an empty workspace.",
+            )
+        except ValueError as e:
+            QMessageBox.warning(
+                None,
+                "Could Not Load STOS File",
+                f"The saved STOS file could not be parsed:\n\n{e}"
+                f"\n\nPyre will start with an empty workspace.",
+            )
+        # Force repaint so control-point draw-time sync runs with loaded transform
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type in window_manager:
+                window_manager[view_type].update()
 
     # Schedule the initialization to occur after the event loop starts
     QTimer.singleShot(0, process_arguments)
@@ -415,7 +430,8 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     composite_window.show()
 
     # Run the application
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

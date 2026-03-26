@@ -25,19 +25,19 @@ class RegisterControlPointCommand(InstantCommandBase):
     """Automatically register selected control points"""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
-    _original_points: NDArray[[2, ], np.floating]
-    _transform_controller: pyre.viewmodels.TransformController
+    _original_points: NDArray[np.floating]
+    _transform_controller: pyre.viewmodels.TransformController  # type: ignore[attr-defined]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _source_image: str
     _target_image: str
     _settings: PointRegistrationSettings
 
     @property
-    def alignment_area(self) -> NDArray[int]:
+    def alignment_area(self) -> NDArray[np.integer]:
         return self._settings.alignment_area_shape
 
     @property
-    def angles_to_search(self) -> NDArray[float]:
+    def angles_to_search(self) -> NDArray[np.floating]:
         return self._settings.angles_to_search
 
     @inject
@@ -46,9 +46,9 @@ class RegisterControlPointCommand(InstantCommandBase):
                  command_points: set[int],  # Points under mouse when command was triggered
                  source_image: str,
                  target_image: str,
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,  # type: ignore[assignment]
                  register_all: bool = False,  # If True, register all points in the transform
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
                  settings: AppSettings = Provide[IContainer.settings],
                  **kwargs):
@@ -99,7 +99,7 @@ class RegisterControlPointCommand(InstantCommandBase):
 
         indicies_to_register = list(self._selected_points)
         # self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.indicies_to_register)
-        self.align_points(source, target, self._selected_points)
+        self.align_points(source, target, list(self._selected_points))
 
         # Do not clear the selected indices in case we want to re-run
         super().execute()
@@ -137,7 +137,7 @@ class RegisterControlPointCommand(InstantCommandBase):
                 fixed = self._transform_controller.GetFixedPoint(i_point)
                 warped = self._transform_controller.GetWarpedPoint(i_point)
 
-                task = pyre.common.StartAttemptAlignPoint(pool=pool,
+                task = pyre.common.StartAttemptAlignPoint(pool=pool,  # type: ignore[arg-type]
                                                           task_description=f"Align Pyre Point {i_point}",
                                                           transform=self._transform_controller.TransformModel,
                                                           target_image=targetimage.ImageWithMaskAsNoise,
@@ -185,7 +185,7 @@ class RegisterControlPointCommand(InstantCommandBase):
             i_point = i_points
             fixed = self._transform_controller.GetFixedPoint(i_point)
             warped = self._transform_controller.GetWarpedPoint(i_point)
-            task = pyre.common.StartAttemptAlignPoint(pool=None,
+            task = pyre.common.StartAttemptAlignPoint(pool=None,  # type: ignore[arg-type]
                                                       task_description=f"Align Pyre Point {i_point}",
                                                       transform=self._transform_controller.TransformModel,
                                                       target_image=targetimage.ImageWithMaskAsNoise,
@@ -236,3 +236,5 @@ class RegisterControlPointCommand(InstantCommandBase):
             pass
 
         # return self._transform_controller.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)
+
+

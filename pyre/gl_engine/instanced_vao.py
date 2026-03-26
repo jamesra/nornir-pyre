@@ -90,6 +90,7 @@ class InstancedVAO(ContextAwareVAOHelper):
                     raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
                 raise_on_error("after glGenVertexArrays in begin_init", RuntimeError("glGenVertexArrays failed"))
 
+                assert context is not None
                 self._context_vaos[context] = vao_id
                 gl.glBindVertexArray(vao_id)
                 raise_on_error("after glBindVertexArray in begin_init")

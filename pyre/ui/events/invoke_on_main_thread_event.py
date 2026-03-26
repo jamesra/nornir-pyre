@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 from PyQt6.QtCore import QEvent
 from dependency_injector.wiring import Provide
 import traceback
+
+import pyre
 from pyre.container import IContainer
 
 # from pyre.interfaces import IEventManager
@@ -12,7 +16,7 @@ class QtInvokeOnMainThreadEvent(QEvent):
 
     _args: tuple | None
     _kwargs: dict | None
-    _obj: "pyre.interfaces.IEventManager"
+    _obj: pyre.interfaces.IEventManager  # type: ignore[name-defined]
     _stack_list: list[str] | None
     _stack: str | None
 
@@ -34,10 +38,10 @@ class QtInvokeOnMainThreadEvent(QEvent):
         return self._kwargs
 
     @property
-    def obj(self) -> "pyre.interfaces.IEventManager | None":
+    def obj(self) -> "pyre.interfaces.IEventManager | None":  # type: ignore[name-defined]
         return self._obj
 
-    def __init__(self, obj: "pyre.interfaces.IEventManager",
+    def __init__(self, obj: "pyre.interfaces.IEventManager",  # type: ignore[name-defined]
                  args: tuple | None = None,
                  kwargs: dict | None = None):
         super().__init__(QtInvokeOnMainThreadEvent.EVENT_TYPE)
@@ -54,7 +58,7 @@ class QtInvokeOnMainThreadEvent(QEvent):
     def invoke(self):
         """Invoke the callback for the event"""
         try:
-            self._obj.invoke(*self._args, **self._kwargs)
+            self._obj.invoke(*(self._args or ()), **(self._kwargs or {}))
         except Exception as e:
             if self.debug:
                 print(f"Exception invoking event {e} from {self._stack}")

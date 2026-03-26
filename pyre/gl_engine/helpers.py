@@ -17,7 +17,7 @@ def raise_on_error(message: str | None = None, exception: Exception | None = Non
     """
     error = gl.glGetError()
     if error != gl.GL_NO_ERROR:
-        error_name = get_gl_error_name(error)
+        error_name = get_gl_error_name(error)  # type: ignore[arg-type]
         if message:
             raise RuntimeError(f"OpenGL error {message}: {error_name} ({error})") from exception
         else:
@@ -58,7 +58,7 @@ def check_for_error(message: str | None = None) -> bool:
     # Clear all remaining errors from the queue
     while error != gl.GL_NO_ERROR:
         found_error = True
-        try_log_error(error, message)
+        try_log_error(error, message)  # type: ignore[arg-type]
         error = gl.glGetError()
 
     return found_error
@@ -95,7 +95,7 @@ def get_gl_type_size(gl_type: int) -> int:
         raise ValueError(f"Unsupported GL type: {gl_type}")
 
 
-def get_dtype_for_gl_type(gl_type: int) -> np.dtype:
+def get_dtype_for_gl_type(gl_type: int) -> type[np.generic]:
     """Returns the numpy data type for the GL type"""
     if gl_type == gl.GL_FLOAT:
         return np.float32

@@ -55,7 +55,7 @@ class GLContextManager(IGLContextManager):
         self._known_contexts = list()
         self._context_to_widget = {}
 
-    def add_context(self, context: QOpenGLContext, widget: QOpenGLWidget = None):
+    def add_context(self, context: QOpenGLContext, widget: QOpenGLWidget | None = None):
         """
         Add a context to the manager and notify subscribers.
 
@@ -161,7 +161,6 @@ class GLContextManager(IGLContextManager):
             None
         """
         self._GLContextAddedEventListeners.add(func)
-        print(f"Adding context event listener {func}")
         for context in self._known_contexts:
             # Make the context current before invoking the callback
             widget = self._context_to_widget.get(context)
@@ -175,7 +174,6 @@ class GLContextManager(IGLContextManager):
             was_current = (current_context == context)
             
             if not was_current:
-                print(f"Making context current for existing context callback")
                 widget.makeCurrent()
             
             try:

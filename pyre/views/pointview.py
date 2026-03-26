@@ -121,7 +121,7 @@ class PointView:
         Returns:
             NDArray[np.floating]: Array of point positions
         """
-        return self._point_buffer.data
+        return self._point_buffer.data  # type: ignore[return-value]
 
     @points.setter
     def points(self, value: NDArray[np.floating]):
@@ -135,26 +135,35 @@ class PointView:
         Args:
             value (NDArray[np.floating]): New array of point positions
         """
-        value = value.astype(dtype=np.float32, copy=False)
+        # OpenGL buffer upload requires host memory; convert CuPy to numpy if needed
+        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
+        value = np.asarray(value, dtype=np.float32)
         gl_value = TransformController.swap_columns_to_XY(value)
         self._point_buffer.data = gl_value
+        # Keep per-instance texture indices aligned with point count.
+        # A stale/short texture buffer can cause invalid GPU reads during instanced draw.
+        texture_data = np.asarray(self._texture_buffer.data)
+        point_count = int(gl_value.shape[0])
+        texture_count = int(texture_data.shape[0]) if texture_data.ndim > 0 else 0
+        if texture_count != point_count:
+            self._texture_buffer.data = np.zeros((point_count, 1), dtype=np.float32)
 
     @property
-    def texture_index(self) -> NDArray[np.integer]:
+    def texture_index(self) -> NDArray[np.floating]:
         """
         Get the array of texture indices.
 
         This property returns the array of texture indices that determine which
         texture from the texture array is used for each point. Each index corresponds
-        to a point in the points array.
+        to a point in the points array. Stored as float32 in the GL buffer.
 
         Returns:
-            NDArray[np.integer]: Array of texture indices
+            NDArray[np.floating]: Array of texture indices (stored as float32 in GL buffer)
         """
-        return self._texture_buffer.data
+        return self._texture_buffer.data  # type: ignore[return-value]
 
     @texture_index.setter
-    def texture_index(self, value: NDArray[np.integer]):
+    def texture_index(self, value: NDArray[np.floating]):
         """
         Set the array of texture indices.
 
@@ -162,9 +171,10 @@ class PointView:
         The input array is converted to float32 for compatibility with the OpenGL buffer.
 
         Args:
-            value (NDArray[np.integer]): New array of texture indices
+            value (NDArray[np.floating]): New array of texture indices
         """
-        value = value.astype(dtype=np.float32, copy=False)
+        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
+        value = np.asarray(value, dtype=np.float32)
         self._texture_buffer.data = value
 
     # Verticies for a square centered at the origin, the last two columns are texture coordinates
@@ -210,11 +220,11 @@ class PointView:
                              "Ensure the context is current before creating PointView objects.")
         
         self._gl_funcs = gl_funcs
-        self.create_open_gl_objects(pyre.gl_engine.shaders.controlpointset_shader, points,
-                                    texture_indicies=texture_indicies)
+        self.create_open_gl_objects(pyre.gl_engine.shaders.controlpointset_shader, points,  # type: ignore[attr-defined]
+                                    texture_indicies=texture_indicies)  # type: ignore[arg-type]
         self._texture_array = texture_array
         self._num_textures = get_texture_array_length(texture_array)
-        self.validate_texture_indicies(texture_indicies)
+        self.validate_texture_indicies(texture_indicies)  # type: ignore[arg-type]
 
     def validate_texture_indicies(self, texture_indicies: NDArray[np.integer] | GLBuffer | None):
         """
@@ -239,12 +249,12 @@ class PointView:
             if texture_indicies.capacity == 0:  # If we are not setting any texture indicies there is nothing to check
                 return
 
-            texture_indicies = texture_indicies.data
+            texture_indicies = texture_indicies.data  # type: ignore[assignment]
 
-        if max(texture_indicies) >= self._num_textures:
+        if max(texture_indicies) >= self._num_textures:  # type: ignore[arg-type]
             raise ValueError(
                 "Array of texture indicies contains values larger than the number of textures in texture array")
-        elif min(texture_indicies) < 0:
+        elif min(texture_indicies) < 0:  # type: ignore[arg-type]
             raise ValueError("Array of texture indicies contains negative values")
 
     def create_open_gl_objects(self,
@@ -288,24 +298,23 @@ class PointView:
             texture_indicies (NDArray[np.integer] | GLBuffer | None, optional): Indices of
                 textures to use for each point. If None, all points use texture 0.
         """
-        self._vertex_buffer = GLBuffer(layout=shader.vertex_layout, data=self._square_verts, usage=gl.GL_STATIC_DRAW )
+        self._vertex_buffer = GLBuffer(layout=shader.vertex_layout, data=self._square_verts, usage=gl.GL_STATIC_DRAW)
         if points is None:
             points = np.zeros((0, 3), dtype=np.float32)
         if isinstance(points, np.ndarray):
             # Swap the point order
             points = TransformController.swap_columns_to_XY(points)
-            self._point_buffer = GLBuffer(layout=shader.pointset_layout, data=points, usage=gl.GL_DYNAMIC_DRAW,
-                                          gl_funcs=self.gl_funcs)
+            self._point_buffer = GLBuffer(layout=shader.pointset_layout, data=points, usage=gl.GL_DYNAMIC_DRAW)
         else:
             self._point_buffer = points  # Points is already a GLBuffer
 
         if texture_indicies is None:
-            texture_indicies = np.zeros(len(points), dtype=np.uint16)
+            texture_indicies = np.zeros((len(points), 1), dtype=np.float32)  # type: ignore[arg-type]
         if isinstance(texture_indicies, np.ndarray):
             self._texture_buffer = GLBuffer(layout=shader.texture_index_layout,
-                                            data=texture_indicies, usage=gl.GL_DYNAMIC_DRAW, gl_funcs=self.gl_funcs)
+                                            data=texture_indicies, usage=gl.GL_DYNAMIC_DRAW)  # type: ignore[arg-type]
         else:
-            self._texture_buffer = texture_indicies  # Texture index is already a GLBuffer
+            self._texture_buffer = texture_indicies  # type: ignore[assignment]
 
     def _create_vao(self):
         """
@@ -324,6 +333,7 @@ class PointView:
         self._vao.begin_init()
         self._vao.add_buffer(self._point_buffer)
         self._vao.add_buffer(self._texture_buffer)
+        assert self._vertex_buffer is not None
         self._vao.add_buffer(self._vertex_buffer)
         self._vao.add_index_buffer(self._indicies)
         self._vao.end_init()
@@ -344,16 +354,16 @@ class PointView:
                 their size on screen
         """
         from pyre.gl_engine.helpers import check_for_error
-        self._gl_funcs.glDisable(gl.GL_DEPTH_TEST)
+        self.gl_funcs.glDisable(gl.GL_DEPTH_TEST)
         check_for_error("after glDisable(GL_DEPTH_TEST) in pointview.draw")
-        self._gl_funcs.glEnable(gl.GL_BLEND)
+        self.gl_funcs.glEnable(gl.GL_BLEND)
         check_for_error("after glEnable(GL_BLEND) in pointview.draw")
-        self._gl_funcs.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+        self.gl_funcs.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
         check_for_error("after glBlendFunc in pointview.draw")
-        pyre.gl_engine.shaders.controlpointset_shader.draw(view_proj_matrix,
+        pyre.gl_engine.shaders.controlpointset_shader.draw(view_proj_matrix,  # type: ignore[attr-defined]
                                                            self._texture_array,
                                                            self._vao,
-                                                           len(self._point_buffer.data),
+                                                           len(self._point_buffer.data),  # type: ignore[arg-type]
                                                            tween=tween, scale=scale_factor)
-        self._gl_funcs.glEnable(gl.GL_DEPTH_TEST)
+        self.gl_funcs.glEnable(gl.GL_DEPTH_TEST)
         check_for_error("after glEnable(GL_DEPTH_TEST) in pointview.draw")

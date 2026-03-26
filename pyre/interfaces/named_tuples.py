@@ -33,12 +33,12 @@ class ImageLoadResult(NamedTuple):
     @property
     def mask_dirname(self) -> str | None:
         """Path to mask directory containing loaded mask"""
-        return os.path.dirname(self.mask_fullpath)
+        return os.path.dirname(self.mask_fullpath) if self.mask_fullpath else None
 
     @property
     def original_mask_dirname(self) -> str | None:
         """Original path to mask before path substitution applied"""
-        return os.path.dirname(self.mask_original_fullpath)
+        return os.path.dirname(self.mask_original_fullpath) if self.mask_original_fullpath else None
 
     @property
     def image_basename(self) -> str:

@@ -14,7 +14,10 @@ import numpy
 from numpy.typing import NDArray
 
 import nornir_imageregistration
-from nornir_imageregistration import ITransform
+from nornir_imageregistration import ITransform, PointLike, AreaLike, ImageStats
+from nornir_imageregistration.settings import StosBruteSettings, GridRefinement, SliceToSliceMethod
+from nornir_imageregistration.transforms import IControlPoints
+from nornir_imageregistration.transforms import utils as transform_utils
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
 import nornir_pools
@@ -26,19 +29,20 @@ from pyre.controllers.transformcontroller import TransformController
 from pyre.interfaces.viewtype import ViewType
 
 
-def SaveRegisteredWarpedImage(fileFullPath: str, transform: nornir_imageregistration.ITransform, warpedImage: NDArray):
+def SaveRegisteredWarpedImage(fileFullPath: str, transform: ITransform, warpedImage: NDArray):
     """Save the warped image registered into fixed space to a file. Uses current STOS config for fixed shape."""
     config = pyre.state.get_current_stos_config()
     if config is None:
         raise RuntimeError("No current STOS config")
+    assert config.FixedImageViewModel is not None and config.WarpedImageViewModel is not None  # type: ignore[attr-defined]
     registeredImage = AssembleHugeRegisteredWarpedImage(transform,
-                                                        config.FixedImageViewModel.Image.shape,
-                                                        config.WarpedImageViewModel.Image)
+                                                        config.FixedImageViewModel.Image.shape,  # type: ignore[arg-type, attr-defined]
+                                                        config.WarpedImageViewModel.Image)  # type: ignore[attr-defined]
 
     nornir_imageregistration.SaveImage(fileFullPath, registeredImage)
 
 
-def AssembleHugeRegisteredWarpedImage(transform: nornir_imageregistration.ITransform, fixedImageShape: NDArray,
+def AssembleHugeRegisteredWarpedImage(transform: ITransform, fixedImageShape: NDArray,
                                       warpedImage: NDArray):
     """Apply transform to warped image and assemble into fixed space. Cuts image into tiles for large data."""
     return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
@@ -77,25 +81,57 @@ def SyncWindows(LookAt, scale: float, window_manager=None):
 @inject
 def RotateTranslateWarpedImage(source_image_key: str,
                                target_image_key: str,
-                               settings: nornir_imageregistration.settings.StosBruteSettings,
+                               settings: StosBruteSettings,
                                LimitImageSize: bool = False,
                                image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
     """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
+    # #region agent log
+    try:
+        import json as _j
+        import time as _t
+        from pathlib import Path as _P
+        _has_s = source_image_key in image_manager
+        _has_t = target_image_key in image_manager
+        with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+            _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "entry", "data": {"source_key": str(source_image_key), "target_key": str(target_image_key), "has_source": _has_s, "has_target": _has_t, "imgr_id": id(image_manager)}, "timestamp": int(_t.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
 
     if source_image_key not in image_manager:
         print("Source image not loaded")
+        # #region agent log
+        try:
+            import json as _j
+            import time as _t
+            from pathlib import Path as _P
+            with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "early_return_no_source", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         return
 
     if target_image_key not in image_manager:
         print("Target image not loaded")
+        # #region agent log
+        try:
+            import json as _j
+            import time as _t
+            from pathlib import Path as _P
+            with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "early_return_no_target", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         return
 
     source_image = image_manager[source_image_key]
     target_image = image_manager[target_image_key]
-    settings._method = nornir_imageregistration.settings.SliceToSliceMethod.LogPolar
+    settings._method = SliceToSliceMethod.LogPolar
     alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=source_image,
                                                                            target_image_data=target_image,
                                                                            settings=settings,
@@ -106,6 +142,16 @@ def RotateTranslateWarpedImage(source_image_key: str,
     print("Alignment found: " + str(alignRecord))
     transform = alignRecord.ToImageTransform(source_image_shape=source_image.shape,
                                              target_image_shape=target_image.shape)
+    # #region agent log
+    try:
+        import json as _j
+        import time as _t
+        from pathlib import Path as _P
+        with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+            _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "C", "location": "common.RotateTranslateWarpedImage", "message": "returning_transform", "data": {"transform_type": type(transform).__name__, "align_record": str(alignRecord)}, "timestamp": int(_t.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     return transform
     # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 
@@ -113,7 +159,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
     # pyre.state.currentStosConfig._transform_controller.transform)
 
 
-def GridRefineTransform(settings: nornir_imageregistration.settings.GridRefinement | None):
+def GridRefineTransform(settings: GridRefinement | None):
     """Refine the current STOS transform using grid refinement. Updates TransformController.TransformModel in place."""
     if settings is None:
         return
@@ -143,7 +189,7 @@ def LinearBlendTransform(blend_factor: float,
     config = pyre.state.get_current_stos_config()
     if config is None:
         return
-    if not isinstance(config.Transform, nornir_imageregistration.transforms.IControlPoints):
+    if not isinstance(config.Transform, IControlPoints):
         logger.warning("Linear blend requires control point based transform")
         return
 
@@ -151,7 +197,7 @@ def LinearBlendTransform(blend_factor: float,
                               'TransformModel',
                               config.TransformController.TransformModel)
 
-    updated_transform = nornir_imageregistration.transforms.utils.BlendWithLinear(
+    updated_transform = transform_utils.BlendWithLinear(
         config.Transform,
         blend_factor, ignore_rotation=False)
 
@@ -159,11 +205,11 @@ def LinearBlendTransform(blend_factor: float,
     print(f"Linear blend completed for blend value {blend_factor}")
 
 
-def either_roi_is_masked(transform: nornir_imageregistration.ITransform,
+def either_roi_is_masked(transform: ITransform,
                          target_mask: NDArray | None,
                          source_mask: NDArray | None,
-                         target_controlpoint: nornir_imageregistration.PointLike,
-                         alignmentArea: nornir_imageregistration.AreaLike,
+                         target_controlpoint: PointLike,
+                         alignmentArea: AreaLike,
                          ):
     """Returns True if either mask is all False"""
 
@@ -174,8 +220,8 @@ def either_roi_is_masked(transform: nornir_imageregistration.ITransform,
             sourceImage_param=source_mask,
             target_image_stats=None,
             source_image_stats=None,
-            target_controlpoint=target_controlpoint,
-            alignmentArea=alignmentArea)
+            target_controlpoint=target_controlpoint,  # type: ignore[arg-type]
+            alignmentArea=alignmentArea)  # type: ignore[arg-type]
 
         if not numpy.any(target_mask_roi):
             return True
@@ -186,15 +232,15 @@ def either_roi_is_masked(transform: nornir_imageregistration.ITransform,
     return False
 
 
-def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
+def StartAttemptAlignPoint(pool: nornir_pools.poolbase,  # type: ignore[type-arg]
                            task_description: str,
-                           transform: nornir_imageregistration.ITransform,
+                           transform: ITransform,
                            target_image: NDArray,
                            source_image: NDArray,
                            target_mask: NDArray | None,
                            source_mask: NDArray | None,
-                           target_image_stats: nornir_imageregistration.ImageStats,
-                           source_image_stats: nornir_imageregistration.ImageStats,
+                           target_image_stats: ImageStats,
+                           source_image_stats: ImageStats,
                            target_controlpoint,
                            alignmentArea: NDArray | tuple[float, float],
                            anglesToSearch: Iterable[float]):
@@ -208,7 +254,7 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,
         else:
             pool = nornir_pools.GetGlobalLocalMachinePool()
 
-    task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,
+    task = nornir_imageregistration.local_distortion_correction.StartAttemptAlignPoint(pool,  # type: ignore[arg-type]
                                                                                        task_description,
                                                                                        transform=transform,
                                                                                        targetImage=target_image,
@@ -238,12 +284,12 @@ def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
     return numpy.maximum(too_large, too_small)
 
 
-def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskImage: NDArray,
+def ClearPointsOnMask(transform: ITransform, FixedMaskImage: NDArray,
                       WarpedMaskImage: NDArray):
     '''Remove all transform points that are positioned in the mask image'''
 
     if FixedMaskImage is not None:
-        SourcePoints = transform.TransformModel.SourcePoints
+        SourcePoints = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
         NumPoints = SourcePoints.shape[0]
         SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
 
@@ -266,10 +312,10 @@ def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskI
 
         AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies))
         AllMaskedIndicies.sort()
-        transform.RemovePoints(AllMaskedIndicies)
+        transform.RemovePoints(AllMaskedIndicies)  # type: ignore[attr-defined]
 
     if WarpedMaskImage is not None:
-        SourcePoints = transform.TransformModel.SourcePoints
+        SourcePoints = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
         NumPoints = SourcePoints.shape[0]
         SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
 
@@ -292,4 +338,4 @@ def ClearPointsOnMask(transform: nornir_imageregistration.ITransform, FixedMaskI
 
         AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies))
         AllMaskedIndicies.sort()
-        transform.RemovePoints(AllMaskedIndicies)
+        transform.RemovePoints(AllMaskedIndicies)  # type: ignore[attr-defined]

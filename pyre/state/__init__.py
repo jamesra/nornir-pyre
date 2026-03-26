@@ -21,8 +21,8 @@ from ..settings import ImageAndMaskPath
 # The global gl_context_manager
 
 # Module-level state; prefer get_current_stos_config/set_current_stos_config (and mosaic) for testability.
-currentStosConfig = None  # type: StosState
-currentMosaicConfig = None  # type: MosaicState
+currentStosConfig: StosState | None = None
+currentMosaicConfig: MosaicState | None = None
 
 
 def get_current_stos_config() -> StosState | None:
@@ -49,10 +49,10 @@ def set_current_mosaic_config(config: MosaicState | None) -> None:
 
 def init():
     global currentStosConfig
-    currentStosConfig = StosState()
+    currentStosConfig = StosState()  # type: ignore[call-arg]
 
     global currentMosaicConfig
-    currentMosaicConfig = MosaicState()
+    currentMosaicConfig = MosaicState()  # type: ignore[call-arg, arg-type]
 
 
 @inject
@@ -65,11 +65,11 @@ def UpdateSettingsFromArguments(arg_values,
 
     else:
         if 'SourceImageFullPath' in arg_values and arg_values.SourceImageFullPath is not None:
-            settings.stos.source_image_filename = arg_values.SourceImageFullPath
-            image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)
+            settings.stos.source_image_filename = arg_values.SourceImageFullPath  # type: ignore[attr-defined]
+            image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)  # type: ignore[attr-defined]
         if 'TargetImageFullPath' in arg_values and arg_values.TargetImageFullPath is not None:
-            settings.stos.target_image_filename = arg_values.TargetImageFullPath
-            image_loader.load_image_into_manager(ViewType.Source, arg_values.FixedImageFullPath)
+            settings.stos.target_image_filename = arg_values.TargetImageFullPath  # type: ignore[attr-defined]
+            image_loader.load_image_into_manager(ViewType.Source, arg_values.FixedImageFullPath)  # type: ignore[attr-defined]
 
     # if 'mosaicFullPath' in arg_values and arg_values.mosaicFullPath is not None:
     #     tiles_path = os.path.dirname(arg_values.mosaicFullPath)
@@ -83,9 +83,23 @@ def UpdateSettingsFromArguments(arg_values,
 def InitializeStateFromSettings(stos_transform_controller: TransformController,
                                 image_loader: pyre.settings.AppSettings = Provide[IContainer.image_loader],
                                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+    """Load the saved STOS or individual images from settings.
+
+    Raises:
+        FileNotFoundError: If the saved STOS file path does not exist on disk.
+        ValueError: If the STOS file exists but its transform cannot be parsed.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
     if settings.stos.stos_filename is not None:
-        load_result = image_loader.load_stos(settings.stos.stos_filename)
-        transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
+        # Let FileNotFoundError propagate — callers show a user-visible dialog.
+        load_result = image_loader.load_stos(settings.stos.stos_filename)  # type: ignore[attr-defined]
+        try:
+            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
+        except Exception as e:
+            raise ValueError(
+                f"Could not parse the transform in '{settings.stos.stos_filename}':\n{e}") from e
         stos_transform_controller.TransformModel = transform
 
         settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
@@ -94,8 +108,14 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                                                       mask_fullpath=load_result.target.mask_fullpath)
     else:
         if settings.stos.target_image is not None and settings.stos.target_image.image_fullpath is not None:
-            image_loader.load_image_into_manager(ViewType.Target, settings.stos.target_image.image_fullpath,
-                                                 mask_path=settings.stos.target_image.mask_fullpath)
+            try:
+                image_loader.load_image_into_manager(ViewType.Target, settings.stos.target_image.image_fullpath,  # type: ignore[attr-defined]
+                                                     mask_path=settings.stos.target_image.mask_fullpath)
+            except (FileNotFoundError, ValueError) as e:
+                _log.warning("Saved target image not found — starting without it: %s", e)
         if settings.stos.source_image is not None and settings.stos.source_image.image_fullpath is not None:
-            image_loader.load_image_into_manager(ViewType.Source, settings.stos.source_image.image_fullpath,
-                                                 mask_path=settings.stos.source_image.mask_fullpath)
+            try:
+                image_loader.load_image_into_manager(ViewType.Source, settings.stos.source_image.image_fullpath,  # type: ignore[attr-defined]
+                                                     mask_path=settings.stos.source_image.mask_fullpath)
+            except (FileNotFoundError, ValueError) as e:
+                _log.warning("Saved source image not found — starting without it: %s", e)

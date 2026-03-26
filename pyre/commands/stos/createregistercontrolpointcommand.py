@@ -27,7 +27,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _original_points: NDArray[np.floating]
     _left_mouse_down: bool = False
-    _transform_controller: pyre.viewmodels.TransformController
+    _transform_controller: "pyre.viewmodels.TransformController"  # type: ignore[name-defined]
     _commandqueue: ICommandQueue
 
     _source_image: str
@@ -39,8 +39,8 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  source_image: str,
                  target_image: str,
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: "pyre.viewmodels.TransformController" = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
                  **kwargs):
         """
@@ -54,7 +54,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         :param space:
         :param completed_func:
         """
-        super().__init__(completed_func=completed_func)
+        super().__init__(completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
 
@@ -92,7 +92,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._selected_points.add(index)
 
         # Queue up a translate command to move the point to the new position if the LMB is still down
-        registration_command = pyre.commands.stos.RegisterControlPointCommand(
+        registration_command = pyre.commands.stos.RegisterControlPointCommand(  # type: ignore[attr-defined]
             selected_points=self._selected_points,
             command_points={index},
             source_image=self._source_image,

@@ -3,7 +3,6 @@ import abc
 import logging
 import os
 import sys
-import pydantic
 
 logger = logging.getLogger(__name__)
 from typing import Generator
@@ -26,7 +25,7 @@ from pyre.settings import AppSettings
 from pyre.space import Space
 from nornir_imageregistration.transforms.transform_type import TransformType
 
-ControlPointActionCommandMapType = Dict[ControlPointAction, AbstractFactory[ICommand]]
+ControlPointActionCommandMapType = Dict[ControlPointAction, AbstractFactory[ICommand]]  # type: ignore[type-arg]
 
 
 def find_file_in_syspath(filename) -> Generator[str, None, None]:
@@ -63,7 +62,7 @@ class IContainer(containers.DeclarativeContainer):
     settings: Application settings loaded from settings.json (AppSettings, canonical format).
     """
     config: providers.Configuration = providers.Configuration()
-    logger: providers.Resource = None
+    logger: providers.Resource | None = None
 
     history_manager: providers.AbstractSingleton[ICommandHistory] = providers.AbstractSingleton(ICommandHistory)
     region_map: providers.Factory[IRegionMap] = providers.AbstractFactory(IRegionMap)
@@ -85,24 +84,19 @@ class IContainer(containers.DeclarativeContainer):
         ControlPointManagerKey)  # Returns the key for the configured transform controller and space
     controlpointmap_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
 
-    transform_control_point_action_maps: providers.Dict[
-        TransformType, providers.AbstractFactory[IControlPointActionMap]] = providers.Dict()
+    transform_control_point_action_maps: providers.Dict = providers.Dict()  # type: ignore[type-arg]
 
-    action_command_map: providers.Dict[TransformType, providers.Dict[ControlPointAction, AbstractFactory[ICommand]]] = \
-        providers.Dict({t: \
-                            {action: providers.AbstractFactory(ICommand) for action in iter(ControlPointAction)} \
-                        for t in iter(TransformType)}
-                       )
+    # Application containers are expected to override this with concrete providers.
+    action_command_map: providers.Dict = providers.Dict({})  # type: ignore[type-arg]
 
     # We want a different set of transform commands for each type of transform
     # action_command_map: providers.Dict[TransformType, ControlPointActionCommandMapType] = providers.Dict({})
 
-    transform_action_map: providers.Dict[TransformType, IControlPointActionMap] = \
-        providers.Dict({
-            TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
-            TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
-            TransformType.RIGID: providers.AbstractFactory(IActionMap),
-            TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
-        })
+    transform_action_map: providers.Dict = providers.Dict({  # type: ignore[type-arg]
+        TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
+        TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
+        TransformType.RIGID: providers.AbstractFactory(IActionMap),
+        TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
+    })
 
     settings = providers.Resource(load_json_settings)

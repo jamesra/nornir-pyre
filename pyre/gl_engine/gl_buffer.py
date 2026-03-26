@@ -12,25 +12,28 @@ from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 class GLBuffer(IBuffer):
     """Contains a buffer object for use in OpenGL"""
     _buffer: ctypes.c_uint | None = None
-    _layout: VertexArrayLayout
-    _data: NDArray[np.floating]
+    _layout: VertexArrayLayout | None
+    _data: NDArray[np.floating] | None
     _usage: int  # How the buffer will be used
 
     _capacity: int | None  # The number of elements the buffer can hold.  This is different than the number of elements in the data array if the buffer is oversized for dynamic use
 
     @property
-    def data(self) -> NDArray[np.floating]:
+    def data(self) -> NDArray[np.floating] | None:
         """The data in the buffer"""
         return self._data
 
     @data.setter
     def data(self, value: NDArray[np.floating]):
+        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
+        value = np.asarray(value)
         self._data = value
         self._update_buffer_data(value)
 
     @property
     def buffer(self) -> ctypes.c_uint:
         """The OpenGL buffer object"""
+        assert self._buffer is not None
         return self._buffer
 
     @property
@@ -45,6 +48,7 @@ class GLBuffer(IBuffer):
     @property
     def capacity(self) -> int:
         """The number of elements the buffer can hold"""
+        assert self._capacity is not None
         return self._capacity
 
     @property
@@ -58,6 +62,9 @@ class GLBuffer(IBuffer):
                  usage: int = gl.GL_STATIC_DRAW,
                  capacity: int | None = None):
         self._layout = layout
+        if data is not None:
+            data = data.get() if hasattr(data, "get") else data  # type: ignore[attr-defined]
+            data = np.asarray(data)
         self._data = data
         self._usage = usage
         self._capacity = capacity if capacity is not None else \
@@ -84,7 +91,7 @@ class GLBuffer(IBuffer):
         buffer_size = gl.glGetBufferParameteriv(gl.GL_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
 
         # Expand capacity if needed
-        if buffer_size == 0 or self._capacity < data.nbytes:
+        if buffer_size == 0 or (self._capacity is not None and self._capacity < data.nbytes):
             self._capacity = data.nbytes
             gl.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data, self._usage)
             check_for_error()
@@ -118,12 +125,15 @@ class GLIndexBuffer(IIndexBuffer):
 
     @data.setter
     def data(self, value: NDArray[np.integer]):
+        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
+        value = np.asarray(value)
         self._data = value
         self._update_buffer_data(value)
 
     @property
     def buffer(self) -> ctypes.c_uint:
         """The OpenGL buffer object"""
+        assert self._buffer is not None
         return self._buffer
 
     @property
@@ -138,16 +148,20 @@ class GLIndexBuffer(IIndexBuffer):
     @property
     def capacity(self) -> int:
         """The number of elements the buffer can hold"""
+        assert self._capacity is not None
         return self._capacity
 
     def __init__(self,
                  data: NDArray[np.integer] | None = None,
                  usage: int = gl.GL_STATIC_DRAW,
                  capacity: int | None = None):
+        if data is not None:
+            data = data.get() if hasattr(data, "get") else data  # type: ignore[attr-defined]
+            data = np.asarray(data)
         self._data = data if data is not None else np.array([], dtype=np.uint16)
         self._usage = usage
         self._capacity = capacity if capacity is not None else \
-            data.nbytes if data is not None else 64  # 64 bytes is the minimum buffer size
+            (data.nbytes if data is not None else 64)  # 64 bytes is the minimum buffer size
         self._create_open_gl_objects(data)
 
     def _create_open_gl_objects(self, data: NDArray[np.integer] | None):
@@ -170,7 +184,7 @@ class GLIndexBuffer(IIndexBuffer):
         buffer_size = gl.glGetBufferParameteriv(gl.GL_ELEMENT_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
 
         # Expand capacity if needed
-        if buffer_size == 0 or self._capacity < data.nbytes:
+        if buffer_size == 0 or (self._capacity is not None and self._capacity < data.nbytes):
             self._capacity = data.nbytes
             gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, self.capacity, data, self._usage)
             check_for_error()

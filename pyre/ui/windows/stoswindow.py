@@ -144,9 +144,9 @@ class StosWindow(PyreWindowBase):
             menu.addSeparator()
             submenuWindow3 = menu.addAction("2 Window View")
 
-            submenuWindow1.triggered.connect(self.onLeft1WindowView)
-            submenuWindow2.triggered.connect(self.onRight1WindowView)
-            submenuWindow3.triggered.connect(self.on2WindowView)
+            submenuWindow1.triggered.connect(self.onLeft1WindowView)  # type: ignore[union-attr]
+            submenuWindow2.triggered.connect(self.onRight1WindowView)  # type: ignore[union-attr]
+            submenuWindow3.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
 
         elif displayCount >= 3:
             submenuWindow1 = menu.addAction("Left 1 Window View")
@@ -158,33 +158,33 @@ class StosWindow(PyreWindowBase):
             menu.addSeparator()
             submenuWindow6 = menu.addAction("3 Window View")
 
-            submenuWindow1.triggered.connect(self.onLeft1WindowView)
-            submenuWindow2.triggered.connect(self.onCenter1WindowView)
-            submenuWindow3.triggered.connect(self.onRight1WindowView)
-            submenuWindow4.triggered.connect(self.on2WindowView)
-            submenuWindow5.triggered.connect(self.onRight2WindowView)
-            submenuWindow6.triggered.connect(self.on3WindowView)
+            submenuWindow1.triggered.connect(self.onLeft1WindowView)  # type: ignore[union-attr]
+            submenuWindow2.triggered.connect(self.onCenter1WindowView)  # type: ignore[union-attr]
+            submenuWindow3.triggered.connect(self.onRight1WindowView)  # type: ignore[union-attr]
+            submenuWindow4.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
+            submenuWindow5.triggered.connect(self.onRight2WindowView)  # type: ignore[union-attr]
+            submenuWindow6.triggered.connect(self.on3WindowView)  # type: ignore[union-attr]
 
         # Add checkable menu items for showing different windows
         self.menuShowFixedImage = menu.addAction("&Target Image")
-        self.menuShowFixedImage.setCheckable(True)
-        self.menuShowFixedImage.setChecked(True)
-        self.menuShowFixedImage.triggered.connect(self.onShowTargetWindow)
+        self.menuShowFixedImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.triggered.connect(self.onShowTargetWindow)  # type: ignore[union-attr]
 
         self.menuShowWarpedImage = menu.addAction("&Source Image")
-        self.menuShowWarpedImage.setCheckable(True)
-        self.menuShowWarpedImage.setChecked(True)
-        self.menuShowWarpedImage.triggered.connect(self.onShowSourceWindow)
+        self.menuShowWarpedImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowWarpedImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowWarpedImage.triggered.connect(self.onShowSourceWindow)  # type: ignore[union-attr]
 
         self.menuShowCompositeImage = menu.addAction("&Composite Image")
-        self.menuShowCompositeImage.setCheckable(True)
-        self.menuShowCompositeImage.setChecked(True)
-        self.menuShowCompositeImage.triggered.connect(self.onShowCompositeWindow)
+        self.menuShowCompositeImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowCompositeImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowCompositeImage.triggered.connect(self.onShowCompositeWindow)  # type: ignore[union-attr]
 
         menu.addSeparator()
 
         menuRestoreOrientation = menu.addAction("&Restore Orientation")
-        menuRestoreOrientation.triggered.connect(self.onRestoreOrientation)
+        menuRestoreOrientation.triggered.connect(self.onRestoreOrientation)  # type: ignore[union-attr]
 
         return menu
 
@@ -193,24 +193,24 @@ class StosWindow(PyreWindowBase):
         menu = QMenu("&Operations", self)
 
         menuFlip = menu.addAction("&Flip Image")
-        menuFlip.triggered.connect(self.onFlipImage)
+        menuFlip.triggered.connect(self.onFlipImage)  # type: ignore[union-attr]
 
         menuRotationTranslation = menu.addAction("&Rotate translate estimate")
-        menuRotationTranslation.triggered.connect(self.onRotateTranslate)
+        menuRotationTranslation.triggered.connect(self.onRotateTranslate)  # type: ignore[union-attr]
 
         menuGridRefine = menu.addAction("&Convert to refined grid")
-        menuGridRefine.triggered.connect(self.onRefineGrid)
+        menuGridRefine.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
 
         menu.addSeparator()
 
         menuInstructions = menu.addAction("&Keyboard Instructions")
-        menuInstructions.triggered.connect(self.onInstructions)
+        menuInstructions.triggered.connect(self.onInstructions)  # type: ignore[union-attr]
 
         menuClearMasked = menu.addAction("&Clear All Masked points")
-        menuClearMasked.triggered.connect(self.onClearMaskedPoints)
+        menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
 
         menuClear = menu.addAction("&Clear All points")
-        menuClear.triggered.connect(self.onClearAllPoints)
+        menuClear.triggered.connect(self.onClearAllPoints)  # type: ignore[union-attr]
 
         return menu
 
@@ -220,39 +220,39 @@ class StosWindow(PyreWindowBase):
 
         # Open stos action
         menuOpenStos = filemenu.addAction("&Open stos file")
-        menuOpenStos.triggered.connect(self.onOpenStos)
+        menuOpenStos.triggered.connect(self.onOpenStos)  # type: ignore[union-attr]
 
         # Open fixed image action
         menuOpenFixedImage = filemenu.addAction("&Open Fixed Image")
-        menuOpenFixedImage.triggered.connect(self.onOpenFixedImage)
+        menuOpenFixedImage.triggered.connect(self.onOpenFixedImage)  # type: ignore[union-attr]
 
         # Open warped image action
         menuOpenWarpedImage = filemenu.addAction("&Open Warped Image")
-        menuOpenWarpedImage.triggered.connect(self.onOpenWarpedImage)
+        menuOpenWarpedImage.triggered.connect(self.onOpenWarpedImage)  # type: ignore[union-attr]
 
         # Open fixed image mask action
         menuOpenFixedImageMask = filemenu.addAction("&Open Fixed Image Mask")
-        menuOpenFixedImageMask.triggered.connect(self.onOpenFixedImageMask)
+        menuOpenFixedImageMask.triggered.connect(self.onOpenFixedImageMask)  # type: ignore[union-attr]
 
         # Open warped image mask action
         menuOpenWarpedImageMask = filemenu.addAction("&Open Warped Image Mask")
-        menuOpenWarpedImageMask.triggered.connect(self.onOpenWarpedImageMask)
+        menuOpenWarpedImageMask.triggered.connect(self.onOpenWarpedImageMask)  # type: ignore[union-attr]
 
         filemenu.addSeparator()
 
         # Save stos action
         menuSaveStos = filemenu.addAction("&Save Stos File")
-        menuSaveStos.triggered.connect(self.onSaveStos)
+        menuSaveStos.triggered.connect(self.onSaveStos)  # type: ignore[union-attr]
 
         # Save warped image action
         menuSaveWarpedImage = filemenu.addAction("&Save Warped Image")
-        menuSaveWarpedImage.triggered.connect(self.onSaveWarpedImage)
+        menuSaveWarpedImage.triggered.connect(self.onSaveWarpedImage)  # type: ignore[union-attr]
 
         filemenu.addSeparator()
 
         # Exit action
         menuExit = filemenu.addAction("&Exit")
-        menuExit.triggered.connect(self.onExit)
+        menuExit.triggered.connect(self.onExit)  # type: ignore[union-attr]
 
         return filemenu
 
@@ -273,9 +273,9 @@ class StosWindow(PyreWindowBase):
 
     def onRestoreOrientation(self):
         """Handle Restore Orientation action"""
-        self._window_manager[ViewType.Composite.value].setPosition()
-        self._window_manager[ViewType.Target.value].setPosition()
-        self._window_manager[ViewType.Source.value].setPosition()
+        self._window_manager[ViewType.Composite.value].setPosition()  # type: ignore[attr-defined]
+        self._window_manager[ViewType.Target.value].setPosition()  # type: ignore[attr-defined]
+        self._window_manager[ViewType.Source.value].setPosition()  # type: ignore[attr-defined]
 
     def onInstructions(self):
         """Handle Keyboard Instructions action"""
@@ -288,7 +288,7 @@ class StosWindow(PyreWindowBase):
             return
         sourceImageView = self._imageviewmodel_manager[ViewType.Source]
         targetImageView = self._imageviewmodel_manager[ViewType.Target]
-        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(
+        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(  # type: ignore[attr-defined]
             config.TransformType,
             sourceImageView.Image.shape,
             targetImageView.Image.shape)
@@ -306,10 +306,10 @@ class StosWindow(PyreWindowBase):
 
         elif config.FixedImageMaskViewModel is not None:
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          config.FixedImageMaskViewModel.Image, None)
+                                          config.FixedImageMaskViewModel.Image, None)  # type: ignore[arg-type]
 
         elif config.WarpedImageMaskViewModel is not None:
-            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,
+            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,  # type: ignore[arg-type]
                                           config.WarpedImageMaskViewModel.Image)
 
     def onFlipImage(self):
@@ -318,12 +318,50 @@ class StosWindow(PyreWindowBase):
 
     def onRotateTranslate(self):
         """Handle Rotate Translate action"""
+        # #region agent log
+        try:
+            import json as _j
+            import time as _t
+            from pathlib import Path as _P
+            with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "A", "location": "stoswindow.onRotateTranslate", "message": "menu_triggered", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         settings = self._settings.stos.brute_registration
-        resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,
-                                                                     target_image_key=Space.Target,
-                                                                     settings=settings,
-                                                                     LimitImageSize=True
-                                                                     )
+        try:
+            resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
+                                                                         target_image_key=Space.Target,  # type: ignore[arg-type]
+                                                                         settings=settings,
+                                                                         LimitImageSize=True
+                                                                         )
+        except Exception as e:
+            # #region agent log
+            try:
+                import json as _j
+                import time as _t
+                import traceback as _tb
+                from pathlib import Path as _P
+                with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+                    _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "D", "location": "stoswindow.onRotateTranslate", "message": "exception", "data": {"err": str(e), "tb": _tb.format_exc()}, "timestamp": int(_t.time() * 1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            QMessageBox.warning(self, "Rotate translate estimate", str(e))
+            return
+
+        # #region agent log
+        try:
+            import json as _j
+            import time as _t
+            from pathlib import Path as _P
+            _cur = self._transform_controller.TransformModel
+            _eq = resulting_transform == _cur if resulting_transform is not None else None
+            with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
+                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "E", "location": "stoswindow.onRotateTranslate", "message": "after_registration", "data": {"result_is_none": resulting_transform is None, "equals_current_transform": _eq, "result_type": type(resulting_transform).__name__ if resulting_transform is not None else None, "current_type": type(_cur).__name__ if _cur is not None else None}, "timestamp": int(_t.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
 
         if resulting_transform is not None:
             self._transform_controller.TransformModel = resulting_transform
@@ -361,7 +399,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadFixedImage(filename)
+                    config.LoadFixedImage(filename)  # type: ignore[attr-defined]
 
     def onOpenWarpedImage(self):
         """Handle Open Warped Image action"""
@@ -378,7 +416,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadWarpedImage(filename)
+                    config.LoadWarpedImage(filename)  # type: ignore[attr-defined]
 
     def onOpenFixedImageMask(self):
         """Handle Open Fixed Image Mask action"""
@@ -395,7 +433,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)
+                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)  # type: ignore[attr-defined]
 
     def onOpenWarpedImageMask(self):
         """Handle Open Warped Image Mask action"""
@@ -412,7 +450,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)
+                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)  # type: ignore[attr-defined]
 
     def onOpenStos(self):
         """Handle Open Stos File action"""
@@ -437,11 +475,11 @@ class StosWindow(PyreWindowBase):
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
                      StosContainer.transform_controller],
-                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]) -> LoadStosResult | None:
+                 settings: AppSettings = Provide[IContainer.settings]) -> LoadStosResult | None:
         try:
             load_result = image_loader.load_stos(filename)
             settings.stos.stos_filename = filename
-            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
+            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
             stos_transform_controller.TransformModel = transform
 
             settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
@@ -472,12 +510,12 @@ class StosWindow(PyreWindowBase):
                 if selected_files:
                     StosWindow.imagedirname = os.path.dirname(selected_files[0])
                     self.filename = os.path.basename(selected_files[0])
-                    config.OutputImageFullPath = selected_files[0]
+                    config.OutputImageFullPath = selected_files[0]  # type: ignore[attr-defined]
 
                     pool = pools.GetGlobalThreadPool()
-                    pool.add_task("Save " + config.OutputImageFullPath,
+                    pool.add_task("Save " + config.OutputImageFullPath,  # type: ignore[attr-defined]
                                   pyre.common.SaveRegisteredWarpedImage,
-                                  config.OutputImageFullPath,
+                                  config.OutputImageFullPath,  # type: ignore[attr-defined]
                                   config.Transform,
                                   config.WarpedImageViewModel.Image)
 
@@ -507,11 +545,11 @@ class StosWindow(PyreWindowBase):
                         self._settings.stos.stos_filename = fullpath
 
                         stosObj = StosFile.Create(
-                            self._settings.stos.target_image.image_fullpath,
-                            self._settings.stos.source_image.image_fullpath,
+                            self._settings.stos.target_image.image_fullpath,  # type: ignore[union-attr]
+                            self._settings.stos.source_image.image_fullpath,  # type: ignore[union-attr]
                             self._transform_controller.TransformModel,
-                            self._settings.stos.target_image.mask_fullpath,
-                            self._settings.stos.source_image.mask_fullpath, )
+                            self._settings.stos.target_image.mask_fullpath,  # type: ignore[union-attr]
+                            self._settings.stos.source_image.mask_fullpath, )  # type: ignore[union-attr]
                         stosObj.Save(fullpath)
                 except ValueError:
                     prettyoutput.LogErr(f"Error saving stos file {fullpath}")

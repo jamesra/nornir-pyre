@@ -26,7 +26,7 @@ def _numpy_to_qimage(image: NDArray[np.uint8]) -> QImage:
             image = np.ascontiguousarray(image)
 
         # Create QImage directly from bytes - much faster than pixel-by-pixel
-        qimage = QImage(image.data, width, height, width, QImage.Format.Format_Grayscale8)
+        qimage = QImage(bytes(image.data), width, height, width, QImage.Format.Format_Grayscale8)
         # Make a copy to ensure data persists beyond the numpy array lifetime
         return qimage.copy()
 
@@ -38,7 +38,7 @@ def _numpy_to_qimage(image: NDArray[np.uint8]) -> QImage:
 
         # Create QImage directly from bytes - much faster than pixel-by-pixel
         # RGBA8888 format expects bytes in R,G,B,A order per pixel
-        qimage = QImage(image.data, width, height, width * 4, QImage.Format.Format_RGBA8888)
+        qimage = QImage(bytes(image.data), width, height, width * 4, QImage.Format.Format_RGBA8888)
         # Make a copy to ensure data persists beyond the numpy array lifetime
         return qimage.copy()
     else:
@@ -70,7 +70,7 @@ def _qimage_to_numpy(qimage: QImage) -> NDArray[np.uint8]:
         bytes_per_line = qimage.bytesPerLine()
         total_bytes = bytes_per_line * height
         # Get the raw bytes from the voidptr
-        bytes_data = ctypes.string_at(bits, total_bytes)
+        bytes_data = ctypes.string_at(int(bits), total_bytes)  # type: ignore[arg-type]
 
         # Create array - handle padding if present
         if bytes_per_line == width:
@@ -96,7 +96,7 @@ def _qimage_to_numpy(qimage: QImage) -> NDArray[np.uint8]:
         expected_bytes_per_line = width * 4
         total_bytes = bytes_per_line * height
         # Get the raw bytes from the voidptr
-        bytes_data = ctypes.string_at(bits, total_bytes)
+        bytes_data = ctypes.string_at(int(bits), total_bytes)  # type: ignore[arg-type]
 
         # Create array - handle padding if present
         if bytes_per_line == expected_bytes_per_line:
@@ -114,7 +114,7 @@ def _qimage_to_numpy(qimage: QImage) -> NDArray[np.uint8]:
         raise ValueError(f"Unsupported QImage format: {qimage.format()}")
 
 
-def _configure_texture(texture: QOpenGLTexture, mag_filter: gl.GLint = gl.GL_NEAREST):
+def _configure_texture(texture: QOpenGLTexture, mag_filter: int = gl.GL_NEAREST):  # type: ignore[assignment]
     """
     Configure a QOpenGLTexture with appropriate parameters for microscopy images.
     
@@ -445,11 +445,12 @@ def get_texture_array_length(texture_id: int) -> int:
     Returns:
         The number of layers in the texture array
     """
-    # Get the texture object from the global dictionary
-    if not hasattr(create_rgba_texture_array, "_textures") or texture_id not in create_rgba_texture_array._textures:
-        raise ValueError(f"Texture ID {texture_id} not found")
-
-    texture = create_rgba_texture_array._textures[texture_id]
-
-    # Return the depth of the texture array
-    return texture.depth()
+    # Query GL texture depth directly; QOpenGLTexture.depth() can report 1 for 2D arrays
+    # in some contexts/drivers even when multiple layers were uploaded.
+    previous_binding = gl.glGetIntegerv(gl.GL_TEXTURE_BINDING_2D_ARRAY)
+    gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, texture_id)
+    try:
+        num_layers = gl.glGetTexLevelParameteriv(gl.GL_TEXTURE_2D_ARRAY, 0, gl.GL_TEXTURE_DEPTH)
+    finally:
+        gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, previous_binding)
+    return int(num_layers)

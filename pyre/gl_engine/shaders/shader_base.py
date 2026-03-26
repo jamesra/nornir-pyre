@@ -22,7 +22,7 @@ def bind_texture(texture: int, texture_location: int, gl_texture: int = gl.GL_TE
     check_for_error()
 
     # Assign the sampler to the texture we just bound
-    offset = gl_texture - gl.GL_TEXTURE0
+    offset = gl_texture - gl.GL_TEXTURE0  # type: ignore[operator]
     gl.glUniform1i(texture_location, offset)
     check_for_error()
 
@@ -34,6 +34,7 @@ class VertexShader:
 
     @property
     def shader(self) -> int:
+        assert self._shader is not None
         return self._shader
 
     def __init__(self, vertex_shader_program: str):
@@ -56,6 +57,7 @@ class FragmentShader:
 
     @property
     def shader(self) -> int:
+        assert self._shader is not None
         return self._shader
 
     def __init__(self, vertex_shader_program: str):
@@ -78,8 +80,10 @@ class BaseShader(ABC):
     _program: int | None = None
 
     _vertex_layout: VertexArrayLayout
-    
+
+    @property
     def initialized(self) -> bool:
+        """True after initialize_gl_objects() has linked the GL program."""
         return self._program is not None
 
     def initialize_gl_objects(self):

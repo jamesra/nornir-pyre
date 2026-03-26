@@ -24,7 +24,7 @@ class AngleSearchRange(BaseModel):
         return AngleSearchRange(max_angle=0, angle_step_size=1)
 
     @property
-    def angle_range(self) -> NDArray[float]:
+    def angle_range(self) -> NDArray[np.floating]:
         angles = np.arange(start=-self.max_angle,
                            stop=self.max_angle + self.angle_step_size,
                            step=self.angle_step_size)  # numpy.linspace(-7.5, 7.5, 11)
@@ -43,12 +43,12 @@ class PointRegistrationSettings(BaseModel):
         super().__init__(alignment_area=alignment_area, angle_search_range=angle_search_range)
 
     @property
-    def alignment_area_shape(self) -> NDArray[int]:
+    def alignment_area_shape(self) -> NDArray[np.integer]:
         side = self.alignment_area
         return np.array([side, side], dtype=np.int32)
 
     @property
-    def angles_to_search(self) -> NDArray[float]:
+    def angles_to_search(self) -> NDArray[np.floating]:
         return self.angle_search_range.angle_range
 
 
@@ -96,3 +96,4 @@ class AppSettings(BaseModel):
 
     ui: UISettings = UISettings()  # field(default_factory=UISettings)
     stos: StosSettings = StosSettings()  # field(default_factory=StosSettings)
+

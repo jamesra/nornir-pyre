@@ -24,24 +24,27 @@ class FileDrop:
         self._original_dropEvent = window.dropEvent
         
         # Override the event handlers
-        window.dragEnterEvent = self.dragEnterEvent
-        window.dropEvent = self.dropEvent
-    
+        window.dragEnterEvent = self.dragEnterEvent  # type: ignore[method-assign]
+        window.dropEvent = self.dropEvent  # type: ignore[method-assign]
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter events"""
-        if event.mimeData().hasUrls():
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
             event.acceptProposedAction()
         elif self._original_dragEnterEvent:
             self._original_dragEnterEvent(event)
-    
+
     def dropEvent(self, event: QDropEvent):
         """Handle drop events"""
-        if event.mimeData().hasUrls():
-            filenames = [url.toLocalFile() for url in event.mimeData().urls()]
+        mime = event.mimeData()
+        if mime is not None and mime.hasUrls():
+            filenames = [url.toLocalFile() for url in mime.urls()]
             self.processDroppedFiles(filenames)
             event.acceptProposedAction()
         elif self._original_dropEvent:
             self._original_dropEvent(event)
+        return
     
     def processDroppedFiles(self, filenames):
         """Process the dropped files"""
@@ -57,18 +60,18 @@ class FileDrop:
                 if extension == ".stos":
                     config.stosdirname = dirname
                     config.stosfilename = filename
-                    config.LoadStos(fullpath)
+                    config.LoadStos(fullpath)  # type: ignore[attr-defined]
                 elif extension == ".mosaic":
                     config.stosdirname = dirname
                     config.stosfilename = filename
-                    config.LoadMosaic(fullpath)
+                    config.LoadMosaic(fullpath)  # type: ignore[attr-defined]
                 else:
                     # Prefer ViewType (StosWindow has _view_type or ID); fallback to legacy string ID
                     view_type = getattr(self.window, '_view_type', None) or getattr(self.window, 'ID', None)
-                    if view_type in (ViewType.Source, ViewType.Fixed) or self.window.ID == "Fixed":
-                        config.LoadFixedImage(fullpath)
-                    elif view_type in (ViewType.Target, ViewType.Warped) or self.window.ID == "Warped":
-                        config.LoadWarpedImage(fullpath)
+                    if view_type in (ViewType.Source, ViewType.Fixed) or self.window.ID == "Fixed":  # type: ignore[attr-defined]
+                        config.LoadFixedImage(fullpath)  # type: ignore[attr-defined]
+                    elif view_type in (ViewType.Target, ViewType.Warped) or self.window.ID == "Warped":  # type: ignore[attr-defined]
+                        config.LoadWarpedImage(fullpath)  # type: ignore[attr-defined]
             
             except IOError as error:
                 QMessageBox.critical(self.window, "Error", f"Error opening file\n{str(error)}")

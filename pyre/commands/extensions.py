@@ -18,7 +18,7 @@ def GetKeyModifiers(event: QMouseEvent | QKeyEvent | QWheelEvent) -> InputModifi
     return modifiers
 
 
-def GetMouseModifiers(event: QMouseEvent | QWheelEvent, last_mouse_event: QMouseEvent | QWheelEvent = None) -> InputModifiers:
+def GetMouseModifiers(event: QMouseEvent | QWheelEvent, last_mouse_event: QMouseEvent | QWheelEvent | None = None) -> InputModifiers:
     modifiers = GetKeyModifiers(event)
 
     # Check mouse buttons only for QMouseEvent
@@ -37,9 +37,9 @@ def GetMouseModifiers(event: QMouseEvent | QWheelEvent, last_mouse_event: QMouse
     # Check wheel rotation for QWheelEvent
     if isinstance(event, QWheelEvent):
         if event.angleDelta().y() > 0:
-            modifiers |= InputEvent.ScrollUp
+            modifiers |= InputEvent.ScrollUp  # type: ignore[operator]
         elif event.angleDelta().y() < 0:
-            modifiers |= InputEvent.ScrollDown
+            modifiers |= InputEvent.ScrollDown  # type: ignore[operator]
 
     # Compare with last event if available
     if last_mouse_event is not None and isinstance(event, QMouseEvent) and isinstance(last_mouse_event, QMouseEvent):

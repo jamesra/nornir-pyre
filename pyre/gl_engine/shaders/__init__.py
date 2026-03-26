@@ -27,10 +27,10 @@ def InitializeShaders():
     global overlay_shader
 
     if not __initialized:
-        color_shader.initialize_gl_objects()
-        texture_shader.initialize_gl_objects()
-        transform_shader.initialize_gl_objects()
-        pointset_shader.initialize_gl_objects()
-        controlpointset_shader.initialize_gl_objects()
-        overlay_shader.initialize_gl_objects()
+        color_shader.initialize_gl_objects()  # type: ignore[union-attr]
+        texture_shader.initialize_gl_objects()  # type: ignore[union-attr]
+        transform_shader.initialize_gl_objects()  # type: ignore[union-attr]
+        pointset_shader.initialize_gl_objects()  # type: ignore[union-attr]
+        controlpointset_shader.initialize_gl_objects()  # type: ignore[attr-defined]
+        overlay_shader.initialize_gl_objects()  # type: ignore[attr-defined]
         __initialized = True

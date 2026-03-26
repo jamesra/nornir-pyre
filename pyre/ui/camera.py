@@ -34,10 +34,10 @@ class Camera(IReadOnlyCamera):
     __on_change_event_listeners: list[Callable[[], None]]
     _angle: float
     _scale: float
-    _lookat: NDArray[float]
+    _lookat: NDArray[np.floating]
     _log: logging.Logger
-    _window_size: NDArray[int]
-    _view_size: NDArray[float]
+    _window_size: NDArray[np.integer]
+    _view_size: NDArray[np.floating]
 
     @property
     def max_zoom(self) -> float:
@@ -59,7 +59,7 @@ class Camera(IReadOnlyCamera):
 
     @property
     def window_size(self) -> tuple[int, int]:
-        return self._window_size
+        return self._window_size  # type: ignore[return-value]
 
     @window_size.setter
     def window_size(self, value: tuple[int, int]):
@@ -75,7 +75,7 @@ class Camera(IReadOnlyCamera):
 
     @property
     def aspect(self) -> float:
-        return self._aspect
+        return self._aspect  # type: ignore[return-value]
 
     @property
     def WindowWidth(self) -> int:
@@ -85,13 +85,13 @@ class Camera(IReadOnlyCamera):
     def WindowHeight(self) -> int:
         return int(self._window_size[nornir_imageregistration.iPoint.Y])
 
-    def _calc_view_size(self, scale: float, aspect: float) -> NDArray[float]:
+    def _calc_view_size(self, scale: float, aspect: float) -> NDArray[np.floating]:
         """Calculate the size of the visible world based on the scale"""
         size = self._window_size[0] / scale
         return np.array((size, aspect * size))
 
     @property
-    def visible_world_size(self) -> NDArray[float]:
+    def visible_world_size(self) -> NDArray[np.floating]:
         return self._view_size
 
     @property
@@ -176,9 +176,9 @@ class Camera(IReadOnlyCamera):
         self._window_size = np.array((1, 1))
 
         if size is None:
-            self.window_size = np.array((480, 640))
+            self.window_size = np.array((480, 640))  # type: ignore[assignment]
         else:
-            self.window_size = np.array(size)
+            self.window_size = np.array(size)  # type: ignore[assignment]
 
     def AddOnChangeEventListener(self, func: Callable[[], None]):
         self.__OnChangeEventListeners.append(func)
@@ -198,7 +198,7 @@ class Camera(IReadOnlyCamera):
         self.lookat = self.lookat + delta
 
     @property
-    def lookat(self) -> NDArray[float]:
+    def lookat(self) -> NDArray[np.floating]:
         return np.copy(self._lookat)
 
     @lookat.setter
@@ -259,7 +259,7 @@ class Camera(IReadOnlyCamera):
         self._view_proj = self._view @ self._projection
 
     @classmethod
-    def orthogonal_projection(cls: NDArray[np.floating], left: float, right: float, bottom: float, top: float,
+    def orthogonal_projection(cls, left: float, right: float, bottom: float, top: float,  # type: ignore[misc]
                               z_near: float, z_far: float) -> NDArray[np.floating]:
         """Create a Mat4 orthographic projection matrix for use with OpenGL.
 
@@ -307,3 +307,4 @@ class Camera(IReadOnlyCamera):
                          (s[1], u[1], -f[1], 0.0),
                          (s[2], u[2], -f[2], 0.0),
                          (-s.dot(position), -u.dot(position), f.dot(position), 1.0)))
+

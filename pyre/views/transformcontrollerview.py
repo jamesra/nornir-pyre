@@ -1,3 +1,4 @@
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QOpenGLContext
 import numpy as np
 from numpy.typing import NDArray
@@ -20,17 +21,17 @@ from pyre.interfaces.managers.buffertype import BufferType
 class BinarySelectionMapper:
     """Maps an observable set of integers to a binary ndarray"""
     _selection: ObservableSet[int]
-    _setter: Callable[[NDArray[bool]], None]
+    _setter: Callable[[NDArray[np.bool_]], None]
 
     def __init__(self, selection: ObservableSet[int],
-                 getter: Callable[[], NDArray[bool]],
-                 setter: Callable[[NDArray[bool]], None]):
+                 getter: Callable[[], NDArray[np.bool_]],
+                 setter: Callable[[NDArray[np.bool_]], None]):
         self._selection = selection
         self._getter = getter
         self._setter = setter
         self._selection.add_observer(self._OnSelectionChanged)
 
-    def _OnSelectionChanged(self, obj: ObservableSet[int], action: ObservedAction, indicies: AbstractSet[int]):
+    def _OnSelectionChanged(self, obj: ObservableSet[int], action: ObservedAction, indicies: AbstractSet[int] | None):
         """Converts the set of integers to a binary array with the integer values set to true"""
 
         # Determine the length of the array we are writing to.
@@ -48,11 +49,11 @@ class BinarySelectionMapper:
 
 class TransformControllerView:
     """Renders the control points of a transform"""
-    _transform_controller: pyre.controllers.TransformController
-    _controlpoint_view: PointView
-    _transformglbuffer_manager: pyre.interfaces.managers.ITransformControllerGLBufferManager = Provide[
+    _transform_controller: pyre.controllers.TransformController | None
+    _controlpoint_view: PointView | None
+    _transformglbuffer_manager: pyre.interfaces.managers.ITransformControllerGLBufferManager = Provide[  # type: ignore[attr-defined]
         IContainer.transform_glbuffermanager]
-    _gl_context_manager: pyre.interfaces.managers.IGLContextManager = Provide[IContainer.glcontext_manager]
+    _gl_context_manager: pyre.interfaces.managers.IGLContextManager = Provide[IContainer.glcontext_manager]  # type: ignore[attr-defined]
 
     _initialized: bool = False
 
@@ -78,8 +79,8 @@ class TransformControllerView:
         self._gl_funcs = gl_funcs
         self._controlpoint_view = None
         self._transform_controller = transform_controller
-        self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)
-        self._transform_controller.AddOnModelReplacedEventListener(self._OnTransformModelReplaced)
+        self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)  # type: ignore[union-attr]
+        self._transform_controller.AddOnModelReplacedEventListener(self._OnTransformModelReplaced)  # type: ignore[union-attr]
         self._initialized = False
         self._gl_context_manager.add_glcontext_added_event_listener(self.create_objects)
         # pyre.state.currentStosConfig.AddOnTransformControllerChangeEventListener(self._OnTransformControllerChange)
@@ -112,7 +113,7 @@ class TransformControllerView:
         if self._transform_controller not in self._transformglbuffer_manager:
             print(f"Warning: Transform controller {self._transform_controller} not in buffer manager yet")
             return False
-            
+
         buffers = self._transformglbuffer_manager[self._transform_controller]
         if buffers is None:
             print(f"Warning: Buffers not initialized for transform controller {self._transform_controller}, deferring object creation")
@@ -127,11 +128,20 @@ class TransformControllerView:
         glselectionbuffer = self._transformglbuffer_manager.get_glbuffer(
             self._transform_controller,
             BufferType.Selection)
-
         self._controlpoint_view = PointView(points=glcontrolpointbuffer,
                                             texture_indicies=glselectionbuffer,
                                             texture_array=pyre.resources.pointtextures.PointArray,
                                             gl_funcs=self.gl_funcs)
+        # Sync current controller points into the shared buffer (handles transform loaded after context creation)
+        self._controlpoint_view.points = self._transform_controller.points
+        # Deferred sync so we pick up points if transform is set in same tick after context creation
+        QTimer.singleShot(0, self._sync_control_points_from_controller)
+
+
+    def _sync_control_points_from_controller(self):
+        """Sync controller points into the control point view buffer (safe to call deferred)."""
+        if self._controlpoint_view is not None and self._transform_controller is not None:
+            self._controlpoint_view.points = self._transform_controller.points
 
     def _OnTransformControllerChange(self, new_transform_controller: pyre.controllers.TransformController | None):
         if self._transform_controller is not None:
@@ -146,12 +156,16 @@ class TransformControllerView:
         if self._controlpoint_view is None:
             return
 
-        if np.allclose(self._controlpoint_view.points, self._transform_controller.points):
+        tc_points = self._transform_controller.points  # type: ignore[union-attr]
+        tc_points = tc_points.get() if hasattr(tc_points, "get") else tc_points  # type: ignore[attr-defined]
+        buf_points = self._controlpoint_view.points
+        # Skip allclose when lengths differ (avoids shape-mismatch; buffer may be stale empty)
+        if buf_points.shape[0] == tc_points.shape[0] and np.allclose(buf_points, tc_points):
             return
 
         reset_selection = len(self._controlpoint_view.texture_index) != self._controlpoint_view.points.shape[0]
 
-        self._controlpoint_view.points = self._transform_controller.points
+        self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
 
         if reset_selection:
             self.selected = None
@@ -161,49 +175,56 @@ class TransformControllerView:
         if self._controlpoint_view is None:
             return
 
-        self._controlpoint_view.points = self._transform_controller.points
+        self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
         self.selected = None
 
     @property
-    def selected(self) -> NDArray[bool]:
-        return self._controlpoint_view.texture_index.astype(bool)
+    def selected(self) -> NDArray[np.bool_]:
+        return self._controlpoint_view.texture_index.astype(bool)  # type: ignore[union-attr]
 
     @selected.setter
-    def selected(self, value: NDArray[bool] | NDArray[np.integer] | None):
+    def selected(self, value: NDArray[np.bool_] | NDArray[np.integer] | None):
         """
         Set the selected control points
         :param value: Passing None will deselect all points, otherwise a boolean or integer array representing the texture index that should be used for points
         :return:
         """
         if value is None:
-            self._controlpoint_view.texture_index = np.zeros(self._controlpoint_view.points.shape[0], dtype=np.uint16)
+            self._controlpoint_view.texture_index = np.zeros(self._controlpoint_view.points.shape[0], dtype=np.uint16)  # type: ignore[union-attr, assignment]
             return
 
-        if value.shape[0] != self._controlpoint_view.points.shape[0]:
+        if value.shape[0] != self._controlpoint_view.points.shape[0]:  # type: ignore[union-attr]
             raise ValueError("Selected array must have the same number of elements as the control points")
 
         if value.dtype == np.integer:
-            if max(value) >= self._controlpoint_view.num_textures:
+            if max(value) >= self._controlpoint_view.num_textures:  # type: ignore[union-attr]
                 raise ValueError(
                     "Selected array of integer values contains indices larger than the number of textures in texture array")
             if min(value) < 0:
                 raise ValueError("Selected array of integer values contains indices that are negative")
 
-        self._controlpoint_view.texture_index = value.astype(np.uint16)
+        self._controlpoint_view.texture_index = value.astype(np.uint16)  # type: ignore[union-attr, assignment]
 
-    def set_selected_by_index(self, index: Iterable[int] | NDArray[int]):
+    def set_selected_by_index(self, index: Iterable[int] | NDArray[np.integer]):
         """Converts passed sequences of integers into a boolean array where values at the index are true"""
-        selected = np.zeros(self._controlpoint_view.points.shape[0], dtype=bool)
-        index = TransformController._ensure_numpy_friendly_index(index)
+        selected = np.zeros(self._controlpoint_view.points.shape[0], dtype=bool)  # type: ignore[union-attr]
+        np_index = TransformController._ensure_numpy_friendly_index(index)  # type: ignore[arg-type]
 
-        if np.any(index >= self._controlpoint_view.points.shape[0]):
+        if np.any(np_index >= self._controlpoint_view.points.shape[0]):  # type: ignore[union-attr]
             raise ValueError("Selected index is out of bounds")
 
-        selected[index] = True
+        selected[np_index] = True  # type: ignore[index]
         self.selected = selected
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float):
         if self._controlpoint_view is None:
             return
 
+        # Sync points when GL context is current (deferred sync may have run without context)
+        n_controller = len(self._transform_controller.points)  # type: ignore[union-attr]
+        n_buffer = len(self._controlpoint_view.points)
+        if n_buffer != n_controller:
+            self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
+
         self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)
+

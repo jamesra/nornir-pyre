@@ -66,10 +66,11 @@ class StosState(StateEventsImpl):
     AngleSearchMax: float = 15
     AnglesToSearch: NDArray[np.floating] = numpy.arange(start=-AngleSearchMax,
                                                         stop=AngleSearchMax + AngleSearchStepSize,
-                                                        step=AngleSearchStepSize)  # numpy.linspace(-7.5, 7.5, 11)
+                                                        step=AngleSearchStepSize,
+                                                        dtype=np.float64)  # numpy.linspace(-7.5, 7.5, 11)
 
-    _fixed_image_permutations: nornir_imageregistration.ImagePermutationHelper
-    _warped_image_permutations: nornir_imageregistration.ImagePermutationHelper
+    _fixed_image_permutations: nornir_imageregistration.ImagePermutationHelper | None
+    _warped_image_permutations: nornir_imageregistration.ImagePermutationHelper | None
     _TransformViewModel = None
     _WarpedImageViewModel = None
     _FixedImageViewModel = None
@@ -199,11 +200,11 @@ class StosState(StateEventsImpl):
         self.FireOnImageChanged(pyre.Space.Source | pyre.Space.Target)
 
     @property
-    def FixedImages(self) -> nornir_imageregistration.ImagePermutationHelper:
+    def FixedImages(self) -> nornir_imageregistration.ImagePermutationHelper | None:
         return self._fixed_image_permutations
 
     @property
-    def WarpedImages(self) -> nornir_imageregistration.ImagePermutationHelper:
+    def WarpedImages(self) -> nornir_imageregistration.ImagePermutationHelper | None:
         return self._warped_image_permutations
 
     @property
@@ -212,6 +213,8 @@ class StosState(StateEventsImpl):
 
     @property
     def TransformType(self) -> nornir_imageregistration.transforms.TransformType | None:
+        if self.Transform is None:
+            return None
         return self.GetTransformType(self.Transform)
 
     @staticmethod
@@ -276,7 +279,7 @@ class StosState(StateEventsImpl):
 
     @staticmethod
     def _update_image_permutations(img: ImageViewModel | None, mask: ImageViewModel | None) \
-            -> nornir_imageregistration.ImagePermutationHelper:
+            -> nornir_imageregistration.ImagePermutationHelper | None:
         if img is None:
             return None
         elif mask is None:
@@ -386,6 +389,6 @@ class StosState(StateEventsImpl):
     def WindowsLookAtFixedPoint(self, fixed_point, scale):
         """Force all open windows to look at this point"""
 
-        self.FixedWindow.lookatfixedpoint(fixed_point, scale)
-        self.WarpedWindow.lookatfixedpoint(fixed_point, scale)
-        self.CompositeWindow.lookatfixedpoint(fixed_point, scale)
+        self.FixedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.WarpedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.CompositeWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]

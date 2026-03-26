@@ -91,7 +91,7 @@ class ShaderVAO(ContextAwareVAOHelper):
             vertex_buffer_id = gl.glGenBuffers(1)
             if vertex_buffer_id is None or vertex_buffer_id == 0:
                 raise RuntimeError("Failed to generate vertex buffer")
-            self._vertex_buffer = int(vertex_buffer_id)
+            self._vertex_buffer = int(vertex_buffer_id)  # type: ignore[assignment]
             check_for_error()
 
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self._vertex_buffer)

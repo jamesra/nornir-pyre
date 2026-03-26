@@ -23,18 +23,18 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     """This command takes a selection of control points and adjusts the position"""
 
     _space: Space
-    _translate_origin: NDArray[float, float]
-    _original_points: NDArray[[2, ], np.floating]
+    _translate_origin: NDArray[np.floating]
+    _original_points: NDArray[np.floating]
 
     @property
     def transform(self) -> IRigidTransform:
-        return self._transform_controller.transform
+        return self._transform_controller.transform  # type: ignore[attr-defined]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
 
     @property
-    def translated_points(self) -> NDArray[[2, ], np.floating]:
-        return self._transform_controller.points[self._selected_point_set]
+    def translated_points(self) -> NDArray[np.floating]:
+        return self._transform_controller.points[list(self._selected_point_set)]  # type: ignore[index]
 
     @inject
     def __init__(self,
@@ -46,8 +46,8 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                  space: Space,  # Space we are moving the points in, source or target side
                  commandqueue: ICommandQueue,
                  translate_all: bool = False,  # True if all points in the transform should be translated
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,  # type: ignore[assignment]
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  **kwargs):
         """
 
@@ -181,7 +181,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         return True
 
     def cancel(self):
-        self._transform_controller.TransformModel = self._original_points
+        self._transform_controller.TransformModel = self._original_points  # type: ignore[assignment]
         super().cancel()
         return
 
@@ -196,3 +196,4 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     def unsubscribe_to_parent(self):
         self._unbind_mouse_events()
         self._unbind_key_events()
+

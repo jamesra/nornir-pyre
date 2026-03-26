@@ -27,6 +27,6 @@ class ICommandHistory(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def RestoreState(self, index: int = None):
+    def RestoreState(self, index: int | None = None):
         """Replace current points with points from undo history"""
         raise NotImplementedError()

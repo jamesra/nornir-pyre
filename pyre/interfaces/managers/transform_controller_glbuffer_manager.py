@@ -1,15 +1,19 @@
 from __future__ import annotations
 import abc
+from typing import TYPE_CHECKING
 
 from pyre.gl_engine import GLBuffer, GLIndexBuffer
 from pyre.interfaces.managers import BufferType, GLBufferCollection
+
+if TYPE_CHECKING:
+    from pyre.controllers.transformcontroller import TransformController
 
 
 class ITransformControllerGLBufferManager(abc.ABC):
     """Interface to a class that returns GL Buffers for transform control points"""
 
     @abc.abstractmethod
-    def __getitem__(self, item: 'pyre.controllers.TransformController') -> GLBufferCollection:
+    def __getitem__(self, item: 'TransformController') -> GLBufferCollection:
         raise NotImplementedError()
 
     def __contains__(self, item: 'TransformController') -> bool:

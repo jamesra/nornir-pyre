@@ -52,10 +52,14 @@ class IImageTransformView(ABC):
              space: Space,
              client_size: tuple[int, int],
              bounding_box: nornir_imageregistration.Rectangle | None = None,
-             default_fbo: int | None = None):
+             default_fbo: int | None = None,
+             overlay_viewport_size: tuple[int, int] | None = None,
+             show_mesh_lines: bool = False):
         """
         Draw the image in either source (fixed) or target (warped) space
-        :param client_size: Size of the client area in pixels. (height, width)
+        :param client_size: Size of the client area in pixels. (height, width) logical.
         :param default_fbo: Widget's default framebuffer (QOpenGLWidget uses an internal FBO; pass widget.defaultFramebufferObject() so overlay draws to screen).
+        :param overlay_viewport_size: When drawing to the widget (e.g. composite overlay), use this viewport (width, height) in physical pixels so the image fills the widget after resize/hi-DPI. If None, client_size is used.
+        :param show_mesh_lines: When True, draw triangulation mesh edges (triangulated transforms only).
         """
         raise NotImplementedError()

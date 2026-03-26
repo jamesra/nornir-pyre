@@ -45,18 +45,22 @@ class RegionMap(IRegionMap, IControlPointActionMap):
         if obj in self.object_to_key:
             raise KeyError("Object already in manager")
 
-        bounds = obj.bounding_box.ToTuple()
+        bbox = obj.bounding_box
+        assert bbox is not None
+        bounds = bbox.ToTuple()
         key = id(obj)
         self.key_to_object[key] = obj
-        self._index.insert(key, bounds)
+        self._index.insert(key, bounds)  # type: ignore[call-arg]
         return key
 
     def tryremove(self, key: int) -> bool:
         if key in self.key_to_object:
             obj = self.key_to_object[key]
+            bbox = obj.bounding_box
+            coords = bbox.ToTuple() if bbox is not None else (0, 0, 0, 0)
             del self.key_to_object[key]
             del self.object_to_key[obj]
-            self._index.delete(key)
+            self._index.delete(key, coords)  # type: ignore[call-arg]
             return True
         return False
 
@@ -71,10 +75,10 @@ class RegionMap(IRegionMap, IControlPointActionMap):
     def find_potential_interactions(self, event: SelectionEventData) -> list[InteractionCandidate]:
         """Determine the list of possible interactions for the event at a world position.
         First checks the bounding box, then invokes interaction_distance on the object"""
-        world_position = event.world_position
+        world_position = event.position
         bounds = nornir_imageregistration.Rectangle.CreateFromBounds(
             np.array((world_position[0], world_position[1], world_position[0], world_position[1])))
-        keys = list(self._index.intersection(bounds.ToTuple()))
+        keys = list(self._index.intersection(bounds.ToTuple()))  # type: ignore[call-arg]
         objects = [self.key_to_object[key] for key in keys]
         candidates = []  # type: list[InteractionCandidate]
         for obj in objects:

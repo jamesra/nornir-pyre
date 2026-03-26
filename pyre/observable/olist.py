@@ -10,9 +10,9 @@ ListObserverCallable = Callable[['ObservableList[T]', ObservedAction, Iterable[i
 
 class ObservableList(list, Generic[T]):
     """A python list that notifies observers when it is modified"""
-    _call_wrapper: Callable = None
+    _call_wrapper: Callable | None = None
 
-    def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable = None):
+    def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable | None = None):
         """
                 :param initial_list: Populates the list with initial values
                 :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread

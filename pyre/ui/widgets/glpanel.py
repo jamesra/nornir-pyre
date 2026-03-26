@@ -2,7 +2,7 @@
 
 from typing import Callable
 
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
 
 import OpenGL.GL as gl
 from PyQt6.QtWidgets import QWidget
@@ -31,19 +31,19 @@ debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 class GLPanel(QOpenGLWidget):
     """A QT widget that contains an OpenGL canvas."""
     # Add this as a class variable to store the shared context
-    SharedContext = None  # type: QOpenGLContext
+    SharedContext: QOpenGLContext | None = None
 
     _glinitialized: bool = False
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
-    _gl_funcs: QOpenGLFunctions = None
+    _gl_funcs: QOpenGLFunctions | None = None
 
     @property
     def gl_funcs(self) -> QOpenGLFunctions:
         """Get the OpenGL functions for this context"""
         if not self._glinitialized:
             raise RuntimeError("OpenGL functions not initialized")
-        return self._gl_funcs
+        return self._gl_funcs  # type: ignore[return-value]
 
     @classmethod
     def initialize_shared_context(cls):
@@ -55,7 +55,6 @@ class GLPanel(QOpenGLWidget):
 
         return cls.SharedContext
 
-    @inject
     def __init__(self, parent, draw_method, pos=QPoint(), size=QSize(), **kwargs):
         # Initialize shared context if not already done
         self._draw_method = draw_method
@@ -153,14 +152,24 @@ class GLPanel(QOpenGLWidget):
         if GLPanel.SharedContext is None:
             GLPanel.SharedContext = self.initialize_shared_context()
 
-            # Install debug message callback
+            # Install debug message callback only when KHR_debug is available (core in GL 4.3+).
+            # 4.1 core contexts often reject GL_DEBUG_OUTPUT with GL_INVALID_ENUM.
             if nornir_imageregistration.in_debug_mode():
-                self._gl_funcs.glDebugMessageCallback(debug_callback_func, None)
-                self._gl_funcs.glEnable(gl.GL_DEBUG_OUTPUT)
+                while gl.glGetError():
+                    pass
+                try:
+                    major = int(gl.glGetIntegerv(gl.GL_MAJOR_VERSION)[0])
+                    minor = int(gl.glGetIntegerv(gl.GL_MINOR_VERSION)[0])
+                except (TypeError, ValueError, IndexError):
+                    major, minor = 0, 0
+                if major > 4 or (major == 4 and minor >= 3):
+                    self._gl_funcs.glDebugMessageCallback(debug_callback_func, None)  # type: ignore[attr-defined,union-attr]
+                    self._gl_funcs.glEnable(gl.GL_DEBUG_OUTPUT)
+                    check_for_error("after GL debug output setup")
 
         # Set share context and notify the context manager
-        self.context().setShareContext(GLPanel.SharedContext)
-        self._glcontextmanager.add_context(self.context(), self)
+        self.context().setShareContext(GLPanel.SharedContext)  # type: ignore[union-attr]
+        self._glcontextmanager.add_context(self.context(), self)  # type: ignore[arg-type]
 
         self._glinitialized = True
         print(f"OpenGL initialized for widget {self}")
@@ -184,7 +193,7 @@ class GLPanel(QOpenGLWidget):
         # Scale the viewport dimensions by the pixel ratio
         viewport_dims = self.gl_funcs.glGetIntegerv(gl.GL_MAX_VIEWPORT_DIMS)
 
-        max_width, max_height = viewport_dims
+        max_width, max_height = viewport_dims  # type: ignore[misc]
 
         physical_width = max(1, min(physical_width, max_width))
         physical_height = max(1, min(physical_height, max_height))
@@ -251,10 +260,12 @@ class GLPanel(QOpenGLWidget):
         # draw objects - wrap in error handling 
         self._draw_method()
 
-        # Reset GL state so Qt's swapBuffers() does not see an invalid state (avoids GL_INVALID_ENUM on some drivers)
+        # Reset GL state so Qt's swapBuffers() does not see an invalid state (avoids GL_INVALID_ENUM on some drivers).
+        # QOpenGLWidget renders to defaultFramebufferObject(), not FBO 0; binding 0 here can show a blank widget.
         gl.glBindVertexArray(0)
         gl.glUseProgram(0)
-        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        dfb = int(self.defaultFramebufferObject())
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, dfb)
 
         # Pinpoint whether GL_INVALID_ENUM is from our draw or from Qt (e.g. swapBuffers) after we return
         check_for_error("at end of paintGL after draw")
@@ -268,9 +279,9 @@ class GLPanel(QOpenGLWidget):
         check_for_error("after makeCurrent in activate_context")
 
     def clear(self): 
-        self._gl_funcs.glClearDepthf(1)
+        self._gl_funcs.glClearDepthf(1)  # type: ignore[union-attr]
         check_for_error("after glClearDepthf in clear()")
-        self._gl_funcs.glClearColor(0, 0.1, 0, 1)
+        self._gl_funcs.glClearColor(0, 0.1, 0, 1)  # type: ignore[union-attr]
         check_for_error("after glClearColor in clear()")
-        self._gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+        self._gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator,union-attr]
         check_for_error("after glClear in clear()")

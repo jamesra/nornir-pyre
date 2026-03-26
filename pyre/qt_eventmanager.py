@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import inspect
 from typing import Any, Callable, TypeVar
 
@@ -7,7 +8,6 @@ from PyQt6.QtCore import QObject, QEvent, QCoreApplication, QThread, pyqtSignal,
 from PyQt6.QtWidgets import QApplication
 
 from pyre.interfaces import EventCallbackType, IEventManager
-from pyre.container import IContainer
 
 
 def qt_post_to_main(callback: Callable, *args, activate_context: Callable[[], None] | None = None, **kwargs) -> None:
@@ -32,7 +32,7 @@ class QtInvokeOnMainThreadEvent(QEvent):
     # Create a custom event type
     EVENT_TYPE = QEvent.Type(QEvent.Type.User + 1)
 
-    def __init__(self, obj: QtEventManager, args: tuple = None, kwargs: dict = None):
+    def __init__(self, obj: QtEventManager, args: tuple | None = None, kwargs: dict | None = None):
         super().__init__(QtInvokeOnMainThreadEvent.EVENT_TYPE)
         self._obj = obj
         self._args = args if args is not None else tuple()
@@ -68,7 +68,7 @@ class QtEventManager(QObject, IEventManager[EventCallbackType]):
 
     # Type hints for class attributes
     _listeners: list[EventCallbackType]
-    _description: str  # Description of the event manager to print in debug messages
+    _description: str | None  # Description of the event manager to print in debug messages
     _debug: bool  # Whether to enable debug output
 
     def __init__(self, description: str | None = None):
@@ -77,8 +77,9 @@ class QtEventManager(QObject, IEventManager[EventCallbackType]):
         self._description = description if description is not None else self._get_invoking_class()
         self._debug = False
 
-        # Try to get debug setting from config
+        # Try to get debug setting from config (deferred import to avoid circular import with pyre.container)
         try:
+            from pyre.container import IContainer
             config = Provide[IContainer.config]
             if "debug" in config:
                 self._debug = bool(config["debug"])
@@ -125,8 +126,6 @@ class QtEventManager(QObject, IEventManager[EventCallbackType]):
 
     def invoke(self, *args, **kwargs):
         """Invoke an event"""
-        print(f'QtEventManager.invoke {self._description} args={args} kwargs={kwargs}')
-
         # Check if we're on the main thread
         if self._is_on_main_thread():
             # If we're on the main thread, invoke directly

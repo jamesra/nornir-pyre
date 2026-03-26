@@ -92,7 +92,7 @@ class ImageLoader(IImageLoader):
         :param key: The key to store the image under in the image manager. If None the key will be the base name of the image file.
         :return: A tuple with the key and the permutations object."""
         key = key if key is not None else os.path.basename(image_fullpath)
-        found_image_fullpath = try_locate_file(image_fullpath, search_dirs, replacement_paths)
+        found_image_fullpath = try_locate_file(image_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
         if found_image_fullpath is None:
             raise ValueError("Image file not found: " + image_fullpath + "\n\tin" + str(search_dirs))
 
@@ -100,17 +100,17 @@ class ImageLoader(IImageLoader):
         image_mask = None
         found_mask_fullpath = None
         if mask_fullpath is not None:
-            found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs, replacement_paths)
+            found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
             if found_mask_fullpath is not None:
                 image_mask = nornir_imageregistration.LoadImage(found_mask_fullpath)
 
-        if key in self._image_manager:
-            del self._image_manager[key]
+        if key in self._image_manager:  # type: ignore[operator]
+            del self._image_manager[key]  # type: ignore[arg-type]
 
-        permutations = self._image_manager.add(key=key,
+        permutations = self._image_manager.add(key=key,  # type: ignore[arg-type]
                                                image=image,
                                                mask=image_mask)
-        return ImageLoadResult(key=key,
+        return ImageLoadResult(key=str(key),
                                permutations=permutations,
                                image_fullpath=found_image_fullpath,
                                mask_fullpath=found_mask_fullpath,
@@ -120,6 +120,6 @@ class ImageLoader(IImageLoader):
     def create_image_viewmodel(self,
                                name: str | Enum,
                                permutations: nornir_imageregistration.ImagePermutationHelper) -> ImageViewModel:
-        if name in self._image_viewmodel_manager:
-            del self._image_viewmodel_manager[name]
-        return self._image_viewmodel_manager.add(name, permutations.Image)
+        if name in self._image_viewmodel_manager:  # type: ignore[operator]
+            del self._image_viewmodel_manager[name]  # type: ignore[index]
+        return self._image_viewmodel_manager.add(str(name), permutations.Image)

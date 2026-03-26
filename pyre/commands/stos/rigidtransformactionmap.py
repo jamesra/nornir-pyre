@@ -1,18 +1,12 @@
-import enum
-from dependency_injector.wiring import Provide, providers, inject
-from dependency_injector import containers
+from dependency_injector.wiring import Provide, inject
 
 from nornir_imageregistration import PointLike
-from typing import Callable
-from pyre.interfaces import ICommand
 from pyre.selection_event_data import InputModifiers, SelectionEventData, InputEvent
 from pyre.settings import AppSettings, UISettings
-from pyre.viewmodels.controlpointmap import ControlPointMap
-from pyre.interfaces.managers.command_manager import IControlPointActionMap, IActionMap
+from pyre.interfaces.managers.command_manager import IActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
-
-from PyQt6.QtCore import Qt
+from pyre.commands.stos.actionmaphelpers import resolve_space_register_action
 
 
 class RigidTransformActionMap(IActionMap):
@@ -63,17 +57,9 @@ class RigidTransformActionMap(IActionMap):
         :return: The action that can be taken for the input.  Only one flag should be set.
         """
         interactions = set()
-        if event.IsKeyboardInput and event.input == InputEvent.Press:
-            if event.keycode == Qt.Key.Key_Space:
-                # If SHIFT is held down, align everything.  Otherwise align the selected point
-                if event.IsShiftPressed:
-                    # TODO: Stos Brute Registration with all angle rotations
-                    return ControlPointActionResult(ControlPointAction.NONE, interactions)
-                    # return ControlPointActionResult(ControlPointAction.REGISTER_ALL, interactions)
-                else:
-                    # TODO: Register with no angle rotation
-                    return ControlPointActionResult(ControlPointAction.NONE, interactions)
-                    # return ControlPointActionResult(ControlPointAction.REGISTER, interactions)
+        register_action = resolve_space_register_action(event, interactions)
+        if register_action is not None:
+            return register_action
 
         action = ControlPointAction.NONE
         # Check for creating a point

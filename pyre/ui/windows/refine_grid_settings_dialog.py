@@ -16,8 +16,9 @@ class GridSettingsDialogResult(NamedTuple):
 
     @property
     def angles_to_search(self) -> list[float]:
-        return nornir_imageregistration.settings.AngleSearchRange(max_angle=self.max_angle,
-                                                                  angle_step_size=self.angle_step_size).angle_range
+        return list(nornir_imageregistration.settings.AngleSearchRange(
+            max_angle=getattr(self, 'max_angle', 180),
+            angle_step_size=getattr(self, 'angle_step_size', 1.0)).angle_range)
 
 
 class RefineGridSettingsDialog(QDialog):

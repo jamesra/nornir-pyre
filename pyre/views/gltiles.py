@@ -108,6 +108,17 @@ def _tile_bounding_points(tile_bounding_rect: nornir_imageregistration.Rectangle
     return warped_corners
 
 
+def _points_to_numpy_f32(points: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Convert transform output (NumPy or CuPy) to NumPy float32 for GL/Qt paths."""
+    try:
+        import cupy as cp
+    except ImportError:
+        return np.asarray(points, dtype=np.float32)
+    if cp.get_array_module(points) is cp:
+        return np.asarray(cp.asnumpy(points), dtype=np.float32)
+    return np.asarray(points, dtype=np.float32)
+
+
 def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
                                points: NDArray[np.floating],
                                forward_transform: bool) -> NDArray[np.floating]:
@@ -116,13 +127,14 @@ def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
 
     """
 
-    # Figure out where the corners of the texture belong 
+    # Figure out where the corners of the texture belong
+    pts_for_transform = nornir_imageregistration.EnsurePointsAre2DArray(points)
     if forward_transform:
-        fixed_points = points
-        warped_points = transform.Transform(points)
+        fixed_points = _points_to_numpy_f32(points)
+        warped_points = _points_to_numpy_f32(transform.Transform(pts_for_transform))
     else:
-        fixed_points = transform.InverseTransform(points)
-        warped_points = points
+        warped_points = _points_to_numpy_f32(points)
+        fixed_points = _points_to_numpy_f32(transform.InverseTransform(pts_for_transform))
 
     return np.hstack((warped_points, fixed_points))
 
@@ -164,6 +176,7 @@ def _merge_point_pairs_with_transform(points_a: NDArray[np.floating],
 
     if len(points_b) > 0:
         return points_b
+    return np.array([])
 
 
 def _build_subtile_point_pairs(transform: nornir_imageregistration.ITransform,
@@ -173,8 +186,9 @@ def _build_subtile_point_pairs(transform: nornir_imageregistration.ITransform,
     tile_points = _tile_grid_points(rect)
     tile_point_pairs = _find_corresponding_points(transform, tile_points,
                                                   forward_transform=forward_transform)
-    transform_point_pairs = np.concatenate(np.array(transform.GetWarpedPointsInRect(rect.ToArray())),
-                                           2).squeeze()
+    transform_point_pairs = np.concatenate(
+        np.array(transform.GetWarpedPointsInRect(rect.ToArray())),  # type: ignore[attr-defined]
+        2).squeeze()
     return _merge_point_pairs_with_transform(tile_point_pairs, transform_point_pairs)
 
 
@@ -231,6 +245,8 @@ def _texture_coordinates(points_yx: NDArray[np.floating],
     :param bounding_rect: Bounding rectangle for the texture space
     :return: texture coordinates for a rectangle in fixed (source) space
     """
+    # Ensure numpy: transform may return CuPy arrays; mixing with np.array() causes TypeError
+    points_yx = np.asarray(points_yx, dtype=np.float64)
     size = np.array(bounding_rect.Size, dtype=np.float64)
     # +0.5 so the first texel center is at (0.5/w, 0.5/h) instead of sampling at (0,0) edge
     texture_points = (points_yx - np.array(bounding_rect.BottomLeft) + 0.5) / size
@@ -254,6 +270,9 @@ def _render_data_for_transform_point_pairs(point_pairs: NDArray[np.floating],
     indices to render them as triangles
     :return: Verts3D, indices, Verts3d is Source (X,Y,Z), Target (X,Y,Z), Texture (U,V)
     """
+    # Ensure numpy: transform may return CuPy arrays; scipy.Delaunay and np.vstack require numpy. OpenGL buffers need host memory.
+    point_pairs = point_pairs.get() if hasattr(point_pairs, "get") else point_pairs  # type: ignore[union-attr]
+    point_pairs = np.asarray(point_pairs, dtype=np.float64)
 
     fixed_points_yx, warped_points_yx = np.hsplit(point_pairs, 2)
 

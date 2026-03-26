@@ -16,7 +16,7 @@ from pyre.viewmodels.imageviewmodel import ImageViewModel
 
 
 class ImageViewModelManager(IImageViewModelManager):
-    _models = dict[str, ImageViewModel]
+    _models: dict[str, ImageViewModel]
     # _glcontext_manager: IGLContextManager
     _change_event_manager: IEventManager[ImageViewModelManagerChangeCallback]
     _lock: Lock

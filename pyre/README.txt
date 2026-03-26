@@ -1,6 +1,4 @@
-This file has been deprecated. Please refer to the main README.rst file in the repository root for up-to-date documentation on keyboard and mouse controls.
+Pyre user documentation (mouse, keyboard, workflows) is shipped as README.rst in the nornir-pyre package root.
+The application loads that file for console startup and Operations → Keyboard Instructions.
 
-For the most current documentation, visit:
-https://github.com/jamesra/nornir-pyre
-
-Pyre was developed by James Anderson and Drew Ferrell as part of the Nornir project, a suite of tools for scientific image processing and analysis.
+For the latest copy online, see the nornir-pyre repository README.rst.

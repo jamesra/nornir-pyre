@@ -32,15 +32,15 @@ class ControlPointMapManager(IControlPointMapManager):
         if key.space not in space_maps:
             raise KeyError(f"No ControlPointMap for space {key.space} under {key.transform_controller}")
 
-        return space_maps[key.space]
+        return space_maps[key.space]  # type: ignore[index]
 
-    def __setitem__(self, key: ControlPointManagerKey, value: dict[Space, ControlPointMap]):
+    def __setitem__(self, key: ControlPointManagerKey, value: ControlPointMap):
         """Stores the ControlPointMap for the specified TransformController and space"""
         if key.transform_controller not in self._maps:
-            space_maps = {}
+            space_maps: dict[Space, ControlPointMap] = {}
             self._maps[key.transform_controller] = space_maps
         else:
             space_maps = self._maps[key.transform_controller]
 
-        space_maps[key.space] = value
+        space_maps[key.space] = value  # type: ignore[index]
         return

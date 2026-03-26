@@ -48,7 +48,8 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         """
         buffer_collection = self._initialize_buffer_collection() if self._have_context else None
         if buffer_collection is not None:
-            buffer_collection[BufferType.ControlPoint].data = transform_controller.points
+            pts = self.__swap_columns(transform_controller.points)
+            buffer_collection[BufferType.ControlPoint].data = pts
 
         if transform_controller in self._transform_controllers:
             raise KeyError(f"Transform controller {transform_controller} already exists in the manager")
@@ -79,9 +80,9 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
                 if buffer_collection is not None:
                     buffer_collection[BufferType.ControlPoint].data = TransformController.swap_columns_to_XY(
                         transform_controller.points)
-                    buffer_collection[BufferType.Selection].data = np.zeros((len(transform_controller.points), 1),
+                    buffer_collection[BufferType.Selection].data = np.zeros((len(transform_controller.points), 1),  # type: ignore[assignment]
                                                                             dtype=np.uint16)
-        
+
         # After buffers are initialized, notify any listeners that were waiting for buffers
         # This allows create_objects callbacks that were deferred to retry
         # Note: We don't directly invoke context callbacks here, but the fact that buffers are now
@@ -114,10 +115,10 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         buffer_collection = self._transform_controllers[transform_controller]
         if buffer_collection is not None:
             control_point_buffer = buffer_collection[BufferType.ControlPoint]
-            num_ctrl_points = len(control_point_buffer.data)
+            num_ctrl_points = len(control_point_buffer.data) if control_point_buffer.data is not None else 0
             if num_ctrl_points != len(transform_controller.points):
                 selection_point_buffer = buffer_collection[BufferType.Selection]
-                selection_point_buffer.data = np.zeros((len(transform_controller.points), 1), dtype=np.uint16)
+                selection_point_buffer.data = np.zeros((len(transform_controller.points), 1), dtype=np.uint16)  # type: ignore[assignment]
 
             points = self.__swap_columns(transform_controller.points)
             buffer_collection[BufferType.ControlPoint].data = points
@@ -136,7 +137,10 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         return item in self._transform_controllers
 
     def __getitem__(self, item) -> GLBufferCollection:
-        return self._transform_controllers[item]
+        result = self._transform_controllers[item]
+        if result is None:
+            raise ValueError("Buffers not initialized")
+        return result
 
     def get_glbuffer(self, key: TransformController, type: BufferType) -> GLBuffer:
         """Fetch the gl buffer for a transform controller of the requested type.

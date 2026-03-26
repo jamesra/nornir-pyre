@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 
 from dependency_injector.providers import Provider, Configuration
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
 import numpy as np
 from numpy.typing import NDArray
 from PyQt6.QtWidgets import QWidget
@@ -34,14 +34,13 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
     _command_action_points: set[int]
     _set_operation: SetOperation
 
-    @inject
     def __init__(self,
                  parent: QWidget,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
                  space: Space,  # Space we are moving the points in, source or target side
                  set_operation: SetOperation,
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,
 
                  **kwargs):
         """
@@ -55,7 +54,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
         :param space:
         :param completed_func:
         """
-        super().__init__(completed_func)
+        super().__init__(completed_func)  # type: ignore[arg-type]
 
         self._selection_set = selected_points
         self._set_operation = set_operation

@@ -16,8 +16,8 @@ class ControlPointMap:
     _transformcontroller: TransformController
     _kdtree: scipy.spatial.KDTree
     _tween: float | Space
-    _cached_tween_points: NDArray[np.floating] = None
-    _cached_points: NDArray[np.floating] = None  # The cached source and target points
+    _cached_tween_points: NDArray[np.floating] | None = None
+    _cached_points: NDArray[np.floating] | None = None  # The cached source and target points
 
     def __init__(self, transformcontroller: TransformController,
                  tween: float | Space):
@@ -36,6 +36,7 @@ class ControlPointMap:
 
     @property
     def points(self) -> NDArray[np.floating]:
+        assert self._cached_points is not None
         return self._cached_points
 
     @property

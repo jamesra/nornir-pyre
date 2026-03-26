@@ -27,13 +27,31 @@ from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
 
 
+DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
+    ControlPointAction.NONE: Qt.CursorShape.ArrowCursor,
+    ControlPointAction.CREATE: Qt.CursorShape.CrossCursor,
+    ControlPointAction.DELETE: Qt.CursorShape.ForbiddenCursor,
+    ControlPointAction.TRANSLATE: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.REGISTER: Qt.CursorShape.WhatsThisCursor,
+    ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.TRANSLATE_ALL: Qt.CursorShape.CrossCursor,
+    ControlPointAction.CALL_TO_MOUSE: Qt.CursorShape.CrossCursor,
+}
+
+
+def _build_default_cursor_action_map() -> dict[ControlPointAction, QCursor]:
+    # QCursor creation requires a live QGuiApplication, so keep it lazy.
+    return {action: QCursor(shape) for action, shape in DEFAULT_CURSOR_SHAPES.items()}
+
+
 class DefaultTransformCommand(NavigationCommandBase):
     """
     Supports:
      1. Navigating around the view of the images.
      2. Selecting control points
     """
-    _executed: bool | None = None
+    _executed: bool = False
 
     config = Provide[IContainer.config]
 
@@ -49,7 +67,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _setselection: SetSelectionCallable | None
     _last_mouse_press_event_args: QMouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
-    _action_to_command: Dict[ControlPointAction, Factory]
+    _action_to_command: dict  # type: ignore[type-arg]
 
     log: Logger = logging.Logger("DefaultTransformCommand")
 
@@ -108,25 +126,13 @@ class DefaultTransformCommand(NavigationCommandBase):
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
 
-        self.cursor_action_map = {
-            ControlPointAction.NONE: QCursor(Qt.CursorShape.ArrowCursor),
-            ControlPointAction.CREATE: QCursor(Qt.CursorShape.CrossCursor),
-            ControlPointAction.DELETE: QCursor(Qt.CursorShape.ForbiddenCursor),
-            ControlPointAction.TRANSLATE: QCursor(Qt.CursorShape.OpenHandCursor),
-            ControlPointAction.REGISTER: QCursor(Qt.CursorShape.WhatsThisCursor),
-            ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: QCursor(Qt.CursorShape.OpenHandCursor),
-            ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: QCursor(
-                Qt.CursorShape.OpenHandCursor),
-            ControlPointAction.TRANSLATE_ALL: QCursor(Qt.CursorShape.CrossCursor),
-            ControlPointAction.CALL_TO_MOUSE: QCursor(Qt.CursorShape.CrossCursor),
-        }
+        self.cursor_action_map = _build_default_cursor_action_map()
 
         self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
         # self._action_command_map = pyre.commands.container_overrides.action_command_map[transform_controller.type]
         self._selection_event_history = {}
         # self._action_command_map = action_command_map[transform_controller.type]
         self._commandqueue = commandqueue
-        self._executed = False
         self._space = space
         self._selected_points = selected_points
         transform_action_map_factory = transform_control_point_action_maps()[
@@ -134,12 +140,10 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         if isinstance(transform_controller.TransformModel, IControlPoints):
             controlpointmapkey = ControlPointManagerKey(transform_controller, space)
-            print(f'Key: {controlpointmapkey} Space: {space}')
-
             self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
             self._actionmap = transform_action_map_factory(self._controlpointmap)
         else:
-            self._actionmap = transform_action_map_factory()
+            self._actionmap = transform_action_map_factory()  # type: ignore[call-arg]
 
         # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
 
@@ -177,25 +181,49 @@ class DefaultTransformCommand(NavigationCommandBase):
     def can_execute(self) -> bool:
         return True
 
-    def _get_last_event(self, input_source: InputSource, input_event: InputEvent) -> SelectionEventData | None:
-        key = SelectionEventKey(input_source, input_event)
-        return self._selection_event_history.get(key, None)
+    def _get_space_point(self, point_pair: PointPair):
+        return point_pair.source if self.space == Space.Source else point_pair.target
+
+    def _build_selection_event(
+        self,
+        *,
+        source: InputSource,
+        input_event: InputEvent,
+        modifiers,
+        position,
+        keycode: int | None = None,
+    ) -> SelectionEventData:
+        return SelectionEventData(
+            camera=self.camera,
+            source=source,
+            input=input_event,
+            modifiers=modifiers,
+            position=position,
+            keycode=keycode,
+            existing_selections=self._selected_points,
+        )
+
+    def _dispatch_selection_event(
+        self, selection_event_data: SelectionEventData, *, update_cursor: bool = True
+    ) -> bool:
+        new_command = self.check_for_new_command(selection_event_data)
+        if not new_command and update_cursor:
+            self._update_cursor_for_possible_actions(selection_event_data)
+
+        return new_command
 
     def on_key_down(self, event):
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],
                                target=self._mouse_position_history[Space.Target])
-        point = point_pair.source if self.space == Space.Source else point_pair.target
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Keyboard,
-                                                  input=InputEvent.Press,
-                                                  modifiers=GetKeyModifiers(event),
-                                                  position=point,
-                                                  keycode=event.key(),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Keyboard,
+            input_event=InputEvent.Press,
+            modifiers=GetKeyModifiers(event),
+            position=self._get_space_point(point_pair),
+            keycode=event.key(),
+        )
+        self._dispatch_selection_event(selection_event_data)
 
         super().on_key_down(event)
 
@@ -207,17 +235,14 @@ class DefaultTransformCommand(NavigationCommandBase):
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],
                                target=self._mouse_position_history[Space.Target])
-        point = point_pair.source if self.space == Space.Source else point_pair.target
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Keyboard,
-                                                  input=InputEvent.Release,
-                                                  modifiers=GetKeyModifiers(event),
-                                                  position=point,
-                                                  keycode=event.key(),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Keyboard,
+            input_event=InputEvent.Release,
+            modifiers=GetKeyModifiers(event),
+            position=self._get_space_point(point_pair),
+            keycode=event.key(),
+        )
+        self._dispatch_selection_event(selection_event_data)
 
         super().on_key_up(event)
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
@@ -232,20 +257,17 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._mouse_position_history[Space.Source] = point_pair.source
         self._mouse_position_history[Space.Target] = point_pair.target
 
-        point = point_pair.source if self.space == Space.Source else point_pair.target
+        point = self._get_space_point(point_pair)
 
-        last_selection_event = self._get_last_event(InputSource.Mouse, InputEvent.Release)
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Mouse,
-                                                  input=InputEvent.Press,
-                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
-                                                  position=point,
-                                                  existing_selections=self._selected_points)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Mouse,
+            input_event=InputEvent.Press,
+            modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+            position=point,
+        )
 
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        self._dispatch_selection_event(selection_event_data)
 
         self._last_mouse_press_event_args = event
 
@@ -285,25 +307,26 @@ class DefaultTransformCommand(NavigationCommandBase):
         """For a command we want to make sure that the point under the mouse is passed with the selected points.
         This was needed for commands triggered by the right-mouse button that did not cause the selection check"""
         new_selections = self._actionmap.find_interactions(selection_event_data.position,
-                                                           1 / self.camera.scale)
+                                                           1 / self.camera.scale)  # type: ignore[call-arg]
         self.selected_points.update(new_selections)
 
     def on_mouse_motion(self, event: QMouseEvent):
+        # Use current parent size so mouse coords and cursor updates are correct after resize (e.g. composite).
+        self._width, self._height = self.parent.size().width(), self.parent.size().height()
         point_pair = self.get_world_positions(event)
         try:
-            point = point_pair.source if self.space == Space.Source else point_pair.target
+            point = self._get_space_point(point_pair)
 
-            selection_event_data = SelectionEventData(camera=self.camera,
-                                                      source=InputSource.Mouse,
-                                                      input=InputEvent.Drag,
-                                                      modifiers=GetMouseModifiers(event,
-                                                                                  self._last_mouse_press_event_args),
-                                                      position=point,
-                                                      existing_selections=self._selected_points)
+            selection_event_data = self._build_selection_event(
+                source=InputSource.Mouse,
+                input_event=InputEvent.Drag,
+                modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+                position=point,
+            )
 
             self._selection_event_history[selection_event_data.eventkey] = selection_event_data
             # Check for command, if there is no command, scroll the camera
-            new_command = self.check_for_new_command(selection_event_data)
+            new_command = self._dispatch_selection_event(selection_event_data, update_cursor=False)
             if new_command:
                 return
 
@@ -341,19 +364,17 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     def on_mouse_release(self, event):
         point_pair = self.get_world_positions(event)
-        point = point_pair.source if self.space == Space.Source else point_pair.target
+        point = self._get_space_point(point_pair)
 
         #        last_selection = self._get_last_event(InputSource.Mouse, InputEvent.Press)
 
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Mouse,
-                                                  input=InputEvent.Release,
-                                                  position=point,
-                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Mouse,
+            input_event=InputEvent.Release,
+            modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+            position=point,
+        )
+        self._dispatch_selection_event(selection_event_data)
 
         self._last_mouse_press_event_args = event
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data

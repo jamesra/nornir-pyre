@@ -78,7 +78,7 @@ class MosaicState(StateEventsImpl):
         self._ImageViewModelList.append(ivm)
         self._TransformControllerList.append(tvm)
 
-        image_transform_view = ImageTransformView(ivm, transform_controller=transform)
+        image_transform_view = ImageTransformView(ivm, transform_controller=transform)  # type: ignore[call-arg]
 
         return image_transform_view
 
@@ -112,7 +112,7 @@ class MosaicState(StateEventsImpl):
             tile_full_path = os.path.join(tiles_dir, image_filename)
 
             task = pools.add_task(str(z), self.AllocateMosaicTile, transform, tile_full_path, transform_scale)
-            task.z = z
+            task.z = z  # type: ignore[reportAttributeAccessIssue]
             tasks.append(task)
 
             # image_transform_view = self.AllocateMosaicTile(transform, tile_full_path, transform_scale)

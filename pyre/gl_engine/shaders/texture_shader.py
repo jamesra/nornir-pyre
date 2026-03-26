@@ -1,5 +1,4 @@
 from typing import Sequence
-import warnings
 
 from OpenGL import GL as gl
 import numpy as np
@@ -33,8 +32,7 @@ _texture_fragment_shader_program = """
     void main() {
         vec4 texColor = texture(
                 texture_sampler, frag_texture_coordinate
-            ); 
-        //outputColor = vec4(texColor.r, frag_texture_coordinate.x, frag_texture_coordinate.y, 1);
+            );
         outputColor = texColor;
     }
 """
@@ -139,7 +137,7 @@ class TextureShader(BaseShader):
 
             vertex_array_object.bind()
 
-            gl.glUniform1f(self.tween_location, tween)
+            gl.glUniform1f(self.tween_location, float(tween))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()
@@ -155,9 +153,8 @@ class TextureShader(BaseShader):
             #    print("Framebuffer is not complete")
 
             if vertex_array_object.num_elements == 0:
-                warnings.warn("No elements to draw")
                 return
-            
+
             gl.glDrawElements(gl.GL_TRIANGLES, vertex_array_object.num_elements, gl.GL_UNSIGNED_SHORT, None)
             check_for_error()
         finally:

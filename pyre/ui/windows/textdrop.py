@@ -20,12 +20,13 @@ class TextDrop:
         self._original_dropEvent = window.dropEvent
         
         # Override the event handlers
-        window.dragEnterEvent = self.dragEnterEvent
-        window.dropEvent = self.dropEvent
+        window.dragEnterEvent = self.dragEnterEvent  # type: ignore[method-assign]
+        window.dropEvent = self.dropEvent  # type: ignore[method-assign]
     
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter events"""
-        if event.mimeData().hasText():
+        mime = event.mimeData()
+        if mime is not None and mime.hasText():
             print("DragOver Text")
             event.acceptProposedAction()
         elif self._original_dragEnterEvent:
@@ -33,8 +34,9 @@ class TextDrop:
     
     def dropEvent(self, event: QDropEvent):
         """Handle drop events"""
-        if event.mimeData().hasText():
-            text = event.mimeData().text()
+        mime = event.mimeData()
+        if mime is not None and mime.hasText():
+            text = mime.text()
             print(str(text))
             event.acceptProposedAction()
         elif self._original_dropEvent:

@@ -1,24 +1,19 @@
-import enum
-from dependency_injector.wiring import Provide, providers, inject
-from dependency_injector import containers
+from dependency_injector.wiring import Provide, inject
 
 from nornir_imageregistration import PointLike
-from typing import Callable
-from pyre.interfaces import ICommand
 from pyre.selection_event_data import InputModifiers, SelectionEventData, InputEvent
 from pyre.settings import AppSettings, UISettings
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.interfaces.managers.command_manager import IControlPointActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
-
-from PyQt6.QtCore import Qt
+from pyre.commands.stos.actionmaphelpers import find_control_point_interactions, resolve_space_register_action
 
 
 class GridTransformActionMap(IControlPointActionMap):
     """
     Maps inputs to actions based on control points based on a specific type of transform.
-    Grid transforms do not support adding or removing points
+    Grid transforms do not support adding or removing control points in the UI.
     """
 
     # config = Provide[IContainer.config]
@@ -37,16 +32,19 @@ class GridTransformActionMap(IControlPointActionMap):
         self.control_point_map = control_point_map
 
     def has_potential_interactions(self, world_position: PointLike) -> bool:
-        return len(self.find_potential_interactions(world_position, self.search_radius)) > 0
+        return bool(self.find_interactions(world_position, 1.0))
 
     def find_interactions(self, world_position: PointLike, scale: float) -> set[int]:
-        return self.control_point_map.find_nearest_within(world_position, self.search_radius * scale)
+        return find_control_point_interactions(self.control_point_map, world_position, self.search_radius, scale)
+
+    def can_delete(self, event: SelectionEventData, interactions: set[int]) -> bool:
+        """Grid refinement transforms do not support deleting control points in Pyre."""
+        return False
 
     def get_possible_actions(self, event: SelectionEventData) -> ControlPointActionResult:
         """
         :return: The set of flags representing actions that may be taken based on the current position and further inputs.
-        For example: If hovering over a control point, TRANSLATE and DELETE might be returned as they would be triggered
-        by a left click or SHIFT+right click respectively."""
+        For example: If hovering over a control point, TRANSLATE might be returned for a left click or drag."""
         interactions = self.find_interactions(event.position, (1 / event.camera.scale))
 
         actions = ControlPointAction.NONE
@@ -56,7 +54,7 @@ class GridTransformActionMap(IControlPointActionMap):
                 actions |= ControlPointAction.TRANSLATE_ALL
 
             elif len(interactions) == 0:
-                if len(event.existing_selections) == 1:
+                if event.existing_selections is not None and len(event.existing_selections) == 1:
                     if event.IsOnlyAltPressed:
                         actions = ControlPointAction.CALL_TO_MOUSE
                     else:
@@ -78,24 +76,17 @@ class GridTransformActionMap(IControlPointActionMap):
         """
         interactions = self.find_interactions(event.position, 1 / event.camera.scale)
 
-        if event.IsKeyboardInput and event.input == InputEvent.Press:
-            if event.keycode == Qt.Key.Key_Space:
-                # If SHIFT is held down, align everything.  Otherwise align the selected point
-                if event.IsShiftPressed:
-                    return ControlPointActionResult(ControlPointAction.REGISTER_ALL, interactions)
-                else:
-                    return ControlPointActionResult(ControlPointAction.REGISTER, interactions)
-            elif event.keycode == Qt.Key.Key_Delete:
-                return ControlPointActionResult(ControlPointAction.DELETE, interactions)
+        register_action = resolve_space_register_action(event, interactions)
+        if register_action is not None:
+            return register_action
 
         action = ControlPointAction.NONE
         # Check for creating a point
         if event.IsMouseInput or event.IsKeyboardInput:
             if event.input == InputEvent.Press:
-                # Check for deleting a point
                 if len(interactions) == 0:
                     if event.IsLeftMousePressed:
-                        if event.IsOnlyAltPressed and len(event.existing_selections) == 1:
+                        if event.IsOnlyAltPressed and event.existing_selections is not None and len(event.existing_selections) == 1:
                             action = ControlPointAction.CALL_TO_MOUSE
                         elif event.NoModifierKeys:
                             action = ControlPointAction.REPLACE_SELECTION

@@ -15,7 +15,7 @@ from pyre.gl_engine.helpers import raise_on_error
 
 # Legacy code path: pyglet used for draw_indexed_custom, GetOrCreateAttribute, DrawRectangle
 try:
-    import pyglet
+    import pyglet  # type: ignore[import-untyped]
 except ImportError:
     pyglet = None  # type: ignore
 
@@ -175,11 +175,12 @@ def GetOrCreateBuffer(size: int, fmt: str, array: NDArray[numpy.floating]):
     return attribute, buffer
 
 
-def GetOrCreateBuffers(size: int, *data: list[tuple[str, numpy.ndarray]]):
+def GetOrCreateBuffers(size: int, *data: tuple[tuple[str, numpy.ndarray], ...]):
     """Generate the attributes used in the GL draw_indexed call."""
     buffers = []
-    for fmt, array in data:
-        attribute, buffer = GetOrCreateBuffer(size, fmt, array)
+    for item in data:
+        fmt, array = item
+        attribute, buffer = GetOrCreateBuffer(size, fmt, array)  # type: ignore[arg-type]
         buffers.append((attribute, buffer))
     return buffers
 
@@ -222,7 +223,7 @@ def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vb
     """Draw a primitive with indexed vertices from buffers."""
     gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
     raise_on_error("after glPushClientAttrib in draw_indexed_from_buffer")
-    for attribute, buffer in vertex_buffer:
+    for attribute, buffer in vertex_buffer:  # type: ignore[union-attr]
         attribute.set_pointer(buffer.ptr)
     if size <= 0xff:
         index_type = gl.GL_UNSIGNED_BYTE
@@ -233,7 +234,7 @@ def draw_indexed_from_buffer(size: int, vertex_buffer: vbo.VBO, index_buffer: vb
     else:
         index_type = gl.GL_UNSIGNED_INT
         index_c_type = ctypes.c_uint
-    index_array = (index_c_type * len(index_buffer))(*index_buffer)
+    index_array = (index_c_type * len(index_buffer))(*index_buffer)  # type: ignore[union-attr]
     gl.glDrawElements(mode, len(index_buffer), index_type, index_array)
     raise_on_error("after glDrawElements in draw_indexed_from_buffer")
     gl.glFlush()

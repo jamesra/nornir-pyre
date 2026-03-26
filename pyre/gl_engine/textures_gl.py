@@ -145,7 +145,7 @@ def create_rgba_texture_array(images: NDArray[np.uint8]) -> int:
 
     z_size, y_size, x_size, num_channels = images.shape
     layer_count = z_size
-    images = images.astype(np.float32, copy=False)
+    images = images.astype(np.float32, copy=False)  # type: ignore[assignment]
     gl.glTexImage3D(gl.GL_TEXTURE_2D_ARRAY, 0, gl.GL_RGBA,
                     x_size, y_size, layer_count,
                     0, gl.GL_RGBA, gl.GL_FLOAT, None)

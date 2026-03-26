@@ -109,7 +109,7 @@ class ImageViewModel:
         return self._TextureSize
 
     @property
-    def ImageFilename(self) -> str:
+    def ImageFilename(self) -> str | None:
         """Filename we loaded"""
         return self._ImageFilename
 
@@ -131,6 +131,9 @@ class ImageViewModel:
         """
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
+        # Accept CuPy arrays from image loader (convert to numpy for viewmodel/tiling)
+        if hasattr(input_image, "get") and callable(getattr(input_image, "get")):
+            input_image = input_image.get()  # type: ignore[attr-defined]
         if isinstance(input_image, str):
 
             Logger.info("Loading image: " + input_image)
@@ -163,18 +166,18 @@ class ImageViewModel:
     def ResizeToPowerOfTwo(self, InputImage: str, tilesize: nornir_imageregistration.ShapeLike | None = None) -> \
             NDArray[np.floating]:
         if tilesize is None:
-            tilesize = self._TileSize
+            tilesize = self._TileSize  # type: ignore[attr-defined]
 
-        Resize = scipy.ndimage.imread(InputImage, flatten=True)
+        Resize = scipy.ndimage.imread(InputImage, flatten=True)  # type: ignore[attr-defined]
 
         height = Resize.shape[0]
         width = Resize.shape[1]
 
-        NumCols = math.ceil(width / float(tilesize[0]))
-        NumRows = math.ceil(height / float(tilesize[1]))
+        NumCols = math.ceil(width / float(tilesize[0]))  # type: ignore[index]
+        NumRows = math.ceil(height / float(tilesize[1]))  # type: ignore[index]
 
-        newwidth = NumCols * tilesize[0]
-        newheight = NumRows * tilesize[1]
+        newwidth = NumCols * tilesize[0]  # type: ignore[index]
+        newheight = NumRows * tilesize[1]  # type: ignore[index]
 
         newImage = np.zeros((newheight, newwidth), dtype=Resize.dtype)
 
@@ -236,7 +239,7 @@ class ImageViewModel:
                     temp = self.Image[iY:end_iY, iX:end_iX]
 
                 try:
-                    texture = gl_engine.textures.create_grayscale_texture(temp)
+                    texture = gl_engine.textures.create_grayscale_texture(temp)  # type: ignore[arg-type]
                     del temp
                     columnTextures.append(texture)
                 except RuntimeError as e:

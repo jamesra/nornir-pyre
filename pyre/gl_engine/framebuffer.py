@@ -24,6 +24,7 @@ class FrameBuffer:
     @property
     def fbo_texture(self) -> int:
         """The texture that is rendered to by the frame buffer"""
+        assert self._fbo_texture is not None
         return self._fbo_texture
 
     def __init__(self, gl_funcs: QOpenGLFunctions):

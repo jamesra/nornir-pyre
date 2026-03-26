@@ -13,10 +13,10 @@ class ControlPointRegion(IRegion):
 
     @property
     def bounding_box(self) -> nornir_imageregistration.Rectangle:
-        return self._control_point.bounding_box
+        return self._control_point.bounding_box  # type: ignore[union-attr]
 
     def interaction_distance(self, world_position: PointLike) -> float:
-        return self._control_point.bounding_box.DistanceToPoint(world_position)
+        return self._control_point.bounding_box.DistanceToPoint(world_position)  # type: ignore[union-attr]
 
     def GetInteractiveCommandForPosition(self, event: SelectionEventData) -> ICommand | None:
         return None

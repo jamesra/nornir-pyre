@@ -35,7 +35,7 @@ def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.T
     elif transform_type == nornir_imageregistration.transforms.TransformType.GRID:
         return CreateDefaultMeshTransform(FixedShape, WarpedShape)
 
-    raise NotImplemented()
+    raise NotImplementedError()
 
 
 def CreateDefaultRigidTransform(FixedShape=None, WarpedShape=None):
@@ -66,10 +66,10 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
     # WarpedShape)
 
 
-TransformChangedCallback = Callable[['transform_controller'], None]
+TransformChangedCallback = Callable[['TransformController'], None]
 
 # Parameter order is the transform controller, the old transform, the new transform
-TransformModelChangedCallback = Callable[['transform_controller',
+TransformModelChangedCallback = Callable[['TransformController',
                                           nornir_imageregistration.ITransform,
                                           nornir_imageregistration.ITransform], None]
 
@@ -81,7 +81,7 @@ class TransformController:
     """
     debug_id = 0
     _id: int
-    _TransformModel: nornir_imageregistration.ITransform = None
+    _TransformModel: nornir_imageregistration.ITransform | None = None
     __OnChangeEventListeners: IEventManager[TransformChangedCallback]
     __OnTransformModelReplacedEventListeners: IEventManager[TransformModelChangedCallback]
     Debug: bool
@@ -153,14 +153,14 @@ class TransformController:
     def WarpedTriangles(self) -> NDArray[np.integer] | None:
         """:return: The triangulation of the source space, or None if the transform does not support triangulation"""
         if isinstance(self._TransformModel, nornir_imageregistration.ITriangulatedSourceSpace):
-            return self.TransformModel.source_space_trianglulation
+            return self._TransformModel.source_space_trianglulation  # type: ignore[attr-defined]
         return None
 
     @property
     def FixedTriangles(self) -> NDArray[np.integer] | None:
         """:return: The triangulation of the fixed space, or None if the transform does not support triangulation"""
         if isinstance(self._TransformModel, nornir_imageregistration.ITriangulatedTargetSpace):
-            return self.TransformModel.target_space_trianglulation
+            return self._TransformModel.target_space_trianglulation  # type: ignore[attr-defined]
         return None
 
     @property
@@ -171,31 +171,31 @@ class TransformController:
     @property
     def TransformModel(self) -> nornir_imageregistration.ITransform:
         """The transform this controller is editing"""
-        return self._TransformModel
+        return self._TransformModel  # type: ignore[return-value]
 
     @TransformModel.setter
-    def TransformModel(self, value: nornir_imageregistration.ITransform):
+    def TransformModel(self, value: nornir_imageregistration.ITransform | None):
         if self._TransformModel == value:
             # No change
             return
 
         if self._TransformModel is not None:
-            self._TransformModel.RemoveOnChangeEventListener(self.OnTransformChanged)
+            self._TransformModel.RemoveOnChangeEventListener(self.OnTransformChanged)  # type: ignore[union-attr]
 
         old_transform = self._TransformModel
         self._TransformModel = value
 
         if self._TransformModel is not None:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
-            self._TransformModel.AddOnChangeEventListener(self.OnTransformChanged)
+            self._TransformModel.AddOnChangeEventListener(self.OnTransformChanged)  # type: ignore[union-attr]
 
-        self.FireOnTransformModelChangeEvent(old_transform, self._TransformModel)
+        self.FireOnTransformModelChangeEvent(old_transform, self._TransformModel)  # type: ignore[arg-type]
         self.FireOnChangeEvent()
 
-    def Transform(self, points: NDArray[float], **kwargs):
+    def Transform(self, points: NDArray[np.floating], **kwargs):
         return self.TransformModel.Transform(points, **kwargs)
 
-    def InverseTransform(self, points: NDArray[float], **kwargs):
+    def InverseTransform(self, points: NDArray[np.floating], **kwargs):
         return self.TransformModel.InverseTransform(points, **kwargs)
 
     def AddOnChangeEventListener(self, func: Callable):
@@ -219,7 +219,7 @@ class TransformController:
         # InitializeDataStructures to parallelize the
         # data structure creation as much as possible
         if self.NumPoints > 25:
-            self._TransformModel.InitializeDataStructures()
+            self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
         self.FireOnChangeEvent()
 
     def FireOnChangeEvent(self):
@@ -272,7 +272,7 @@ class TransformController:
         TransformController.debug_id += 1
 
         self.__OnChangeEventListeners = pyre.qt_eventmanager.QtEventManager[TransformChangedCallback]()
-        self.__OnTransformModelReplacedEventListeners = pyre.qt_eventmanager.QtEventManager[TransformChangedCallback]()
+        self.__OnTransformModelReplacedEventListeners = pyre.qt_eventmanager.QtEventManager[TransformModelChangedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 
@@ -296,7 +296,7 @@ class TransformController:
             raise ValueError(f"points parameter has unexpected type: {points.__class__}")
 
         if isinstance(self.TransformModel, IControlPoints):
-            self.TransformModel.points = points
+            self.TransformModel.points = points  # type: ignore[assignment]
 
         return
 
@@ -307,45 +307,45 @@ class TransformController:
             self.ShowWarped = False
 
     def GetFixedPoint(self, index: int):
-        return self.TransformModel.TargetPoints[index, :]
+        return self.TransformModel.TargetPoints[index, :]  # type: ignore[attr-defined]
 
     def GetWarpedPoint(self, index: int):
-        return self.TransformModel.SourcePoints[index, :]
+        return self.TransformModel.SourcePoints[index, :]  # type: ignore[attr-defined]
 
     def GetWarpedPointsInRect(self, bounds: nornir_imageregistration.Rectangle):
-        return self.TransformModel.GetWarpedPointsInRect(bounds)
+        return self.TransformModel.GetWarpedPointsInRect(bounds)  # type: ignore[attr-defined]
 
     def GetFixedPointsInRect(self, bounds: nornir_imageregistration.Rectangle):
-        return self.TransformModel.GetFixedPointsInRect(bounds)
+        return self.TransformModel.GetFixedPointsInRect(bounds)  # type: ignore[attr-defined]
 
     def NearestPoint(self, ImagePoint: NDArray[np.floating], space: Space) -> tuple[
-        float | None, int | None]:
+        float | NDArray[np.floating] | None, int | NDArray[np.integer] | None]:
         if isinstance(self.TransformModel, IControlPoints):
             if space == Space.Target:
-                return self.TransformModel.NearestWarpedPoint(ImagePoint)
+                return self.TransformModel.NearestWarpedPoint(ImagePoint)  # type: ignore[attr-defined]
             else:
-                return self.TransformModel.NearestFixedPoint(ImagePoint)
+                return self.TransformModel.NearestFixedPoint(ImagePoint)  # type: ignore[attr-defined]
         else:
             return None, None
 
     def TranslateFixed(self, offset: nornir_imageregistration.VectorLike):
-        self.TransformModel.TranslateFixed(offset)
+        self.TransformModel.TranslateFixed(offset)  # type: ignore[attr-defined]
 
     def TranslateWarped(self, offset: nornir_imageregistration.VectorLike):
-        self.TransformModel.TranslateWarped(offset)
+        self.TransformModel.TranslateWarped(offset)  # type: ignore[attr-defined]
 
     def Translate(self, offset: nornir_imageregistration.VectorLike, space: Space):
         if space == Space.Target:
-            self.TransformModel.TranslateWarped(offset)
+            self.TransformModel.TranslateWarped(offset)  # type: ignore[attr-defined]
         else:
-            self.TransformModel.TranslateFixed(offset)
+            self.TransformModel.TranslateFixed(offset)  # type: ignore[attr-defined]
 
-    def Rotate(self, rangle: float, center: NDArray[float] | None = None):
+    def Rotate(self, rangle: float, center: NDArray[np.floating] | None = None):
         if isinstance(self._TransformModel, nornir_imageregistration.ITransformTargetRotation):
-            self.TransformModel.RotateTargetPoints(-rangle, center)
+            self.TransformModel.RotateTargetPoints(-rangle, center)  # type: ignore[attr-defined]
             self.FireOnChangeEvent()
         elif isinstance(self._TransformModel, nornir_imageregistration.ITransformSourceRotation):
-            self.TransformModel.RotateSourcePoints(rangle, center)
+            self.TransformModel.RotateSourcePoints(rangle, center)  # type: ignore[attr-defined]
             self.FireOnChangeEvent()
         else:
             raise NotImplementedError("Current transform does not support rotation")
@@ -368,13 +368,13 @@ class TransformController:
         OppositePoint = None
         NewPointPair = []
         if space == Space.Target and not self.ShowWarped:
-            OppositePoint = self.TransformModel.Transform([[ImageY, ImageX]])
+            OppositePoint = self.TransformModel.Transform([[ImageY, ImageX]])  # type: ignore[arg-type]
             NewPointPair = [OppositePoint[0][0], OppositePoint[0][1], ImageY, ImageX]
         else:
-            OppositePoint = self.TransformModel.InverseTransform([[ImageY, ImageX]])
+            OppositePoint = self.TransformModel.InverseTransform([[ImageY, ImageX]])  # type: ignore[arg-type]
             NewPointPair = [ImageY, ImageX, OppositePoint[0][0], OppositePoint[0][1]]
 
-        return self.TransformModel.AddPoint(NewPointPair)
+        return self.TransformModel.AddPoint(NewPointPair)  # type: ignore[arg-type]
 
     def TryDeletePoint(self, ImageX: float, ImageY: float, maxDistance: float, space: Space = Space.Source):
 
@@ -388,19 +388,19 @@ class TransformController:
 
         try:
             if space == Space.Target and not self.ShowWarped:
-                distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])
+                distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])  # type: ignore[attr-defined, arg-type]
             else:
-                distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])
+                distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])  # type: ignore[attr-defined, arg-type]
         except:
             pass;
 
         if distance > maxDistance:
             return None
 
-        self.TransformModel.RemovePoint(index)
+        self.TransformModel.RemovePoint(index)  # type: ignore[arg-type]
         return True
 
-    def TryDeletePoints(self, indicies: np.ndarray[np.integer] | Sequence[int]):
+    def TryDeletePoints(self, indicies: NDArray[np.integer] | Sequence[int]):
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPointAddRemove):
             print("transform does not support add/remove control points")
@@ -415,7 +415,7 @@ class TransformController:
 
         return True
 
-    def RemovePoints(self, indicies: np.ndarray[np.integer]):
+    def RemovePoints(self, indicies: NDArray[np.integer]):
         if isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPointAddRemove):
             self.TransformModel.RemovePoint(indicies)
 
@@ -430,19 +430,18 @@ class TransformController:
             return None
 
         if space == Space.Target and not self.ShowWarped:
-            Distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])
+            Distance, index = self.TransformModel.NearestWarpedPoint([ImageY, ImageX])  # type: ignore[attr-defined, arg-type]
         else:
-            Distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])
+            Distance, index = self.TransformModel.NearestFixedPoint([ImageY, ImageX])  # type: ignore[attr-defined, arg-type]
 
         if Distance > maxDistance:
             return None
 
-        index = self.MovePoint(index, ImageDY, ImageDX)
+        index = self.MovePoint(index, ImageDY, ImageDX)  # type: ignore[arg-type]
         return index
 
     @staticmethod
-    def _ensure_numpy_friendly_index(index: set[int] | NDArray[np.integer] | list[int] | Sequence[int]) -> NDArray[
-                                                                                                               int] | int:
+    def _ensure_numpy_friendly_index(index: int | set[int] | NDArray[np.integer] | list[int] | Sequence[int]) -> NDArray[np.intp] | int:
         """
         Ensures that the index is a numpy array of integers or an integer
         :param index:
@@ -462,68 +461,66 @@ class TransformController:
         if len(index) == 1:
             return int(index[0])
 
-        return index
+        return index  # type: ignore[return-value]
 
-    def GetPoints(self, index: set[int] | NDArray[np.integer] | list[int], space: Space = Space.Source):
+    def GetPoints(self, index: int | set[int] | NDArray[np.integer] | list[int], space: Space = Space.Source):
         NearestPoint = None
-        index = self._ensure_numpy_friendly_index(index)
+        np_index = self._ensure_numpy_friendly_index(index)
 
-        if isinstance(index, Sequence) or isinstance(index, np.ndarray):
-            if max(index) > len(self.TransformModel.SourcePoints):
+        if isinstance(np_index, np.ndarray):
+            if max(np_index) > len(self.TransformModel.SourcePoints):  # type: ignore[attr-defined]
                 return None
         else:
-            if index > len(self.TransformModel.SourcePoints):
+            if np_index > len(self.TransformModel.SourcePoints):  # type: ignore[attr-defined]
                 return None
 
         if space == Space.Source:
-            return self.TransformModel.SourcePoints[index]
+            return self.TransformModel.SourcePoints[np_index]  # type: ignore[attr-defined]
         else:
-            return self.TransformModel.TargetPoints[index]
+            return self.TransformModel.TargetPoints[np_index]  # type: ignore[attr-defined]
 
-    def SetPoint(self, index: int, X: float, Y: float, space: Space = Space.Source) -> int:
+    def SetPoint(self, index: int, X: float, Y: float, space: Space = Space.Source) -> int | NDArray[np.integer]:
         """Sets the specified point to the new location.  If the transform does not support editing the specied space,
         the point is changed in the opposite space if possible.  Raises ValueError if the transform does not support
         editing any space"""
         original_point = np.array((Y, X))
         point = original_point
 
-        index = self._ensure_numpy_friendly_index(index)
+        np_index: int | NDArray[np.integer] = self._ensure_numpy_friendly_index(index)
 
         if space == Space.Target:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                index = self.TransformModel.UpdateTargetPointsByIndex(index, point)
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)  # type: ignore[attr-defined]
             elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                new_source_point = self.TransformModel.InverseTransform([point])[0]
-                index = self.TransformModel.UpdateSourcePointsByIndex(index, new_source_point)
+                new_source_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, new_source_point)  # type: ignore[attr-defined]
             else:
                 raise ValueError("Transform does not support editing target points in either source or target space")
         elif space == Space.Source:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                index = self.TransformModel.UpdateSourcePointsByIndex(index, point)
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
             elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                new_target_point = self.TransformModel.Transform([point])[0]
-                index = self.TransformModel.UpdateTargetPointsByIndex(index, new_target_point)
+                new_target_point = self.TransformModel.Transform([point])[0]  # type: ignore[arg-type]
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, new_target_point)  # type: ignore[attr-defined]
             else:
                 raise ValueError("Transform does not support editing target points in either source or target space")
         else:
             raise ValueError(f"Unexpected value for space: {space}")
 
-        print(f"Set point {str(index)} {str(point)}")
+        return np_index
 
-        return index
-
-    def MovePoint(self, index: int | list[int], ImageDX: float, ImageDY: float,
-                  space: Space = Space.Source) -> int:
+    def MovePoint(self, index: int | list[int] | NDArray[np.integer], ImageDX: float, ImageDY: float,
+                  space: Space = Space.Source) -> int | NDArray[np.integer]:
 
         if not isinstance(self.TransformModel, nornir_imageregistration.transforms.IControlPoints):
-            return index
+            return index  # type: ignore[return-value]
 
         np_index = self._ensure_numpy_friendly_index(index)
 
         original_point = self.GetPoints(np_index, space)
         if original_point is None:
             print(f"No point found for index {np_index}")
-            return index
+            return index  # type: ignore[return-value]
 
         point = original_point + numpy.array((ImageDY, ImageDX))
 
@@ -531,7 +528,7 @@ class TransformController:
             # This code is to manipulate transforms where source space points are fixed.  Instead we move the
             # target points in this case.
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
             else:
                 # if not self.ShowWarped:
                 #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
@@ -541,16 +538,16 @@ class TransformController:
                         raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
 
                 OldTargetPoint = \
-                    self.TransformModel.Transform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
-                NewTargetPoint = self.TransformModel.Transform([point])[0]
+                    self.TransformModel.Transform([[point[0] - ImageDY, point[1] - ImageDX]])[0]  # type: ignore[arg-type]
+                NewTargetPoint = self.TransformModel.Transform([point])[0]  # type: ignore[arg-type]
 
                 Delta = OldTargetPoint - NewTargetPoint
-                FinalPoint = self.TransformModel.TargetPoints[np_index] + Delta
-                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, FinalPoint)
+                FinalPoint = self.TransformModel.TargetPoints[np_index] + Delta  # type: ignore[attr-defined]
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, FinalPoint)  # type: ignore[attr-defined]
 
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)  # type: ignore[attr-defined]
             else:
                 # if not self.ShowWarped:
                 #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
@@ -560,16 +557,16 @@ class TransformController:
                         raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
 
                 OldSourcePoint = \
-                    self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]
-                NewSourcePoint = self.TransformModel.InverseTransform([point])[0]
+                    self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]  # type: ignore[arg-type]
+                NewSourcePoint = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
 
                 Delta = OldSourcePoint - NewSourcePoint
-                FinalPoint = self.TransformModel.SourcePoints[np_index] + Delta
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, FinalPoint)
+                FinalPoint = self.TransformModel.SourcePoints[np_index] + Delta  # type: ignore[attr-defined]
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, FinalPoint)  # type: ignore[attr-defined]
 
                 # print(f'Dragged point {str(np_index)} {str(point)}')
 
         if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
             return np.array([np_index], dtype=int)
         else:
-            return np_index
+            return np_index  # type: ignore[return-value]

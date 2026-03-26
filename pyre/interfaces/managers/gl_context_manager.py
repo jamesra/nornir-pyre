@@ -13,7 +13,7 @@ class IGLContextManager(ABC):
     the context so subscribers can create GL resources."""
 
     @abstractmethod
-    def add_context(self, context: QOpenGLContext, widget: QOpenGLWidget = None):
+    def add_context(self, context: QOpenGLContext, widget: QOpenGLWidget | None = None):
         """Add a context to the context manager. This should be called by the GLCanvas when a context is created.
         
         Args:

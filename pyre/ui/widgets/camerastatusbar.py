@@ -56,7 +56,7 @@ class CameraStatusBar(QStatusBar):
             self.addPermanentWidget(label, 1)  # Equal stretch for all labels
         
         # Connect to parent's resize event
-        parent.resizeEvent = self._wrap_resize_event(parent.resizeEvent)
+        parent.resizeEvent = self._wrap_resize_event(parent.resizeEvent)  # type: ignore[assignment]
         
         # Connect to camera change events
         self._camera.AddOnChangeEventListener(self.onCameraChanged)
@@ -64,7 +64,7 @@ class CameraStatusBar(QStatusBar):
         self._window_width, self._window_height = camera_window.size().width(), camera_window.size().height()
         
         # Connect to mouse position history manager
-        mouse_position_history_manager.add_mouse_position_update_event_listener(self.on_position_update)
+        mouse_position_history_manager.add_mouse_position_update_event_listener(self.on_position_update)  # type: ignore[arg-type]
 
     def _wrap_resize_event(self, original_handler):
         """Wrap the parent's resize event to also handle our size updates"""

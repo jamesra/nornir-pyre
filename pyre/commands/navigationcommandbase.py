@@ -6,7 +6,7 @@ Created on Feb 10, 2015
 
 from __future__ import annotations
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
@@ -24,19 +24,21 @@ from pyre.space import Space
 
 from pyre.container import IContainer
 
+import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
+
 
 class NavigationCommandBase(UICommandBase, abc.ABC):
     """
     A command that needs to handle the mouse position in volume coordinates
     """
 
-    _last_mouse_position: tuple[float, float]
-    _transform_controller: pyre.state.TransformController
+    _last_mouse_position: tuple[float, float] | None
+    _transform_controller: pyre.state.TransformController  # type: ignore[attr-defined]
 
     # Bounds the camera is allowed to travel within
     _bounds: nornir_imageregistration.Rectangle
 
-    _history_manager: ICommandHistory = Provide[pyre.container.IContainer.history_manager]
+    _history_manager: ICommandHistory = Provide[pyre.container.IContainer.history_manager]  # type: ignore[attr-defined]
 
     _commandqueue: ICommandQueue
 
@@ -56,10 +58,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         """The space the command is operating in"""
         return self._space
 
-    @inject
     def __init__(self,
                  parent: QWidget,
-                 transform_controller: pyre.viewmodels.TransformController,
+                 transform_controller: pyre.viewmodels.TransformController,  # type: ignore[attr-defined]
                  camera: pyre.ui.Camera,
                  space: Space,
                  bounds: nornir_imageregistration.Rectangle,
@@ -80,8 +81,18 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         super(NavigationCommandBase, self).__init__(parent=parent,
                                                     completed_func=completed_func)
 
+    def _stos_image_panel(self) -> imagetransformviewpanel_module.ImageTransformViewPanel | None:
+        """Return the ImageTransformViewPanel hosting this command, if any (not mosaic)."""
+        w = self.parent
+        if w is None:
+            return None
+        cand = w.parent()
+        if isinstance(cand, imagetransformviewpanel_module.ImageTransformViewPanel):
+            return cand
+        return None
+
     @staticmethod
-    def ParamToMousePosition(e: QMouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def ParamToMousePosition(e: QMouseEvent | QWheelEvent | tuple[float, float]) -> tuple[float, float]:
         """
         :param e Either a QMouseEvent or a tuple of (y, x) coordinates:
         :return: (y, x) coordinates of mouse
@@ -97,13 +108,13 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         return y, x
 
     @staticmethod
-    def GetCorrectedMousePosition(e: QMouseEvent | tuple[float, float], height: int) -> tuple[float, float]:
+    def GetCorrectedMousePosition(e: QMouseEvent | QWheelEvent | tuple[float, float], height: int) -> tuple[float, float]:
         """Qt mouse coordinates have origin at top-left, convert to bottom-left origin"""
         y, x = NavigationCommandBase.ParamToMousePosition(e)
 
         return height - y, x
 
-    def get_space_position(self, e: QMouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def get_space_position(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> tuple[float, float]:
         """
         Return the mouse position in the source or target space, matching the source property of our instance
         :param e: QMouseEvent or (y,x) tuple
@@ -111,15 +122,20 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         """
         y, x = NavigationCommandBase.ParamToMousePosition(e)
         cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
-        return self.camera.ImageCoordsForMouse(cy, cx)
+        return self.camera.ImageCoordsForMouse(cy, cx)  # type: ignore[return-value]
 
-    def get_world_positions(self, e: QMouseEvent | tuple[float, float]) -> PointPair:
+    def get_world_positions(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> PointPair:
         """
-        Returns a tuple of the mouse position in both source and target space
+        Returns a tuple of the mouse position in both source and target space.
+        When no transform is loaded (TransformModel is None) both spaces return the
+        camera-space position so that panning and cursor tracking remain functional.
         :param e:
         :return:
         """
         position = np.array(self.get_space_position(e))
+
+        if self._transform_controller.TransformModel is None:
+            return PointPair(target=position, source=position)
 
         if self._space == Space.Source:
             return PointPair(target=np.squeeze(self._transform_controller.InverseTransform(position)),
@@ -228,13 +244,17 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             else:
                 zdelta = (1 + (scroll_y / 40))
 
+                # Use current parent size so zoom-to-cursor is correct on all panels (fixed/composite/warped).
+                # Command dimensions can be stale if resize fired before glpanel was laid out.
+                self._width, self._height = self.parent.size().width(), self.parent.size().height()
+
                 mouse_position = self.get_world_positions(e)
                 screen_center = self.get_world_positions((self.height / 2, self.width / 2))
 
                 new_scale = self.camera.scale * zdelta
                 max_image_dimension_value = max(self._bounds.Width, self._bounds.Height)
                 if self._transform_controller.width is not None:
-                    max_transform_dimension = max(self._transform_controller.width, self._transform_controller.height)
+                    max_transform_dimension = max(self._transform_controller.width, self._transform_controller.height)  # type: ignore[arg-type]
                     max_image_dimension_value = max(max_image_dimension_value, max_transform_dimension)
 
                 if new_scale > max_image_dimension_value * 2.0:
@@ -267,14 +287,19 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         except:
             pass
 
-        # if keycode == Qt.Key.Key_Tab:
-        #     try:
-        #         if self.composite:
-        #             self.NextGLFunction()
-        #         else:
-        #             self.ShowWarped = not self.ShowWarped
-        #     except:
-        #         pass
+        panel = self._stos_image_panel()
+        if keycode == Qt.Key.Key_Tab and not (e.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            if panel is not None:
+                self._transform_controller.NextViewMode()
+                self.parent.update()
+            e.accept()
+            return
+
+        if symbol == 'l' and panel is not None:
+            panel.show_lines = not panel.show_lines
+            self.parent.update()
+            e.accept()
+            return
 
         if symbol == 'a':  # "A" Character
             ImageDX = -0.05 * self.camera.visible_world_width
@@ -293,10 +318,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             self.camera.scale *= 0.9
         elif keycode == Qt.Key.Key_PageDown:
             self.camera.scale *= 1.1
-
-            self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
-        # elif symbol == 'l':
-        #    self.show_lines = not self.show_lines
         # elif keycode == Qt.Key.Key_F1:
         #    self._image_transform_view.Debug = not self._image_transform_view.Debug
         elif symbol == 'm':

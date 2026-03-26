@@ -12,18 +12,18 @@ SetObserverCallable = Callable[['ObservableSet[T]', ObservedAction, AbstractSet[
 
 class SetOperation(enum.IntEnum):
     """Helper enum to indicate to a function the type of set operation to be performed"""
-    Replace = 0,  # Replace the current set with the new set
-    Union = 1,  # Return a new set with elements from the set and all others.
-    Intersection = 2,  # Return a new set with elements common to the set and all others.
-    Difference = 3,  # Return a new set with elements in the set that are not in the others.
+    Replace = 0  # Replace the current set with the new set
+    Union = 1  # Return a new set with elements from the set and all others.
+    Intersection = 2  # Return a new set with elements common to the set and all others.
+    Difference = 3  # Return a new set with elements in the set that are not in the others.
     SymmetricDifference = 4  # Return a new set with elements in either the set or other but not both.
 
 
 class ObservableSet(set, Generic[T]):
     """A python set that notifies observers when it is modified"""
-    _call_wrapper: Callable = None
+    _call_wrapper: Callable | None = None
 
-    def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable = None):
+    def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable | None = None):
         """
         :param initial_set:
         :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread
@@ -69,18 +69,15 @@ class ObservableSet(set, Generic[T]):
 
     def update(self, *others: Iterable[T] | AbstractSet[T]):
         """Update the set, adding elements from all others."""
-        if isinstance(*others, int):
-            pass
-
-        if not isinstance(*others, Iterable):
-            others = frozenset([*others])
-        else:
-            others = frozenset(*others)
-            # intersection = frozenset([others]) - self
-
-        intersection = others - self
-        super().update(others)
-        self._notify_observers(ObservedAction.ADD, intersection)
+        combined: list[T] = []
+        for other in others:
+            if hasattr(other, '__iter__'):
+                combined.extend(other)  # type: ignore[arg-type]
+            else:
+                combined.append(other)  # type: ignore[arg-type]
+        adding = frozenset(combined) - self
+        super().update(combined)
+        self._notify_observers(ObservedAction.ADD, adding)
 
     def intersection_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, keeping only elements found in it and all others."""

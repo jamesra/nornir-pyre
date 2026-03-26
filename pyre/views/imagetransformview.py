@@ -41,7 +41,7 @@ class ImageTransformView(IImageTransformView):
     _z: float
     _image_viewmodel: pyre.viewmodels.ImageViewModel
     _image_mask_viewmodel: pyre.viewmodels.ImageViewModel | None
-    _transform_controller: TransformController = None
+    _transform_controller: TransformController | None = None
     Debug: bool
     _gl_initialized: bool = False
     _tile_render_data: RenderDataMap
@@ -86,10 +86,10 @@ class ImageTransformView(IImageTransformView):
 
     @property
     def transform(self) -> nornir_imageregistration.ITransform:
-        return self._transform_controller.TransformModel
+        return self._transform_controller.TransformModel  # type: ignore[union-attr]
 
     @property
-    def transform_controller(self) -> TransformController:
+    def transform_controller(self) -> TransformController | None:
         return self._transform_controller
 
     @transform_controller.setter
@@ -132,12 +132,13 @@ class ImageTransformView(IImageTransformView):
         self._tile_render_data = {}
         self._image_space = space
         self._rendercache = RenderCache()
-        self._image_viewmodel = image_view_model
+        self._image_viewmodel = image_view_model  # type: ignore[assignment]
         self._image_mask_viewmodel = image_mask_view_model
-        self._transform_controller = transform_controller
+        self._transform_controller = transform_controller  # type: ignore[assignment]
         self._z = 0.5
 
-        self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
+        if self._transform_controller is not None:
+            self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
         self.Debug = False
 
@@ -179,7 +180,7 @@ class ImageTransformView(IImageTransformView):
             for grid_coords in self._image_viewmodel.generate_grid_indicies():
                 gltiles._update_tile_buffers(self.transform,
                                              grid_coords,
-                                             self._image_viewmodel.TextureSize,
+                                             self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
                                              self._image_space,
                                              get_or_create_tile_globjects=self.get_or_create_tile_globjects)
                 if grid_coords in unused_grid_coords:
@@ -207,13 +208,13 @@ class ImageTransformView(IImageTransformView):
                 return
 
             # Triangles = self.__Transform.WarpedTriangles
-            verts = np.fliplr(self.transform.SourcePoints)
+            verts = np.fliplr(self.transform.SourcePoints)  # type: ignore[attr-defined]
             triangles = self.transform.source_space_trianglulation
         else:
             if not isinstance(self.transform, nornir_imageregistration.transforms.ITriangulatedTargetSpace):
                 return
 
-            verts = np.fliplr(self.transform.TargetPoints)
+            verts = np.fliplr(self.transform.TargetPoints)  # type: ignore[attr-defined]
             triangles = self.transform.target_space_trianglulation
 
         if verts is not None and triangles is not None:
@@ -225,7 +226,7 @@ class ImageTransformView(IImageTransformView):
         Assumes shaders are already initialized (caller should check)."""
 
         # Generate the buffers for the VAO
-        vertex_buffer = GLBuffer(layout=shaders.texture_shader.vertex_layout,
+        vertex_buffer = GLBuffer(layout=shaders.texture_shader.vertex_layout,  # type: ignore[union-attr]
                                  usage=gl.GL_DYNAMIC_DRAW)
 
         index_buffer = GLIndexBuffer(usage=gl.GL_DYNAMIC_DRAW)
@@ -243,7 +244,7 @@ class ImageTransformView(IImageTransformView):
         Returns None if shaders are not initialized yet."""
         if (ix, iy) not in self._tile_render_data:
             # Check if shaders are initialized before creating GL objects
-            if not shaders.texture_shader.initialized:
+            if not shaders.texture_shader.initialized:  # type: ignore[union-attr]
                 # Shaders not ready yet, return None to skip this tile
                 return None
             self._tile_render_data[(ix, iy)] = self._create_tile_globjects()
@@ -255,7 +256,9 @@ class ImageTransformView(IImageTransformView):
              space: pyre.Space,
              client_size: tuple[int, int],
              bounding_box: nornir_imageregistration.Rectangle | None = None,
-             default_fbo: int | None = None):
+             default_fbo: int | None = None,
+             overlay_viewport_size: tuple[int, int] | None = None,
+             show_mesh_lines: bool = False):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param view_proj:
@@ -271,13 +274,15 @@ class ImageTransformView(IImageTransformView):
 
         self._draw_imageviewmodel(view_proj=view_proj,
                                   image_viewmodel=self._image_viewmodel,
-                                  space=space)
+                                  space=space,
+                                  show_mesh_lines=show_mesh_lines)
 
     def _draw_imageviewmodel(self,
                              view_proj: NDArray[np.floating],
                              image_viewmodel: pyre.viewmodels.ImageViewModel | None,
                              space: pyre.Space,
-                             bounding_box: nornir_imageregistration.Rectangle | None = None):
+                             bounding_box: nornir_imageregistration.Rectangle | None = None,
+                             show_mesh_lines: bool = False):
 
         if image_viewmodel is None:
             return
@@ -296,26 +301,25 @@ class ImageTransformView(IImageTransformView):
         if not image_array or len(image_array) == 0:
             return
 
-        tween = space
-
+        # Space is IntFlag; coerce so GLSL tween uniform always gets 0.0 or 1.0 (not enum object).
+        tween = float(int(space))
         for ix in range(0, image_viewmodel.NumCols):
             column = image_array[ix]
             for iy in range(0, image_viewmodel.NumRows):
                 texture = column[iy]
-                
+
                 # Skip if texture is invalid
                 if texture == 0:
                     continue
 
                 render_data = self.get_or_create_tile_globjects(ix, iy)
-                
+
                 # Skip if shaders aren't initialized yet (render_data will be None)
                 if render_data is None:
                     continue
 
-                # Check if shaders are initialized before using them
                 try:
-                    shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween)
+                    shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween)  # type: ignore[union-attr]
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame
@@ -323,7 +327,12 @@ class ImageTransformView(IImageTransformView):
                     raise
                 except RuntimeError as e:
                     if "Invalid texture ID" in str(e) or "Failed to bind texture" in str(e):
-                        # Texture is invalid, skip this tile
                         print(f"Warning: Skipping invalid texture {texture} at ({ix}, {iy})")
                         continue
                     raise
+
+        if show_mesh_lines:
+            try:
+                self.draw_lines(draw_in_fixed_space=(space == Space.Target))
+            except Exception as e:
+                warnings.warn(f"draw_lines skipped: {e}")

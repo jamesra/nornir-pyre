@@ -157,8 +157,8 @@ class TransformShader(BaseShader):
             check_for_error()
             vertex_array_object.bind()
 
-            bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
-            bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
+            bind_texture(source_texture, self.source_texture_location or 0, gl.GL_TEXTURE0)
+            bind_texture(target_texture, self.target_texture_location or 0, gl.GL_TEXTURE1)
 
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0

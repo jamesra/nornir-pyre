@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QWheelEvent, QMouseEvent
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 from dependency_injector.providers import Factory, Dict
 import nornir_imageregistration
 from nornir_imageregistration import ITransform
@@ -67,7 +67,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _show_lines: bool = False
     _config: ImageTransformPanelConfig
 
-    _command: ICommand
+    _command: ICommand | None
     _command_queue: CommandQueue
     _transform_controller: TransformController
 
@@ -76,12 +76,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_glbuffermanager]
 
     _view_type: ViewType
-    _transform_type_to_command_action_map: Dict[TransformType, Dict[ControlPointAction, Factory]] = Provide[
+    _transform_type_to_command_action_map: dict[TransformType, dict[ControlPointAction, Factory]] = Provide[  # type: ignore[assignment]
         IContainer.action_command_map]
 
     _imagename_space_mapping: dict[str, Space]  # Maps an image name to a space
 
-    _transform_controller_view: TransformControllerView
+    _transform_controller_view: TransformControllerView | None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
 
@@ -140,7 +140,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         return self._transform_controller
 
     @property
-    def image_transform_view(self) -> IImageTransformView:
+    def image_transform_view(self) -> IImageTransformView | None:
         return self._image_transform_view
 
     @image_transform_view.setter
@@ -149,9 +149,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @property
     def max_image_dimension(self):
-        return max([self.image_transform_view.width, self.image_transform_view.height])
+        assert self.image_transform_view is not None
+        return max([self.image_transform_view.width, self.image_transform_view.height])  # type: ignore[arg-type]
 
-    @inject
     def __init__(self,
                  parent: QWidget,
                  space: Space,
@@ -165,13 +165,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         :param space:
         """
         self._selected_points = selected_points
-        self._command = None
-        self._transform_controller_view = None
+        self._command = None  # type: ignore[assignment]
+        self._transform_controller_view = None  # type: ignore[assignment]
         self._imagename_space_mapping = imagename_space_mapping
         self._view_type = view_type
         self._transform_controller = transform_controller
         self._space = space
-        self._command_queue: ICommandQueue = CommandQueue()
+        self._command_queue = CommandQueue()  # type: ignore[assignment]
 
         super().__init__(parent=parent,
                          transform_controller=transform_controller,
@@ -224,20 +224,20 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if old != new:
             self._command.cancel()
-        elif old.type != new.type:
+        elif old is not None and old.type != new.type:
             self._command.cancel()
 
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):
         glcontext_manager.add_glcontext_added_event_listener(self.create_objects)
 
     def activate_command(self, previous_command=None):
-        command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]
+        command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]  # type: ignore[index]
         self._command = self._command_queue.get()
         if self._command is None:
             # Use GL panel as parent so mouse events and resize use GL viewport coordinates
             gl_w, gl_h = self._glpanel.width(), self._glpanel.height()
             bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (gl_w, gl_h))
-            self._command = command_factory[ControlPointAction.NONE](parent=self._glpanel,
+            self._command = command_factory[ControlPointAction.NONE](parent=self._glpanel,  # type: ignore[index]
                                                                      completed_func=None,
                                                                      commandqueue=self._command_queue,
                                                                      camera=self.camera,
@@ -246,8 +246,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                      selected_points=self._selected_points)
 
         # Ensure we load the next command when this command finishes
+        assert self._command is not None
         self._command.add_completed_callback(self.activate_command)
-        print(f'Activating command: {self._command}')
+        # Do not print here (e.g. "Activating command: ...") - reduces console noise
         self._command.activate()
 
     def on_imageviewmodelmanager_change(self,
@@ -278,7 +279,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                     source_image_name=ViewType.Source.value,
                                                                     target_image_name=ViewType.Target.value,
                                                                     transform_controller=self.transform_controller,
-                                                                    gl_funcs=self._glpanel._gl_funcs)
+                                                                    gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
                 # Force repaint after view's async setup (posted callbacks set source/target views)
                 QTimer.singleShot(50, self._glpanel.update)
                 QTimer.singleShot(150, self._glpanel.update)
@@ -291,7 +292,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                             activate_context=self.glcanvas.activate_context,
                                                             image_view_model=image,
                                                             transform_controller=self.transform_controller,
-                                                            gl_funcs=self._glpanel._gl_funcs)
+                                                            gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
             print(f'Added image view model {name} to {self.view_type.value} view')
 
         # Use QTimer to call center_camera after the widget is fully initialized
@@ -308,7 +309,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             context: The OpenGL context that was just created and is now current
         """
         if self._image_transform_view is not None:
-            self._image_transform_view.create_objects()
+            self._image_transform_view.create_objects()  # type: ignore[attr-defined]
 
         if self._transform_controller_view is None:
             self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
@@ -342,16 +343,18 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """
         Center the camera at whatever interesting thing this class displays
         """
+        if self.camera is None:
+            return
         if self._image_transform_view is None or self._image_transform_view.width is None:
             self.camera.lookat = (0, 0)
             self.camera.scale = 1.0
             return
 
-        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)
+        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)  # type: ignore[operator]
         self.camera.lookat = center
 
-        width_scale = self.width() / self._image_transform_view.width
-        height_scale = self.height() / self._image_transform_view.height
+        width_scale = self.width() / self._image_transform_view.width  # type: ignore[operator]
+        height_scale = self.height() / self._image_transform_view.height  # type: ignore[operator]
 
         self.camera.scale = min(width_scale, height_scale)
 
@@ -360,11 +363,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def OnImageViewModelChanged(self, space: pyre.Space):
         """Called when the image view model changes"""
-        if space == self.space:
-            imageviewmodel = self._imageviewmodel_manager[space]
-            self.image_transform_view.image_view_model = imageviewmodel
-        else:
+        if space != self.space:
             return
+        imageviewmodel = self._imageviewmodel_manager[space]
+        self.image_transform_view.image_view_model = imageviewmodel  # type: ignore[attr-defined, union-attr]
 
         self.center_camera()
         self.glcanvas.update()
@@ -374,9 +376,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if not self.FixedSpace:
             if not self.ShowWarped:
                 if self.transform_controller is not None:
-                    point = self.transform_controller.InverseTransform([point]).flat
+                    point = self.transform_controller.InverseTransform([point]).flat  # type: ignore[arg-type]
 
-        super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)
+        super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)  # type: ignore[arg-type]
 
     def draw(self):
         """Region is [x,y,TextureWidth,TextureHeight] indicating where the image should be drawn on the window"""
@@ -393,19 +395,24 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if self._image_transform_view is not None:
             bounding_box = self.camera.VisibleImageBoundingBox
 
-            SetDrawTextureState(self._glpanel._gl_funcs)
+            SetDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
             # Use GL panel size so viewport/FBO match the actual drawing surface.
             # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
+            # Pass physical viewport size so composite overlay fills the widget after resize/hi-DPI (resizeGL uses physical pixels).
             gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
             default_fbo = self._glpanel.defaultFramebufferObject()
+            ratio = self._glpanel.devicePixelRatio()
+            overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
             self._image_transform_view.draw(self.camera.view_proj,
                                             space=self.space,
                                             client_size=(gl_h, gl_w),
                                             bounding_box=bounding_box,
-                                            default_fbo=default_fbo)
+                                            default_fbo=default_fbo,
+                                            overlay_viewport_size=overlay_viewport_size,
+                                            show_mesh_lines=self.show_lines)
 
-            ClearDrawTextureState(self._glpanel._gl_funcs)
+            ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
         if self._transform_controller_view is not None:
             tween = 0 if self.space == pyre.Space.Source else 1

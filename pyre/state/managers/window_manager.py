@@ -58,9 +58,12 @@ class WindowManager(IWindowManager):
     @property
     def any_visible_windows(self) -> bool:
         """Return True if any windows are visible"""
+        visible_count = 0
         for w in self._windows.values():
             if w.isVisible():
-                return True
+                visible_count += 1
+        if visible_count > 0:
+            return True
 
         return False
 

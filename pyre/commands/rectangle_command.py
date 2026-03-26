@@ -62,7 +62,8 @@ class RectangleCommand(UICommandBase):
         :param tuple origin: Origin of rectangle
         '''
 
-        super(RectangleCommand, self).__init__(parent, completed_func, camera)
+        super(RectangleCommand, self).__init__(parent, completed_func)
+        self.camera = camera  # type: ignore[attr-defined]
 
         self.Origin = origin
         self.LastMousePosition = origin
@@ -93,7 +94,7 @@ class RectangleCommand(UICommandBase):
         y = self.parent.height() - pos.y()
         x = pos.x()
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
         self.LastMousePosition = numpy.array((ImageY, ImageX))
 
         return numpy.array((ImageY, ImageX))
@@ -107,7 +108,7 @@ class RectangleCommand(UICommandBase):
             self._update_last_mouse_position(e)
             print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
                                      self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
-            self.parent.Refresh()
+            self.parent.update()  # type: ignore[union-attr]
         finally:
             e.Skip()
         pass
@@ -120,8 +121,8 @@ class RectangleCommand(UICommandBase):
         self._update_last_mouse_position(e)
         print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
                                  self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
-        self.parent.Refresh()
-        self.end_command()
+        self.parent.update()  # type: ignore[union-attr]
+        self.end_command()  # type: ignore[attr-defined]
         return
 
     def draw(self):

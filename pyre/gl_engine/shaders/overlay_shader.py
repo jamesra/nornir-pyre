@@ -161,6 +161,7 @@ class OverlayShader(BaseShader):
             self._vertex_position_location = gl.glGetAttribLocation(self.program, "vertex_position")
             if self._vertex_position_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._vertex_position_location is not None
         return self._vertex_position_location
 
     @property
@@ -169,22 +170,25 @@ class OverlayShader(BaseShader):
             self._texture_coord_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
             if self._texture_coord_location == -1:
                 raise ValueError("Could not find texture coordinate attribute")
+        assert self._texture_coord_location is not None
         return self._texture_coord_location
 
     @property
-    def source_texture_location(self):
+    def source_texture_location(self) -> int:
         if self._source_texture_location is None:
             self._source_texture_location = gl.glGetUniformLocation(self.program, "source_texture")
             if self._source_texture_location == -1:
                 raise ValueError("Could not find texture_sampler attribute")
+        assert self._source_texture_location is not None
         return self._source_texture_location
 
     @property
-    def target_texture_location(self):
+    def target_texture_location(self) -> int:
         if self._target_texture_location is None:
             self._target_texture_location = gl.glGetUniformLocation(self.program, "target_texture")
             if self._target_texture_location == -1:
                 raise ValueError("Could not find texture_sampler attribute")
+        assert self._target_texture_location is not None
         return self._target_texture_location
 
     @property
@@ -194,6 +198,7 @@ class OverlayShader(BaseShader):
                                                                                   "model_view_projection_matrix")
             if self._model_view_projection_matrix_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._model_view_projection_matrix_location is not None
         return self._model_view_projection_matrix_location
 
     @property
@@ -203,6 +208,7 @@ class OverlayShader(BaseShader):
                                                                           "source_channel_blend")
             if self._source_channel_blend_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._source_channel_blend_location is not None
         return self._source_channel_blend_location
 
     @property
@@ -212,6 +218,7 @@ class OverlayShader(BaseShader):
                                                                           "target_channel_blend")
             if self._target_channel_blend_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._target_channel_blend_location is not None
         return self._target_channel_blend_location
 
     def create_vao(self) -> ShaderVAO:
@@ -249,8 +256,10 @@ class OverlayShader(BaseShader):
             raise_on_error("after glUseProgram in draw")
             bound_vao = self._vao.bind()
 
-            bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
-            bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
+            src_loc = self.source_texture_location
+            tgt_loc = self.target_texture_location
+            bind_texture(source_texture, src_loc, gl.GL_TEXTURE0)
+            bind_texture(target_texture, tgt_loc, gl.GL_TEXTURE1)
 
             gl.glUniform4fv(self.source_channel_blend_location, 1, source_channel_mix.astype(np.float32, copy=False))
             raise_on_error("after glUniform4fv(source_channel_blend) in draw")

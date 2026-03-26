@@ -1,4 +1,5 @@
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
+from typing import cast
 from PyQt6.QtWidgets import QMainWindow, QWidget
 from PyQt6.QtCore import Qt, QEvent, QObject, pyqtSignal, QSize, QPoint
 from PyQt6.QtGui import QCloseEvent
@@ -6,6 +7,9 @@ from PyQt6.QtGui import QCloseEvent
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.managers.window_manager import IWindowManager
 from pyre.container import IContainer
+
+# View types that have layout windows (Source, Target, Composite)
+_LAYOUT_VIEW_TYPES = (ViewType.Source, ViewType.Target, ViewType.Composite)
 
 
 class InvokeOnMainThreadEvent(QEvent):
@@ -36,7 +40,6 @@ class PyreWindowBase(QMainWindow):
     def ID(self):
         return self._ID
     
-    @inject
     def __init__(self,
                  parent,
                  windowID,
@@ -57,7 +60,7 @@ class PyreWindowBase(QMainWindow):
         """Handle custom events"""
         if event.type() == InvokeOnMainThreadEvent.EVENT_TYPE:
             # Handle the invoke on main thread event
-            invoke_event = event
+            invoke_event = cast(InvokeOnMainThreadEvent, event)
             invoke_event.invoke()
             return True
         return super().event(event)
@@ -73,53 +76,47 @@ class PyreWindowBase(QMainWindow):
         else:
             self.show()
     
+    def _set_layout_position(self, position, desired_displays: int = 1):
+        """Call setPosition on each layout window that exists in the manager (avoids KeyError if not yet registered)."""
+        # Collect windows: support both ViewType keys (Source/Target/Composite) and legacy (Fixed/Warped/Composite)
+        to_position = []
+        for view_type in _LAYOUT_VIEW_TYPES:
+            if view_type in self._window_manager:
+                to_position.append(self._window_manager[view_type])
+        if len(to_position) < 3:
+            to_position = []
+            for key in ("Fixed", "Warped", "Composite"):
+                if key in self._window_manager:
+                    to_position.append(self._window_manager[key])
+        for win in to_position:
+            win.setPosition(position=position, desiredDisplays=desired_displays)
+
     def onLeft1WindowView(self):
         """Position windows on the left display"""
-        self._window_manager[ViewType.Source.value].setPosition(position=0, desiredDisplays=1)
-        self._window_manager[ViewType.Target.value].setPosition(position=0, desiredDisplays=1)
-        self._window_manager[ViewType.Composite.value].setPosition(position=0, desiredDisplays=1)
+        self._set_layout_position(0, desired_displays=1)
     
     def onCenter1WindowView(self):
         """Position windows on the center display"""
-        self._window_manager[ViewType.Source.value].setPosition(position=1, desiredDisplays=1)
-        self._window_manager[ViewType.Target.value].setPosition(position=1, desiredDisplays=1)
-        self._window_manager[ViewType.Composite.value].setPosition(position=1, desiredDisplays=1)
+        self._set_layout_position(1, desired_displays=1)
     
     def onRight1WindowView(self):
-        """Position windows on the right display"""
+        """Position windows on the right display (or only display if single monitor)"""
         from PyQt6.QtGui import QGuiApplication
-        
         count = len(QGuiApplication.screens())
-        
-        if count == 2:
-            self._window_manager[ViewType.Source.value].setPosition(position=1, desiredDisplays=1)
-            self._window_manager[ViewType.Target.value].setPosition(position=1, desiredDisplays=1)
-            self._window_manager[ViewType.Composite.value].setPosition(position=1, desiredDisplays=1)
-        else:
-            self._window_manager[ViewType.Source.value].setPosition(position=2, desiredDisplays=1)
-            self._window_manager[ViewType.Target.value].setPosition(position=2, desiredDisplays=1)
-            self._window_manager[ViewType.Composite.value].setPosition(position=2, desiredDisplays=1)
+        position = 0 if count == 1 else (1 if count == 2 else 2)
+        self._set_layout_position(position, desired_displays=1)
     
     def on2WindowView(self):
         """Position windows across two displays"""
-        locations = 0, 1
-        self._window_manager[ViewType.Source.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Target.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Composite.value].setPosition(position=locations, desiredDisplays=2)
+        self._set_layout_position((0, 1), desired_displays=2)
     
     def onRight2WindowView(self):
         """Position windows across the right two displays"""
-        locations = 1, 2
-        self._window_manager[ViewType.Source.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Target.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Composite.value].setPosition(position=locations, desiredDisplays=2)
+        self._set_layout_position((1, 2), desired_displays=2)
     
     def on3WindowView(self):
         """Position windows across three displays"""
-        locations = 0, 1, 2
-        self._window_manager[ViewType.Source.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Target.value].setPosition(position=locations, desiredDisplays=2)
-        self._window_manager[ViewType.Composite.value].setPosition(position=locations, desiredDisplays=2)
+        self._set_layout_position((0, 1, 2), desired_displays=2)
     
     def findDisplayOrder(self, position=None):
         """Find the order of displays based on their x-coordinates"""
@@ -138,11 +135,13 @@ class PyreWindowBase(QMainWindow):
                     smallestX = sizes_copy[i].x(), i
                 if sizes_copy[i].x() < smallestX[0]:
                     smallestX = sizes_copy[i].x(), i
+            assert smallestX is not None
             orderedSizeList.append(sizes_copy.pop(smallestX[1]))
         
         return orderedSizeList
     
-    def setPosition(self, desiredDisplays: int = None, count=None, position=None):
+    def setPosition(self, desiredDisplays: int | None = None, count: int | None = None,
+                    position: int | tuple[int, int] | tuple[int, int, int] | None = None):
         """Set the position of the window based on the available displays"""
         from PyQt6.QtGui import QGuiApplication
         
@@ -160,48 +159,60 @@ class PyreWindowBase(QMainWindow):
         
         sizes = self.findDisplayOrder(position)
         
-        if ViewType.Source.value not in self._window_manager:
+        # Resolve actual manager keys (launcher may use ViewType.Source->"Source" or legacy "Fixed"/"Warped")
+        source_key = "Source" if ViewType.Source in self._window_manager else ("Fixed" if "Fixed" in self._window_manager else None)
+        target_key = "Target" if ViewType.Target in self._window_manager else ("Warped" if "Warped" in self._window_manager else None)
+        if source_key is None or target_key is None:
             return
-        
-        if ViewType.Target.value not in self._window_manager:
-            return
+
+        try:
+            source_win = self._window_manager[source_key]
+            target_win = self._window_manager[target_key]
+        except KeyError:
+            raise
+        # Identify this window by object identity so layout works regardless of title
+        is_source = self is source_win
+        is_target = self is target_win
         
         if desiredDisplays == 1:
-            halfX = sizes[position].width() // 2
-            halfY = sizes[position].height() // 2
-            if self.windowTitle() == "Fixed Image" or self.windowTitle() == self._window_manager[ViewType.Source.value].windowTitle():
-                self.move(sizes[position].x(), sizes[position].y())
+            p0 = cast(int, position)
+            halfX = sizes[p0].width() // 2
+            halfY = sizes[p0].height() // 2
+            if is_source:
+                self.move(sizes[p0].x(), sizes[p0].y())
                 self.resize(halfX, halfY)
-            elif self.windowTitle() == "Warped Image" or self.windowTitle() == self._window_manager[ViewType.Target.value].windowTitle():
-                self.move(sizes[position].x() + halfX, sizes[position].y())
+            elif is_target:
+                self.move(sizes[p0].x() + halfX, sizes[p0].y())
                 self.resize(halfX, halfY)
             else:
-                self.move(sizes[position].x(), halfY)
-                self.resize(sizes[position].width(), halfY)
+                self.move(sizes[p0].x(), sizes[p0].y() + halfY)
+                self.resize(sizes[p0].width(), halfY)
         
         elif desiredDisplays == 2 and count >= 2:
-            halfX = sizes[position[1]].width() // 2
-            halfY = sizes[position[1]].height() // 2
-            if self.windowTitle() == "Fixed Image" or self.windowTitle() == self._window_manager[ViewType.Source.value].windowTitle():
-                self.move(sizes[position[1]].x(), sizes[position[1]].y())
-                self.resize(sizes[position[1]].width(), halfY)
-            elif self.windowTitle() == "Warped Image" or self.windowTitle() == self._window_manager[ViewType.Target.value].windowTitle():
-                self.move(sizes[position[1]].x(), halfY + sizes[position[1]].y())
-                self.resize(sizes[position[1]].width(), halfY)
+            p2 = cast(tuple[int, int], position)
+            halfX = sizes[p2[1]].width() // 2
+            halfY = sizes[p2[1]].height() // 2
+            if is_source:
+                self.move(sizes[p2[1]].x(), sizes[p2[1]].y())
+                self.resize(sizes[p2[1]].width(), halfY)
+            elif is_target:
+                self.move(sizes[p2[1]].x(), halfY + sizes[p2[1]].y())
+                self.resize(sizes[p2[1]].width(), halfY)
             else:
-                self.move(sizes[position[0]].x(), sizes[position[0]].y())
-                self.resize(sizes[position[0]].width(), sizes[position[0]].height())
+                self.move(sizes[p2[0]].x(), sizes[p2[0]].y())
+                self.resize(sizes[p2[0]].width(), sizes[p2[0]].height())
         
         elif desiredDisplays >= 3 and count >= 3:
-            if self.windowTitle() == "Fixed Image" or self.windowTitle() == self._window_manager[ViewType.Source.value].windowTitle():
-                self.move(sizes[position[0]].x(), sizes[position[0]].y())
+            p3 = cast(tuple[int, int, int], position)
+            if is_source:
+                self.move(sizes[p3[0]].x(), sizes[p3[0]].y())
                 self.resize(sizes[0].width(), sizes[0].height())
-            elif self.windowTitle() == "Warped Image" or self.windowTitle() == self._window_manager[ViewType.Target.value].windowTitle():
-                self.move(sizes[position[2]].x(), sizes[position[2]].y())
-                self.resize(sizes[position[2]].width(), sizes[position[2]].height())
+            elif is_target:
+                self.move(sizes[p3[2]].x(), sizes[p3[2]].y())
+                self.resize(sizes[p3[2]].width(), sizes[p3[2]].height())
             else:
-                self.move(sizes[position[1]].x(), sizes[position[1]].y())
-                self.resize(sizes[position[1]].width(), sizes[position[1]].height())
+                self.move(sizes[p3[1]].x(), sizes[p3[1]].y())
+                self.resize(sizes[p3[1]].width(), sizes[p3[1]].height())
         self.update()
     
     def closeEvent(self, event: QCloseEvent):

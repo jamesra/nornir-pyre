@@ -21,14 +21,14 @@ class DeleteControlPointCommand(InstantCommandBase):
     """This command deletes a selection of control points"""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
-    _original_points: NDArray[[2, ], np.floating]
+    _original_points: NDArray[np.floating]
     _transform_controller: TransformController
 
     @inject
     def __init__(self,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
                  **kwargs):
         """
@@ -70,3 +70,4 @@ class DeleteControlPointCommand(InstantCommandBase):
     def activate(self):
         super().activate()
         self.execute()
+

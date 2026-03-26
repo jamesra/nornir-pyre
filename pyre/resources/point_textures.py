@@ -14,8 +14,8 @@ def _load_point_image(path: str) -> np.ndarray:
     """
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Point texture not found: {path}")
-    raw = nornir_imageregistration.LoadImage(path)
-    raw = np.asarray(raw)
+    # OpenGL texture upload needs host memory; force numpy so CuPy backend does not return GPU array
+    raw = nornir_imageregistration.LoadImage(path, backend="numpy")
     if raw.ndim == 2:
         raw = np.stack([raw] * 4, axis=-1)
     elif raw.shape[-1] == 3:
@@ -50,14 +50,14 @@ class PointTextures:
     def PointImage(self) -> int:
         if PointTextures.__pointImage is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__pointImage is not None
         return PointTextures.__pointImage
 
     @property
     def SelectedPointImage(self) -> int:
         if PointTextures.__selectedPointImage is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointImage is not None
         return PointTextures.__selectedPointImage
 
     @property
@@ -66,20 +66,21 @@ class PointTextures:
         A texture array, with 0 being the unselected texture and 1 the selected texture
         :return:
         """
+        assert self.__point_array is not None
         return self.__point_array
 
     @property
     def SelectedPointSpriteOn(self) -> int:
         if PointTextures.__selectedPointSpriteOn is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointSpriteOn is not None
         return PointTextures.__selectedPointSpriteOn
 
     @property
     def SelectedPointSpriteOff(self) -> int:
         if PointTextures.__selectedPointSpriteOff is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointSpriteOff is not None
         return PointTextures.__selectedPointSpriteOff
 
     @classmethod

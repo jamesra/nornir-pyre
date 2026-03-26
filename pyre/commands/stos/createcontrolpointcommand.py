@@ -36,8 +36,8 @@ class CreateControlPointCommand(NavigationCommandBase):
                  space: Space,  # Space we are moving the points in, source or target side
                  commandqueue: ICommandQueue,
                  selected_points: ObservableSet[int],  # The indices of the selected points
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  **kwargs):
         """
 
@@ -55,7 +55,7 @@ class CreateControlPointCommand(NavigationCommandBase):
                          bounds=bounds,
                          space=space,
                          commandqueue=commandqueue,
-                         completed_func=completed_func)
+                         completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
         self._selected_points = selected_points
@@ -114,7 +114,7 @@ class CreateControlPointCommand(NavigationCommandBase):
         point = self._new_point_position
         # point = self._new_point_position.source if self.space == Space.Source else self._new_point_position.target
         newpoint = np.array([point.target[0], point.target[1], point.source[0], point.source[1]], dtype=np.float32)
-        index = self._transform_controller.TransformModel.AddPoint(newpoint)
+        index = self._transform_controller.TransformModel.AddPoint(newpoint)  # type: ignore[union-attr]
 
         # Ensure only the new point is selected
         self._selected_points.clear()
@@ -123,7 +123,7 @@ class CreateControlPointCommand(NavigationCommandBase):
         # Queue up a translate command to move the point to the new position if the LMB is still down
         # TODO: Check if shift is held down, and run auto-align if it is
         if self._left_mouse_down:
-            translate_command = pyre.commands.stos.TranslateControlPointCommand(parent=self.parent,
+            translate_command = pyre.commands.stos.TranslateControlPointCommand(parent=self.parent,  # type: ignore[attr-defined]
                                                                                 transform_controller=self._transform_controller,
                                                                                 camera=self.camera,
                                                                                 bounds=self._bounds,

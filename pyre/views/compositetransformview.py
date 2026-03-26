@@ -3,7 +3,6 @@ Created on Oct 19, 2012
 
 @author: u0490822
 """
-from multiprocessing.managers import Value
 from typing import Callable
 
 import OpenGL.GL as gl
@@ -75,23 +74,23 @@ class CompositeTransformView(IImageTransformView):
         return self._transformVertexAngleDeltas
 
     @property
-    def VertexMaxAngleDelta(self) -> float:
-        return self._vertexMaxAngleDelta
+    def VertexMaxAngleDelta(self) -> float | None:
+        return float(self._vertexMaxAngleDelta) if self._vertexMaxAngleDelta is not None else None  # type: ignore[arg-type]
 
     @property
-    def NormalizedVertexMaxAngleDelta(self) -> float:
-        return self._vertexMaxAngleDelta
+    def NormalizedVertexMaxAngleDelta(self) -> float | None:
+        return float(self._vertexMaxAngleDelta) if self._vertexMaxAngleDelta is not None else None  # type: ignore[arg-type]
 
     @property
-    def MaxAngleDelta(self) -> float:
+    def MaxAngleDelta(self) -> float | None:
         return self._MaxAngleDelta
 
     @property
-    def width(self) -> int:
+    def width(self) -> int | None:
         return None if self._source_image_view is None else self._source_image_view.width
 
     @property
-    def height(self) -> int:
+    def height(self) -> int | None:
         return None if self._source_image_view is None else self._source_image_view.height
 
     @property
@@ -306,11 +305,14 @@ class CompositeTransformView(IImageTransformView):
              space: Space,
              client_size: tuple[int, int],
              bounding_box: nornir_imageregistration.Rectangle | None = None,
-             default_fbo: int | None = None):
+             default_fbo: int | None = None,
+             overlay_viewport_size: tuple[int, int] | None = None,
+             show_mesh_lines: bool = False):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
-        :param client_size: Size of the client area in pixels. (height, width)
-        :param default_fbo: Widget's default framebuffer; must use this instead of 0 so overlay draws to QOpenGLWidget's internal FBO (Qt does not use FBO 0 for the widget)."""
+        :param client_size: Size of the client area in pixels. (height, width) logical.
+        :param default_fbo: Widget's default framebuffer; must use this instead of 0 so overlay draws to QOpenGLWidget's internal FBO (Qt does not use FBO 0 for the widget).
+        :param overlay_viewport_size: (width, height) in physical pixels for the overlay viewport; must match resizeGL so the composite fills the widget after resize/hi-DPI."""
         # Rough idea:
         # 1. Render each image to a FrameBufferObject
         # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
@@ -332,10 +334,13 @@ class CompositeTransformView(IImageTransformView):
             raise_on_error("after glClearDepthf(source) in compositetransformview.draw")
             gl.glClearColor(0, 0.1, 0, 1)
             raise_on_error("after glClearColor(source) in compositetransformview.draw")
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
             raise_on_error("after glClear(source) in compositetransformview.draw")
 
-            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+            # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
+            # target space and aligns with the target image in the composite overlay.
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box,
+                                         show_mesh_lines=show_mesh_lines)
 
             target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
             # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
@@ -351,10 +356,11 @@ class CompositeTransformView(IImageTransformView):
             raise_on_error("after glClearDepthf(target) in compositetransformview.draw")
             gl.glClearColor(0, 0.1, 0, 1)
             raise_on_error("after glClearColor(target) in compositetransformview.draw")
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
             raise_on_error("after glClear(target) in compositetransformview.draw")
 
-            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box,
+                                         show_mesh_lines=show_mesh_lines)
 
             # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
             # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
@@ -362,9 +368,10 @@ class CompositeTransformView(IImageTransformView):
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, draw_fbo)
             raise_on_error("after glBindFramebuffer(draw target) in compositetransformview.draw")
             
-            # Restore viewport to window size (not framebuffer size)
-            # client_size is (height, width), viewport expects (x, y, width, height)
-            gl.glViewport(0, 0, width, height)
+            # Viewport must match resizeGL (physical pixels) so the overlay fills the widget after resize/hi-DPI.
+            # Otherwise we only draw to logical size and the top/right stay green.
+            ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
+            gl.glViewport(0, 0, ov_w, ov_h)
             raise_on_error("after glViewport(restore) in compositetransformview.draw")
             
             # OK, we have two textures with the rendered+transformed images of source and target images.
@@ -384,7 +391,7 @@ class CompositeTransformView(IImageTransformView):
                 return
             
             # Ensure overlay shader is initialized in this context (e.g. composite context added after first).
-            # BaseShader.initialized is a method, not a property - must call it.
+            # OverlayShader.initialized is a regular method (not a @property) - must call it with ().
             if not shaders.overlay_shader.initialized():
                 try:
                     shaders.overlay_shader.initialize_gl_objects()
@@ -409,9 +416,11 @@ class CompositeTransformView(IImageTransformView):
                 gl.glEnable(gl.GL_DEPTH_TEST)
 
         elif self._source_image_view is not None:
-            self._source_image_view.draw(view_proj, space, client_size, bounding_box)
+            self._source_image_view.draw(view_proj, space, client_size, bounding_box,
+                                         show_mesh_lines=show_mesh_lines)
         elif self._target_image_view is not None:
-            self._target_image_view.draw(view_proj, space, client_size, bounding_box)
+            self._target_image_view.draw(view_proj, space, client_size, bounding_box,
+                                         show_mesh_lines=show_mesh_lines)
 
     def draw_textures(self, view_proj: NDArray[np.floating],
                       space: Space,
@@ -429,17 +438,17 @@ class CompositeTransformView(IImageTransformView):
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
         raise_on_error("after glBlendFunc(SRC_ALPHA) in draw_textures")
 
-        if self._source_image_array is not None:
+        if self._source_image_array is not None:  # type: ignore[attr-defined]
             FixedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 FixedColor = (1.0, 0.0, 1.0, 1)
 
             # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
-            self.draw(view_proj=view_proj,
+            self.draw(view_proj=view_proj,  # type: ignore[call-arg]
                       space=Space.Source,
-                      BoundingBox=BoundingBox,
-                      glFunc=glFunc)
-            self.DrawWarpedImage(view_proj, self._source_image_array, tex_color=FixedColor, BoundingBox=BoundingBox,
+                      BoundingBox=BoundingBox,  # type: ignore[call-arg]
+                      glFunc=glFunc)  # type: ignore[call-arg]
+            self.DrawWarpedImage(view_proj, self._source_image_array, tex_color=FixedColor, BoundingBox=BoundingBox,  # type: ignore[attr-defined]
                                  z=None,
                                  glFunc=glFunc,
                                  tween=1.0)
@@ -447,14 +456,14 @@ class CompositeTransformView(IImageTransformView):
         gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
         raise_on_error("after glClear(DEPTH) in clear_composite_rendering")
 
-        if self._target_image_array is not None:
+        if self._target_image_array is not None:  # type: ignore[attr-defined]
             WarpedColor = None
             if glFunc == gl.GL_FUNC_ADD:
                 gl.glBlendEquation(glFunc)
                 raise_on_error("after glBlendEquation in clear_composite_rendering")
                 WarpedColor = (0, 1.0, 0, 1)
 
-            self.DrawWarpedImage(view_proj, self._target_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,
+            self.DrawWarpedImage(view_proj, self._target_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,  # type: ignore[attr-defined]
                                  z=None,
                                  glFunc=glFunc,
                                  tween=1)

@@ -44,19 +44,22 @@ class MosaicWindow(PyreWindowBase):
 
         # Open mosaic action
         menuOpenMosaic = filemenu.addAction("&Open mosaic file")
-        menuOpenMosaic.triggered.connect(self.onOpenMosaic)
+        if menuOpenMosaic is not None:
+            menuOpenMosaic.triggered.connect(self.onOpenMosaic)
 
         filemenu.addSeparator()
 
         # Save mosaic action
         menuSaveMosaic = filemenu.addAction("&Save mosaic file")
-        menuSaveMosaic.triggered.connect(self.onSaveMosaic)
+        if menuSaveMosaic is not None:
+            menuSaveMosaic.triggered.connect(self.onSaveMosaic)
 
         filemenu.addSeparator()
 
         # Exit action
         menuExit = filemenu.addAction("&Exit")
-        menuExit.triggered.connect(self.onExit)
+        if menuExit is not None:
+            menuExit.triggered.connect(self.onExit)
 
         return filemenu
 

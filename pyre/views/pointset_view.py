@@ -33,7 +33,9 @@ class PointSetView:
     @property
     def points(self) -> NDArray[np.floating]:
         """The points to render"""
-        return self._point_buffer.data
+        data = self._point_buffer.data
+        assert data is not None
+        return data
 
     @points.setter
     def points(self, value: NDArray[np.floating]):
@@ -77,5 +79,7 @@ class PointSetView:
 
     def draw(self, view_proj_matrix: NDArray[np.floating], tween: float):
         """Draw the points"""
-        pyre.gl_engine.shaders.pointset_shader.draw(view_proj_matrix, self._texture, self._vao,
-                                                    len(self._point_buffer.data), tween)
+        ps = pyre.gl_engine.shaders.pointset_shader
+        data = self._point_buffer.data
+        if ps is not None and data is not None:
+            ps.draw(view_proj_matrix, self._texture, self._vao, len(data), tween)

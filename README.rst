@@ -115,10 +115,12 @@ Image Registration
    * Use File > Open STOS to load an existing transformation
    * Or use File > New STOS to create a new transformation between two images
 
-2. Add control points:
+2. Add control points (triangulation / standard STOS transforms with movable control points):
 
    * Use Shift+Click to add corresponding points in both images
    * Use Alt+Shift+Click to add a point and auto-align it
+
+   Refined grid transforms do not support adding or removing control points via the UI (use triangulation or convert workflow if you need to edit the mesh).
 
 3. Align the images:
 
@@ -140,14 +142,16 @@ Mosaic Viewing
 2. Navigate the mosaic:
 
    * Use WASD keys or right-click drag to pan
-   * Use mouse wheel to zoom
-   * Use Tab to switch between different view modes
+   * Use mouse wheel to zoom; Ctrl+scroll (and Ctrl+Shift+scroll for finer steps) rotates the transform when supported
+   * Use Page Up / Page Down to change magnification
 
 Usage
 ~~~~~
 
 Mouse Controls
 --------------
+
+The bindings below apply to STOS registration views. Triangulation transforms support adding points; refined grid transforms do not (see workflows above).
 
 Left Button:
     * Click to select an existing point
@@ -158,7 +162,7 @@ Left Button:
     * Alt+Click to move currently selected point to mouse position
 
 Right Button:
-    * Shift+Click to delete a point
+    * Shift+Click to delete a point (triangulation transforms; not available on refined grid transforms)
     * Click+drag to move the view
 
 Scroll wheel:
@@ -177,7 +181,7 @@ View Controls:
     * M: Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
     * L: Show transform mesh lines
     * F: Flip the warped image
-    * Tab: Change properties of the view. A warped image may be displayed as it appears registered. The composite view will switch to a different view.
+    * Tab: Toggle how the warped image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
 
 Alignment:
     * Space: Auto-align the selected point

@@ -71,6 +71,7 @@ class DynamicVAO(ContextAwareVAOHelper, IVAO):
                     raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
                 raise_on_error("after glGenVertexArrays", RuntimeError("glGenVertexArrays failed"))
 
+                assert context is not None
                 self._context_vaos[context] = vao_id
                 gl.glBindVertexArray(vao_id)
                 raise_on_error("after glBindVertexArray in begin_init")
@@ -124,7 +125,7 @@ class DynamicVAO(ContextAwareVAOHelper, IVAO):
         # Store the index buffer object and its data
         self._index_buffer = value
         self._indices = value.data
-        self._index_buffer_id = value.buffer
+        self._index_buffer_id = int(value.buffer) if value.buffer is not None else None
 
         # Bind the index buffer to the VAO
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self._index_buffer.buffer)

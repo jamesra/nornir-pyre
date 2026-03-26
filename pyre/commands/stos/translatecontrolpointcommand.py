@@ -24,14 +24,14 @@ class TranslateControlPointCommand(NavigationCommandBase):
     _selected_point_set: ObservableSet[int]  # The indices of the selected points
     _command_points: set[int]  # Points under mouse when command was triggered
     _space: Space
-    _translate_origin: NDArray[float, float]
-    _original_points: NDArray[[2, ], np.floating]
+    _translate_origin: NDArray[np.floating]
+    _original_points: NDArray[np.floating]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
 
     @property
-    def translated_points(self) -> NDArray[[2, ], np.floating]:
-        return self._transform_controller.points[self._selected_point_set]
+    def translated_points(self) -> NDArray[np.floating]:
+        return self._transform_controller.points[list(self._selected_point_set)]  # type: ignore[index]
 
     @inject
     def __init__(self,
@@ -43,8 +43,8 @@ class TranslateControlPointCommand(NavigationCommandBase):
                  space: Space,  # Space we are moving the points in, source or target side
                  commandqueue: ICommandQueue,
                  translate_all: bool = False,  # True if all points in the transform should be translated
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  **kwargs):
         """
 
@@ -95,31 +95,32 @@ class TranslateControlPointCommand(NavigationCommandBase):
         """Called when the mouse is dragged"""
 
         if event.buttons() & Qt.MouseButton.RightButton:
-            # super().on_mouse_motion(event)
             self.cancel()
             return
 
         if not (event.buttons() & Qt.MouseButton.LeftButton):
             return
 
+        # Use current parent size so deltas are correct (e.g. in composite after resize)
+        self._width, self._height = self.parent.size().width(), self.parent.size().height()
         point_pair = self.get_world_positions(event)
 
         world_point = point_pair.source if self.space == Space.Source else point_pair.target
 
         delta = world_point - self._translate_origin
-        print(
-            f'space: {self.space} x:{world_point[1]} y:{world_point[0]} hx:{self._translate_origin[1]} hy:{self._translate_origin[0]} dx:{delta[1]} dy:{delta[0]}')
         self._translate_origin = world_point
 
-        new_selected_indicies = self._transform_controller.MovePoint(self._selected_point_set, delta[1], delta[0],
+        new_selected_indicies = self._transform_controller.MovePoint(list(self._selected_point_set), delta[1], delta[0],
                                                                      space=self.space)
 
         # Update selected points in the UI if indicies have changed
-        if len(set(new_selected_indicies) - self._selected_point_set) > 0:
+        new_indices_set = set(np.atleast_1d(new_selected_indicies).tolist())
+        if len(new_indices_set - self._selected_point_set) > 0:
             self._selected_point_set.clear()
-            self._selected_point_set.update(new_selected_indicies)
+            self._selected_point_set.update(new_indices_set)
 
-        pass
+        # Request repaint so control point movement is visible during drag (change listeners are deferred)
+        self.parent.update()
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
@@ -128,17 +129,14 @@ class TranslateControlPointCommand(NavigationCommandBase):
         if (keycode == Qt.Key.Key_Left or
             keycode == Qt.Key.Key_Right or
             keycode == Qt.Key.Key_Up or
-            keycode == Qt.Key.Key_Down) and self.HighlightedPointIndex is not None:
+            keycode == Qt.Key.Key_Down) and self.HighlightedPointIndex is not None:  # type: ignore[attr-defined]
 
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
-            print(str(multiplier))
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 multiplier *= 5
-                print(str(multiplier))
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 multiplier *= 25
-                print(str(multiplier))
 
             delta = [0, 0]
             if keycode == Qt.Key.Key_Left:
@@ -153,7 +151,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
             delta[0] *= multiplier
             delta[1] *= multiplier
 
-            self._transform_controller.MovePoint(self._selected_point_set, delta[1], delta[0],
+            self._transform_controller.MovePoint(list(self._selected_point_set), delta[1], delta[0],
                                                  space=self._space)
         return
 
@@ -189,3 +187,4 @@ class TranslateControlPointCommand(NavigationCommandBase):
     def unsubscribe_to_parent(self):
         self._unbind_mouse_events()
         self._unbind_key_events()
+

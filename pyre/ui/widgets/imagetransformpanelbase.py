@@ -13,7 +13,7 @@ from PyQt6.QtGui import QResizeEvent, QMouseEvent
 
 from pyre.interfaces.managers import IGLContextManager
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 import nornir_imageregistration
 from pyre.ui import Camera
 from pyre.ui.widgets import glpanel
@@ -26,7 +26,7 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
     """
     Contains a GLContext and a camera to render a scene
     """
-    _camera: Camera
+    _camera: Camera | None
     _glpanel: glpanel.GLPanel
     # _width: int
     # _height: int
@@ -43,12 +43,7 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
         return self._statusbar
 
     @property
-    def glcanvas(self):
-        """The GLCanvas that renders the scene"""
-        return self._glpanel
-
-    @property
-    def camera(self) -> Camera:
+    def camera(self) -> Camera | None:
         """Camera position information for the scene being rendered on the glcanvas"""
         return self._camera
 
@@ -65,7 +60,7 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
 
     @property
     def glcanvas(self):
-        """Alias for _glpanel for backwards compatibility"""
+        """The GLCanvas that renders the scene"""
         return self._glpanel
 
     @property
@@ -83,7 +78,6 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
     #     """Height of the image in pixels"""
     #     return self._height
 
-    @inject
     def __init__(self,
                  parent: QWidget,
                  transform_controller: TransformController,
@@ -102,15 +96,15 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
         self._glpanel.setMouseTracking(True)
 
         # Create layout
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.addWidget(self._glpanel, 1)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.addWidget(self._glpanel, 1)
 
         # Initialize camera
         self._camera = Camera((0, 0), 1)
 
         # Connect resize event
-        self.resizeEvent = self.on_resize
+        self.resizeEvent = self.on_resize  # type: ignore[method-assign]
 
         # Get initial size
         # self._width, self._height = self._glpanel.width(), self._glpanel.height()
@@ -134,16 +128,16 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
     def addStatusBar(self):
         """Add a status bar to the panel"""
         self._statusbar = CameraStatusBar(self,
-                                          self.camera,
+                                          self.camera,  # type: ignore[arg-type]
                                           self.glcanvas)
-        self.layout.addWidget(self._statusbar)
+        self._layout.addWidget(self._statusbar)
 
     def __str__(self, *args, **kwargs):
-        return self.window().windowTitle()
+        return self.window().windowTitle()  # type: ignore[union-attr]
 
     def imageCoordsForMouse(self, y: float, x) -> tuple[float, float]:
         """Convert mouse coordinates to image coordinates"""
-        return self.camera.ImageCoordsForMouse(y, x)
+        return self.camera.ImageCoordsForMouse(y, x)  # type: ignore[return-value]
 
     def on_resize(self, event: QResizeEvent):
         """Handle resize event. Defer update_size so layout has resized _glpanel first."""
@@ -152,20 +146,10 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
     def update_size(self):
         """Update the size of the camera and the camera's view of the world"""
         _width, _height = self._glpanel.width(), self._glpanel.height()
-        # #region agent log
-        try:
-            import json
-            import time
-            from pathlib import Path
-            _logpath = Path(__file__).resolve().parent.parent.parent.parent / "debug-f136c0.log"
-            with open(_logpath, "a", encoding="utf-8") as _f:
-                _f.write(json.dumps({"sessionId": "f136c0", "hypothesisId": "resize", "location": "imagetransformpanelbase.update_size", "message": "glpanel size", "data": {"w": _width, "h": _height}, "timestamp": int(time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         if self.camera is not None and _width > 0 and _height > 0:
-            self.camera.window_size = np.array((_height, _width))
+            self.camera.window_size = np.array((_height, _width))  # type: ignore[assignment]
             self.camera.focus(_width, _height)
+            self._glpanel.update()
 
     def getCorrectedMousePosition(self, event: QMouseEvent) -> tuple[float, float]:
         """QT uses a different coordinate system, flip the Y coordinate"""
@@ -183,6 +167,8 @@ class ImageTransformPanelBase(PyQt6.QtOpenGLWidgets.QOpenGLWidget):
 
     def lookatfixedpoint(self, point: nornir_imageregistration.PointLike, scale: float):
         """specify a point to look at in fixed space"""
+        if self.camera is None:
+            return
         self.camera.lookat = point
         self.camera.scale = scale
 

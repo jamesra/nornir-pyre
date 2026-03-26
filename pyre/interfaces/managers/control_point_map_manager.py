@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import abc
 from typing import NamedTuple
+
+import pyre
 from pyre.space import Space
 
 
@@ -9,7 +11,7 @@ from pyre.space import Space
 
 
 class ControlPointManagerKey(NamedTuple):
-    transform_controller: 'pyre.controllers.transformcontroller.TransformController'
+    transform_controller: "pyre.controllers.transformcontroller.TransformController"  # type: ignore[attr-defined]
     space: float | Space
 
     def __str__(self):
@@ -20,15 +22,15 @@ class IControlPointMapManager(abc.ABC):
     """Tracks ControlPointMaps for a TransformController and a space to prevent rebuilding data structures constantly"""
 
     @abc.abstractmethod
-    def getorcreate(self, key: ControlPointManagerKey) -> 'pyre.viewmodels.ControlPointMap':
+    def getorcreate(self, key: ControlPointManagerKey) -> "pyre.viewmodels.ControlPointMap":  # type: ignore[name-defined]
         """Gets a ControlPointMap if it exists, otherwise creates one"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def __getitem__(self, key: ControlPointManagerKey) -> 'pyre.viewmodels.ControlPointMap':
+    def __getitem__(self, key: ControlPointManagerKey) -> "pyre.viewmodels.ControlPointMap":  # type: ignore[name-defined]
         """Returns the Control Point Map for the specified TransformController and space"""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def __setitem__(self, key: ControlPointManagerKey, value: dict[Space, 'pyre.viewmodels.ControlPointMap']):
+    def __setitem__(self, key: ControlPointManagerKey, value: "pyre.viewmodels.ControlPointMap"):  # type: ignore[name-defined]
         raise NotImplementedError
