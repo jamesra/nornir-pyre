@@ -7,6 +7,7 @@ Created on Oct 26, 2012
 from PIL import Image as PILImage
 import numpy
 import OpenGL.GL as gl
+from typing import cast
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtCore import Qt, QSize, QPoint
@@ -59,7 +60,7 @@ class TileExportWindow(QOpenGLWidget):
         buffer = gl.glReadPixels(0, 0, self._tile_width, self._tile_height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
 
         # Convert buffer to numpy array
-        rawData = numpy.frombuffer(buffer, dtype=numpy.uint8)  # type: ignore[arg-type]
+        rawData = numpy.frombuffer(cast(bytes, buffer), dtype=numpy.uint8)
         rawData = rawData.reshape((self._tile_height, self._tile_width, 3))
 
         # OpenGL returns the image upside down, so flip it
@@ -83,7 +84,7 @@ class TileExportWindow(QOpenGLWidget):
         '''
         gl.glClearDepthf(1)
         gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
+        gl.glClear(int(gl.GL_COLOR_BUFFER_BIT) | int(gl.GL_DEPTH_BUFFER_BIT))
 
     def ImageCoordsForMouse(self, x, y):
         '''

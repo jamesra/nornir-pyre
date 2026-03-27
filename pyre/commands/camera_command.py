@@ -1,7 +1,6 @@
 import nornir_imageregistration.spatial
 
 try:
-    import PyQt6.Key  # type: ignore[import-untyped]
     import PyQt6.QtCore
     from PyQt6.QtCore import Qt
 except:

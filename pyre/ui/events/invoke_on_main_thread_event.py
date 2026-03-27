@@ -6,6 +6,7 @@ import traceback
 
 import pyre
 from pyre.container import IContainer
+from pyre.interfaces import IEventManager
 
 # from pyre.interfaces import IEventManager
 
@@ -16,7 +17,7 @@ class QtInvokeOnMainThreadEvent(QEvent):
 
     _args: tuple | None
     _kwargs: dict | None
-    _obj: pyre.interfaces.IEventManager  # type: ignore[name-defined]
+    _obj: IEventManager
     _stack_list: list[str] | None
     _stack: str | None
 
@@ -38,10 +39,10 @@ class QtInvokeOnMainThreadEvent(QEvent):
         return self._kwargs
 
     @property
-    def obj(self) -> "pyre.interfaces.IEventManager | None":  # type: ignore[name-defined]
+    def obj(self) -> IEventManager | None:
         return self._obj
 
-    def __init__(self, obj: "pyre.interfaces.IEventManager",  # type: ignore[name-defined]
+    def __init__(self, obj: IEventManager,
                  args: tuple | None = None,
                  kwargs: dict | None = None):
         super().__init__(QtInvokeOnMainThreadEvent.EVENT_TYPE)

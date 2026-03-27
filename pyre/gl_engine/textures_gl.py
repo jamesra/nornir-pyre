@@ -1,6 +1,7 @@
 import OpenGL.GL as gl
 import numpy as np
 from numpy.typing import NDArray
+from typing import cast
 
 import nornir_imageregistration
 
@@ -24,7 +25,7 @@ import nornir_imageregistration
 #
 #     return textureid
 
-def _adjust_image_for_gl(image: NDArray[np.uint8]) -> NDArray:
+def _adjust_image_for_gl(image: NDArray[np.uint8]) -> NDArray[np.floating]:
     if np.issubdtype(image.dtype, np.uint8):
         return image / 255.0
     elif isinstance(image.dtype, np.floating):
@@ -77,7 +78,7 @@ def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
 
 
 def create_rgba_texture(image: NDArray[np.uint8]) -> int:
-    image = _adjust_image_for_gl(image)
+    image_f = _adjust_image_for_gl(image)
     gl.glActiveTexture(gl.GL_TEXTURE0)
     textureid = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D, textureid)
@@ -87,10 +88,10 @@ def create_rgba_texture(image: NDArray[np.uint8]) -> int:
 
     _configure_texture_sampler(gl.GL_LINEAR)
 
-    gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, image.shape[1], image.shape[0],
-                    0, gl.GL_RGBA, gl.GL_FLOAT, image)
+    gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, image_f.shape[1], image_f.shape[0],
+                    0, gl.GL_RGBA, gl.GL_FLOAT, image_f)
 
-    _configure_mipmaps(image.shape)
+    _configure_mipmaps(image_f.shape)
 
     gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
 
@@ -138,21 +139,21 @@ def read_rgba_texture(texture_id: int, width: int, height: int) -> NDArray[np.ui
 
 def create_rgba_texture_array(images: NDArray[np.uint8]) -> int:
     """Given a 3D array of images, create a 2D texture array"""
-    images = _adjust_image_for_gl(images)
+    images_f = _adjust_image_for_gl(images)
     # gl.glActiveTexture(gl.GL_TEXTURE0)
     textureid = gl.glGenTextures(1)
     gl.glBindTexture(gl.GL_TEXTURE_2D_ARRAY, textureid)
 
-    z_size, y_size, x_size, num_channels = images.shape
+    z_size, y_size, x_size, num_channels = images_f.shape
     layer_count = z_size
-    images = images.astype(np.float32, copy=False)  # type: ignore[assignment]
+    images_f = cast(NDArray[np.floating], images_f.astype(np.float32, copy=False))
     gl.glTexImage3D(gl.GL_TEXTURE_2D_ARRAY, 0, gl.GL_RGBA,
                     x_size, y_size, layer_count,
                     0, gl.GL_RGBA, gl.GL_FLOAT, None)
 
     # Loop through each texture and add it to the array
-    for z in range(images.shape[0]):
-        texture_data = images[z, :, :, :]
+    for z in range(images_f.shape[0]):
+        texture_data = images_f[z, :, :, :]
         # Copy the texture into the texture array
         gl.glTexSubImage3D(gl.GL_TEXTURE_2D_ARRAY,
                            0, 0, 0, z,

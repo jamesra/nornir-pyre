@@ -7,7 +7,7 @@ Created on Oct 17, 2012
 import logging
 import math
 import sys
-from typing import Generator
+from typing import Generator, cast
 
 import OpenGL.GL as gl
 import numpy as np
@@ -132,8 +132,9 @@ class ImageViewModel:
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
         # Accept CuPy arrays from image loader (convert to numpy for viewmodel/tiling)
-        if hasattr(input_image, "get") and callable(getattr(input_image, "get")):
-            input_image = input_image.get()  # type: ignore[attr-defined]
+        get_fn = getattr(input_image, "get", None)
+        if callable(get_fn):
+            input_image = cast(str | NDArray, get_fn())
         if isinstance(input_image, str):
 
             Logger.info("Loading image: " + input_image)
@@ -166,20 +167,22 @@ class ImageViewModel:
     def ResizeToPowerOfTwo(self, InputImage: str, tilesize: nornir_imageregistration.ShapeLike | None = None) -> \
             NDArray[np.floating]:
         if tilesize is None:
-            tilesize = self._TileSize  # type: ignore[attr-defined]
+            tilesize = self.TextureSize
 
-        Resize = scipy.ndimage.imread(InputImage, flatten=True)  # type: ignore[attr-defined]
+        tile_height = int(tilesize[0])
+        tile_width = int(tilesize[1])
+        Resize = nornir_imageregistration.LoadImage(InputImage, dtype=np.float32)
 
         height = Resize.shape[0]
         width = Resize.shape[1]
 
-        NumCols = math.ceil(width / float(tilesize[0]))  # type: ignore[index]
-        NumRows = math.ceil(height / float(tilesize[1]))  # type: ignore[index]
+        NumCols = math.ceil(width / float(tile_height))
+        NumRows = math.ceil(height / float(tile_width))
 
-        newwidth = NumCols * tilesize[0]  # type: ignore[index]
-        newheight = NumRows * tilesize[1]  # type: ignore[index]
+        newwidth = NumCols * tile_height
+        newheight = NumRows * tile_width
 
-        newImage = np.zeros((newheight, newwidth), dtype=Resize.dtype)
+        newImage = np.zeros((int(newheight), int(newwidth)), dtype=Resize.dtype)
 
         newImage[0:Resize.shape[0], 0:Resize.shape[1]] = Resize
 
@@ -239,7 +242,8 @@ class ImageViewModel:
                     temp = self.Image[iY:end_iY, iX:end_iX]
 
                 try:
-                    texture = gl_engine.textures.create_grayscale_texture(temp)  # type: ignore[arg-type]
+                    texture_input = cast(NDArray[np.uint8], nornir_imageregistration.image_to_uint8(temp))
+                    texture = gl_engine.textures.create_grayscale_texture(texture_input)
                     del temp
                     columnTextures.append(texture)
                 except RuntimeError as e:

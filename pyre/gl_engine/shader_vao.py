@@ -27,7 +27,7 @@ class ShaderVAO(ContextAwareVAOHelper):
             # ... rendering code ...
         # VAO is automatically unbound here
     """
-    _vertex_buffer: ctypes.c_uint | None = None
+    _vertex_buffer: int | None = None
     _vertex_layout: VertexArrayLayout | None = None
     _vertex_data: NDArray[np.floating] | None = None
     _is_bound: bool = False
@@ -91,7 +91,7 @@ class ShaderVAO(ContextAwareVAOHelper):
             vertex_buffer_id = gl.glGenBuffers(1)
             if vertex_buffer_id is None or vertex_buffer_id == 0:
                 raise RuntimeError("Failed to generate vertex buffer")
-            self._vertex_buffer = int(vertex_buffer_id)  # type: ignore[assignment]
+            self._vertex_buffer = int(vertex_buffer_id)
             check_for_error()
 
             gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self._vertex_buffer)

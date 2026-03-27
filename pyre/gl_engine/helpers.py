@@ -1,4 +1,5 @@
 from OpenGL import GL as gl
+from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 from nornir_imageregistration import in_debug_mode
@@ -17,7 +18,7 @@ def raise_on_error(message: str | None = None, exception: Exception | None = Non
     """
     error = gl.glGetError()
     if error != gl.GL_NO_ERROR:
-        error_name = get_gl_error_name(error)  # type: ignore[arg-type]
+        error_name = get_gl_error_name(cast(int, error))
         if message:
             raise RuntimeError(f"OpenGL error {message}: {error_name} ({error})") from exception
         else:
@@ -58,7 +59,7 @@ def check_for_error(message: str | None = None) -> bool:
     # Clear all remaining errors from the queue
     while error != gl.GL_NO_ERROR:
         found_error = True
-        try_log_error(error, message)  # type: ignore[arg-type]
+        try_log_error(cast(int, error), message)
         error = gl.glGetError()
 
     return found_error

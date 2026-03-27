@@ -54,7 +54,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
         :param space:
         :param completed_func:
         """
-        super().__init__(completed_func)  # type: ignore[arg-type]
+        super().__init__(completed_func)
 
         self._selection_set = selected_points
         self._set_operation = set_operation

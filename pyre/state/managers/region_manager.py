@@ -11,7 +11,7 @@ a new command for the input.  The first object to return a command is selected a
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import numpy as np
 import rtree
@@ -40,6 +40,8 @@ class RegionMap(IRegionMap, IControlPointActionMap):
 
     def __init__(self):
         self._index = rtree.index.Index(interleaved=True)
+        self.object_to_key = {}
+        self.key_to_object = {}
 
     def add(self, obj: IRegion) -> int:
         if obj in self.object_to_key:
@@ -49,8 +51,9 @@ class RegionMap(IRegionMap, IControlPointActionMap):
         assert bbox is not None
         bounds = bbox.ToTuple()
         key = id(obj)
+        self.object_to_key[obj] = key
         self.key_to_object[key] = obj
-        self._index.insert(key, bounds)  # type: ignore[call-arg]
+        self._index.insert(key, cast(tuple[float, float, float, float], bounds))
         return key
 
     def tryremove(self, key: int) -> bool:
@@ -60,7 +63,7 @@ class RegionMap(IRegionMap, IControlPointActionMap):
             coords = bbox.ToTuple() if bbox is not None else (0, 0, 0, 0)
             del self.key_to_object[key]
             del self.object_to_key[obj]
-            self._index.delete(key, coords)  # type: ignore[call-arg]
+            self._index.delete(key, cast(tuple[float, float, float, float], coords))
             return True
         return False
 
@@ -78,7 +81,7 @@ class RegionMap(IRegionMap, IControlPointActionMap):
         world_position = event.position
         bounds = nornir_imageregistration.Rectangle.CreateFromBounds(
             np.array((world_position[0], world_position[1], world_position[0], world_position[1])))
-        keys = list(self._index.intersection(bounds.ToTuple()))  # type: ignore[call-arg]
+        keys = list(self._index.intersection(cast(tuple[float, float, float, float], bounds.ToTuple())))
         objects = [self.key_to_object[key] for key in keys]
         candidates = []  # type: list[InteractionCandidate]
         for obj in objects:

@@ -4,6 +4,7 @@ import sys
 from nornir_imageregistration import Mosaic
 import nornir_imageregistration.tileset
 import nornir_pools
+from nornir_pools import task as pool_task
 from pyre.state.events import StateEventsImpl
 from pyre.viewmodels import ImageViewModel
 from pyre.views import ImageTransformView
@@ -107,22 +108,21 @@ class MosaicState(StateEventsImpl):
 
         pools = nornir_pools.GetGlobalThreadPool()
 
-        tasks = []
+        tasks: list[tuple[pool_task.Task, float]] = []
         for image_filename, transform in list(mosaic.ImageToTransform.items()):
             tile_full_path = os.path.join(tiles_dir, image_filename)
 
             task = pools.add_task(str(z), self.AllocateMosaicTile, transform, tile_full_path, transform_scale)
-            task.z = z  # type: ignore[reportAttributeAccessIssue]
-            tasks.append(task)
+            tasks.append((task, z))
 
             # image_transform_view = self.AllocateMosaicTile(transform, tile_full_path, transform_scale)
             # image_transform_view.z = z
             z += z_step
             # ImageTransformViewList.append(image_transform_view)
 
-        for t in tasks:
+        for t, task_z in tasks:
             image_transform_view = t.wait_return()
-            image_transform_view.z = t.z
+            image_transform_view.z = task_z
             ImageTransformViewList.append(image_transform_view)
 
             output = '%g' % (z * 100.0)

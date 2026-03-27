@@ -48,7 +48,7 @@ class CallControlPointToMouseCommand(InstantCommandBase):
         :param space:
         :param completed_func:
         """
-        super().__init__(completed_func=completed_func)  # type: ignore[arg-type]
+        super().__init__(completed_func=completed_func)
         self._transform_controller = transform_controller
         self._mouse_position = self._mouse_position_history[space]
         self._space = space

@@ -1,4 +1,5 @@
 import ctypes
+from typing import cast
 
 from OpenGL import GL as gl
 import numpy as np
@@ -25,10 +26,13 @@ class GLBuffer(IBuffer):
 
     @data.setter
     def data(self, value: NDArray[np.floating]):
-        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
-        value = np.asarray(value)
-        self._data = value
-        self._update_buffer_data(value)
+        raw: object = value
+        get_fn = getattr(raw, "get", None)
+        if callable(get_fn):
+            raw = get_fn()
+        array_value = cast(NDArray[np.floating], np.asarray(raw))
+        self._data = array_value
+        self._update_buffer_data(array_value)
 
     @property
     def buffer(self) -> ctypes.c_uint:
@@ -63,8 +67,11 @@ class GLBuffer(IBuffer):
                  capacity: int | None = None):
         self._layout = layout
         if data is not None:
-            data = data.get() if hasattr(data, "get") else data  # type: ignore[attr-defined]
-            data = np.asarray(data)
+            raw: object = data
+            get_fn = getattr(raw, "get", None)
+            if callable(get_fn):
+                raw = get_fn()
+            data = cast(NDArray[np.floating], np.asarray(raw))
         self._data = data
         self._usage = usage
         self._capacity = capacity if capacity is not None else \
@@ -125,10 +132,13 @@ class GLIndexBuffer(IIndexBuffer):
 
     @data.setter
     def data(self, value: NDArray[np.integer]):
-        value = value.get() if hasattr(value, "get") else value  # type: ignore[attr-defined]
-        value = np.asarray(value)
-        self._data = value
-        self._update_buffer_data(value)
+        raw: object = value
+        get_fn = getattr(raw, "get", None)
+        if callable(get_fn):
+            raw = get_fn()
+        array_value = cast(NDArray[np.integer], np.asarray(raw))
+        self._data = array_value
+        self._update_buffer_data(array_value)
 
     @property
     def buffer(self) -> ctypes.c_uint:
@@ -156,8 +166,11 @@ class GLIndexBuffer(IIndexBuffer):
                  usage: int = gl.GL_STATIC_DRAW,
                  capacity: int | None = None):
         if data is not None:
-            data = data.get() if hasattr(data, "get") else data  # type: ignore[attr-defined]
-            data = np.asarray(data)
+            raw: object = data
+            get_fn = getattr(raw, "get", None)
+            if callable(get_fn):
+                raw = get_fn()
+            data = cast(NDArray[np.integer], np.asarray(raw))
         self._data = data if data is not None else np.array([], dtype=np.uint16)
         self._usage = usage
         self._capacity = capacity if capacity is not None else \
