@@ -67,9 +67,11 @@ Save and load operations were tested for all transform types:
 
 #### Failed:
 ✗ **Rigid**: Parameter name mismatch in deserialization
-  - Error: `CenteredSimilarity2DTransform.__init__() got an unexpected keyword argument 'scale'`
-  - This is a minor API inconsistency in the nornir_imageregistration library
-  - Workaround: Use Mesh transform and convert to Rigid after loading
+  - Error: `CenteredSimilarity2DTransform.__init__() got an unexpected keyword argument 'scale'. Did you mean 'scalar'?`
+  - **Root Cause**: Bug in `nornir_imageregistration/transforms/factory.py` line 448 - uses `scale=` instead of `scalar=`
+  - **Location**: `ParseCenteredSimilarity2DTransform()` function passes wrong parameter name
+  - **Fix Required**: In nornir_imageregistration library, change `scale=scale` to `scalar=scale` in factory.py
+  - **Workaround**: Use Mesh transform and convert to Rigid after loading, or manually patch the factory.py file
   
 ✗ **RBF**: Missing serialization method
   - Error: `'TwoWayRBFWithLinearCorrection' object has no attribute 'ToITKString'`
@@ -144,9 +146,19 @@ Downloaded files:
 ## Known Limitations
 
 1. **Grid → Rigid Conversion**: May fail with certain point configurations due to SVD convergence issues
-2. **Rigid Transform Serialization**: Minor parameter name inconsistency in deserialization
+2. **Rigid Transform Serialization**: Bug in nornir_imageregistration library factory.py (parameter name: `scale` vs `scalar`)
 3. **RBF Transform Serialization**: RBF transforms don't support ITK string format
 4. **Refined Grid Transforms**: Do not support adding/removing control points via UI (by design)
+
+## Bugs Found in Dependencies
+
+### nornir_imageregistration v1.6.5
+**File**: `nornir_imageregistration/transforms/factory.py`  
+**Line**: ~448  
+**Function**: `ParseCenteredSimilarity2DTransform()`  
+**Issue**: Uses `scale=scale` instead of `scalar=scale` when constructing CenteredSimilarity2DTransform  
+**Impact**: Rigid transforms cannot be loaded from saved STOS files  
+**Fix**: Change parameter name from `scale` to `scalar` in the factory function
 
 ## Recommendations
 
