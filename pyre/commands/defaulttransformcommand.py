@@ -337,10 +337,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                 # Draw a rectangle to select point
                 pass
             elif event.buttons() & Qt.MouseButton.RightButton:
-                old_point = self._mouse_position_history[self.space]
                 dy, dx = self._mouse_position_history[self.space] - point
-                if nornir_imageregistration.in_debug_mode():
-                    print(f'x:{point[1]} y:{point[0]} hx:{old_point[1]} hy:{old_point[0]} dx:{dx} dy:{dy}')
                 self.camera.translate((dy, dx))
 
                 # Update the point pair to account for camera motion

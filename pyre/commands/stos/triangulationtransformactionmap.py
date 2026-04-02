@@ -66,7 +66,9 @@ class TriangulationTransformActionMap(IControlPointActionMap):
 
                 return ControlPointActionResult(actions, interactions)
             elif len(interactions) >= 1:
-                if event.IsLeftMousePressed:
+                if event.IsOnlyShiftPressed and self.can_delete(event, interactions):
+                    actions |= ControlPointAction.DELETE
+                elif event.IsLeftMousePressed:
                     if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
                         actions |= ControlPointAction.REGISTER
                     elif event.IsOnlyCtrlPressed:
