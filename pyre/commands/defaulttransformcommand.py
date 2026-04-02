@@ -26,7 +26,6 @@ from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
 
-
 DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
     ControlPointAction.NONE: Qt.CursorShape.ArrowCursor,
     ControlPointAction.CREATE: Qt.CursorShape.CrossCursor,
@@ -273,6 +272,9 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
+        if self.status != pyre.CommandStatus.Active:
+            return False
+
         new_action = self._actionmap.get_action(selection_event_data)
         if new_action.action not in self._action_to_command:
             self.log.error(

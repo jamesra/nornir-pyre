@@ -302,10 +302,11 @@ class StosWindow(PyreWindowBase):
         config = pyre.state.get_current_stos_config()
         if config is None:
             return
+        transform_type = config.TransformType or nornir_imageregistration.transforms.TransformType.RIGID
         sourceImageView = self._imageviewmodel_manager[ViewType.Source]
         targetImageView = self._imageviewmodel_manager[ViewType.Target]
         self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(  # type: ignore[attr-defined]
-            config.TransformType,
+            transform_type,
             sourceImageView.Image.shape,
             targetImageView.Image.shape)
 

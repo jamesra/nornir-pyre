@@ -11,7 +11,6 @@ from PyQt6.QtGui import QMouseEvent, QKeyEvent, QResizeEvent
 import pyre
 from pyre.interfaces import IInstantCommand, StatusChangeCallback, ICommand
 
-
 class CommandBase(IInstantCommand):
     """Shared implementation for all commands"""
     _command_completed_callbacks: list[StatusChangeCallback]
