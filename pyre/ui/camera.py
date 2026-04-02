@@ -194,7 +194,8 @@ class Camera(IReadOnlyCamera):
     def translate(self, delta: nornir_imageregistration.PointLike):
         """translate the camera by the specified amount"""
         # print("Translate X: %g Y: %g" % (delta[1], delta[0]))
-        delta = nornir_imageregistration.EnsureArray(delta, float)
+        # Camera state is UI-side and should remain NumPy-backed even when compute paths use CuPy.
+        delta = nornir_imageregistration.EnsureNumpyArray(delta, float)
         self.lookat = self.lookat + delta
 
     @property

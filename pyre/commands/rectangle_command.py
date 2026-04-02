@@ -16,6 +16,9 @@ import pyre.views
 class RectangleCommand(UICommandBase):
     '''
     The user interface to draw and size a rectangle
+
+    Legacy wx-era command kept for compatibility with old mosaic panel code.
+    New command routing uses UICommandBase mouse/key dispatch methods.
     '''
 
     @property
@@ -99,7 +102,7 @@ class RectangleCommand(UICommandBase):
 
         return numpy.array((ImageY, ImageX))
 
-    def on_mouse_drag(self, e):
+    def on_mouse_motion(self, e):
         '''
         :param obj e: wx mouse move object
         :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL
@@ -112,6 +115,10 @@ class RectangleCommand(UICommandBase):
         finally:
             e.Skip()
         pass
+
+    # Legacy alias retained for old manual call sites.
+    def on_mouse_drag(self, e):
+        self.on_mouse_motion(e)
 
     def on_mouse_release(self, e):
         '''

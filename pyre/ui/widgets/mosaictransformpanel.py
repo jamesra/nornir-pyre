@@ -183,7 +183,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         (y, x) = self.getCorrectedMousePosition(event)
 
         if event.buttons() & Qt.MouseButton.LeftButton and self.Command is not None:
-            self.Command.on_mouse_drag(event)
+            self.Command.on_mouse_motion(event)
 
         if self.LastMousePosition is None:
             self.LastMousePosition = (y, x)

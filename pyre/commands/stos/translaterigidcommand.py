@@ -124,11 +124,6 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
         pass
 
-    def on_mouse_wheel(self, event: QMouseEvent):
-        """Called when the mouse wheel is scrolled"""
-
-        pass
-
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
         keycode = event.key()
@@ -165,6 +160,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                                                  space=self._space)
 
         return
+
+    def on_mouse_wheel(self, event: QMouseEvent):
+        """Legacy handler retained for compatibility; Qt dispatch uses on_mouse_scroll."""
+        self.on_mouse_scroll(event)
 
     def activate(self):
         super().activate()

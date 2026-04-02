@@ -141,6 +141,7 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
     _parent: QWidget
     _width: int
     _height: int
+    _saved_mouse_tracking: bool | None
 
     @property
     def width(self) -> int:
@@ -191,6 +192,7 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         self._saved_mouseReleaseEvent = None
         self._saved_keyPressEvent = None
         self._saved_keyReleaseEvent = None
+        self._saved_mouse_tracking = None
 
     def on_resize(self, event: QResizeEvent):
         """Resize our window the command is active within"""
@@ -238,6 +240,10 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
         self.on_resize(event)
 
     def _bind_mouse_events(self):
+        # Ensure hover/move events are delivered even with no button pressed.
+        # Some command flows rely on this for cursor updates and hit-testing.
+        self._saved_mouse_tracking = self._parent.hasMouseTracking()
+        self._parent.setMouseTracking(True)
         self._saved_wheelEvent = self._ensure_bound_instance_method("wheelEvent")
         self._saved_mousePressEvent = self._ensure_bound_instance_method("mousePressEvent")
         self._saved_mouseMoveEvent = self._ensure_bound_instance_method("mouseMoveEvent")
@@ -268,6 +274,10 @@ class UICommandBase(ICommand, CommandBase, abc.ABC):
             self._saved_mouseReleaseEvent = None
         else:
             self._restore_class_event("mouseReleaseEvent")
+
+        if self._saved_mouse_tracking is not None:
+            self._parent.setMouseTracking(self._saved_mouse_tracking)
+            self._saved_mouse_tracking = None
 
     def _handle_wheel_event(self, event):
         if self._saved_wheelEvent is not None:

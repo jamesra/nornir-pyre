@@ -60,10 +60,15 @@ def UpdateSettingsFromArguments(arg_values,
                                 image_loader: pyre.settings.AppSettings = Provide[
                                     IContainer.image_loader],
                                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+    import logging
+    _log = logging.getLogger(__name__)
+
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
         settings.stos.stos_filename = arg_values.stosFullPath
+        _log.info("STOS argument provided: %s", arg_values.stosFullPath)
 
     else:
+        _log.info("No STOS argument provided at startup")
         if 'SourceImageFullPath' in arg_values and arg_values.SourceImageFullPath is not None:
             settings.stos.source_image_filename = arg_values.SourceImageFullPath  # type: ignore[attr-defined]
             image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)  # type: ignore[attr-defined]
@@ -93,11 +98,21 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
     _log = logging.getLogger(__name__)
 
     if settings.stos.stos_filename is not None:
-        # Let FileNotFoundError propagate — callers show a user-visible dialog.
-        load_result = image_loader.load_stos(settings.stos.stos_filename)  # type: ignore[attr-defined]
+        _log.info("Attempting to load STOS from settings: %s", settings.stos.stos_filename)
+        try:
+            # Let FileNotFoundError propagate — callers show a user-visible dialog.
+            load_result = image_loader.load_stos(settings.stos.stos_filename)  # type: ignore[attr-defined]
+        except FileNotFoundError as e:
+            _log.error("STOS load failed (file not found): %s", settings.stos.stos_filename)
+            raise
+        except ValueError as e:
+            _log.error("STOS load failed (invalid data or missing linked image): %s | %s",
+                       settings.stos.stos_filename, e)
+            raise
         try:
             transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
         except Exception as e:
+            _log.error("STOS transform parse failed for %s: %s", settings.stos.stos_filename, e)
             raise ValueError(
                 f"Could not parse the transform in '{settings.stos.stos_filename}':\n{e}") from e
         stos_transform_controller.TransformModel = transform

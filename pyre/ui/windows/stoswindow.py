@@ -1,4 +1,5 @@
 import os
+import logging
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
@@ -24,6 +25,8 @@ from pyre.ui.windows.filedrop import FileDrop
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
 from pyre.observable import ObservableSet
+
+logger = logging.getLogger(__name__)
 
 
 class StosWindow(PyreWindowBase):
@@ -195,6 +198,19 @@ class StosWindow(PyreWindowBase):
         menuFlip = menu.addAction("&Flip Image")
         menuFlip.triggered.connect(self.onFlipImage)  # type: ignore[union-attr]
 
+        convertSubmenu = menu.addMenu("Convert Transform &Type")
+        assert convertSubmenu is not None
+        convertToRigid = convertSubmenu.addAction("&Rigid")
+        convertToRigid.triggered.connect(self.onConvertToRigid)  # type: ignore[union-attr]
+        convertToGrid = convertSubmenu.addAction("&Grid")
+        convertToGrid.triggered.connect(self.onConvertToGrid)  # type: ignore[union-attr]
+        convertToMesh = convertSubmenu.addAction("&Mesh")
+        convertToMesh.triggered.connect(self.onConvertToMesh)  # type: ignore[union-attr]
+        convertToRbf = convertSubmenu.addAction("&RBF")
+        convertToRbf.triggered.connect(self.onConvertToRbf)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
         menuRotationTranslation = menu.addAction("&Rotate translate estimate")
         menuRotationTranslation.triggered.connect(self.onRotateTranslate)  # type: ignore[union-attr]
 
@@ -316,18 +332,54 @@ class StosWindow(PyreWindowBase):
         """Handle Flip Image action"""
         self.transform_controller.FlipWarped()
 
+    def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):
+        """Convert the current transform model to the requested transform type."""
+        current_transform = self._transform_controller.TransformModel
+        if current_transform.type == transform_type:
+            return
+
+        kwargs = {}
+        try:
+            source_image = self._image_manager[ViewType.Source]
+            kwargs["source_image_shape"] = source_image.shape
+        except Exception:
+            # Some conversion paths do not require an image shape.
+            pass
+
+        try:
+            converted_transform = nornir_imageregistration.transforms.ConvertTransform(
+                current_transform,
+                transform_type,
+                **kwargs
+            )
+            self._transform_controller.TransformModel = converted_transform
+        except Exception as e:
+            logger.exception("Failed converting transform to %s", transform_type.value)
+            QMessageBox.warning(
+                self,
+                "Convert Transform Type",
+                f"Unable to convert transform to {transform_type.value}: {e}"
+            )
+
+    def onConvertToRigid(self):
+        """Convert the current transform to a rigid transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RIGID)
+
+    def onConvertToGrid(self):
+        """Convert the current transform to a grid transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.GRID)
+
+    def onConvertToMesh(self):
+        """Convert the current transform to a mesh transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.MESH)
+
+    def onConvertToRbf(self):
+        """Convert the current transform to an RBF transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RBF)
+
     def onRotateTranslate(self):
         """Handle Rotate Translate action"""
-        # #region agent log
-        try:
-            import json as _j
-            import time as _t
-            from pathlib import Path as _P
-            with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "A", "location": "stoswindow.onRotateTranslate", "message": "menu_triggered", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
+        logger.debug("Rotate translate estimate triggered")
         settings = self._settings.stos.brute_registration
         try:
             resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
@@ -336,32 +388,16 @@ class StosWindow(PyreWindowBase):
                                                                          LimitImageSize=True
                                                                          )
         except Exception as e:
-            # #region agent log
-            try:
-                import json as _j
-                import time as _t
-                import traceback as _tb
-                from pathlib import Path as _P
-                with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-                    _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "D", "location": "stoswindow.onRotateTranslate", "message": "exception", "data": {"err": str(e), "tb": _tb.format_exc()}, "timestamp": int(_t.time() * 1000)}) + "\n")
-            except Exception:
-                pass
-            # #endregion
+            logger.exception("Rotate translate estimate failed")
             QMessageBox.warning(self, "Rotate translate estimate", str(e))
             return
 
-        # #region agent log
-        try:
-            import json as _j
-            import time as _t
-            from pathlib import Path as _P
-            _cur = self._transform_controller.TransformModel
-            _eq = resulting_transform == _cur if resulting_transform is not None else None
-            with open(_P(__file__).resolve().parents[4] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "E", "location": "stoswindow.onRotateTranslate", "message": "after_registration", "data": {"result_is_none": resulting_transform is None, "equals_current_transform": _eq, "result_type": type(resulting_transform).__name__ if resulting_transform is not None else None, "current_type": type(_cur).__name__ if _cur is not None else None}, "timestamp": int(_t.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
+        current_transform = self._transform_controller.TransformModel
+        logger.debug(
+            "Rotate translate estimate result_is_none=%s equals_current=%s",
+            resulting_transform is None,
+            resulting_transform == current_transform if resulting_transform is not None else None
+        )
 
         if resulting_transform is not None:
             self._transform_controller.TransformModel = resulting_transform

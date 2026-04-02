@@ -25,7 +25,7 @@ class AngleSearchRange(BaseModel):
 
     @property
     def angle_range(self) -> NDArray[np.floating]:
-        angles = np.arange(start=-self.max_angle,
+        angles = np.arange(-self.max_angle,
                            stop=self.max_angle + self.angle_step_size,
                            step=self.angle_step_size)  # numpy.linspace(-7.5, 7.5, 11)
         angles = np.union1d(angles, [0])

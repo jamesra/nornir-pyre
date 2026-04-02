@@ -85,48 +85,19 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                LimitImageSize: bool = False,
                                image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
     """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
-    # #region agent log
-    try:
-        import json as _j
-        import time as _t
-        from pathlib import Path as _P
-        _has_s = source_image_key in image_manager
-        _has_t = target_image_key in image_manager
-        with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-            _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "entry", "data": {"source_key": str(source_image_key), "target_key": str(target_image_key), "has_source": _has_s, "has_target": _has_t, "imgr_id": id(image_manager)}, "timestamp": int(_t.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    logger.debug("RotateTranslateWarpedImage entry source=%s target=%s", source_image_key, target_image_key)
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
 
     if source_image_key not in image_manager:
         print("Source image not loaded")
-        # #region agent log
-        try:
-            import json as _j
-            import time as _t
-            from pathlib import Path as _P
-            with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "early_return_no_source", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
+        logger.warning("RotateTranslateWarpedImage missing source image key=%s", source_image_key)
         return
 
     if target_image_key not in image_manager:
         print("Target image not loaded")
-        # #region agent log
-        try:
-            import json as _j
-            import time as _t
-            from pathlib import Path as _P
-            with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-                _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "B", "location": "common.RotateTranslateWarpedImage", "message": "early_return_no_target", "data": {}, "timestamp": int(_t.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
+        logger.warning("RotateTranslateWarpedImage missing target image key=%s", target_image_key)
         return
 
     source_image = image_manager[source_image_key]
@@ -142,16 +113,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
     print("Alignment found: " + str(alignRecord))
     transform = alignRecord.ToImageTransform(source_image_shape=source_image.shape,
                                              target_image_shape=target_image.shape)
-    # #region agent log
-    try:
-        import json as _j
-        import time as _t
-        from pathlib import Path as _P
-        with open(_P(__file__).resolve().parents[2] / "debug-14fe16.log", "a", encoding="utf-8") as _f:
-            _f.write(_j.dumps({"sessionId": "14fe16", "hypothesisId": "C", "location": "common.RotateTranslateWarpedImage", "message": "returning_transform", "data": {"transform_type": type(transform).__name__, "align_record": str(alignRecord)}, "timestamp": int(_t.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
+    logger.debug("RotateTranslateWarpedImage returning transform=%s", type(transform).__name__)
     return transform
     # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 

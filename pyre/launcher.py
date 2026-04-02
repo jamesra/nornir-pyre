@@ -32,7 +32,6 @@ from __future__ import annotations
 import sys
 import atexit
 import io
-from datetime import datetime
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
@@ -159,13 +158,12 @@ def _setup_console_logging():
     _original_stderr = sys.stderr
     _original_excepthook = sys.excepthook
 
-    # Create logs directory if it doesn't exist
-    log_dir = os.path.join(os.curdir, "PyreLogs")
-    os.makedirs(log_dir, exist_ok=True)
-
-    # Create log file with timestamp
-    timestamp = datetime.now().strftime('%Y.%m.%d_%H.%M.%S')
-    log_file_path = os.path.join(log_dir, f'pyre-console-{timestamp}.log')
+    log_file_path = nornir_shared.misc.GetUnifiedConsoleLogPath()
+    if log_file_path is None:
+        # Fall back to the current working directory when no shared root is configured.
+        log_file_path = os.path.join(os.getcwd(), 'pyre-console.log')
+    else:
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
 
     # Create tee output that writes to both console and file
     # Share the same file handle between stdout and stderr
@@ -348,15 +346,12 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     # StartProfilerCheck()
 
-    nornir_shared.misc.SetupLogging(OutputPath=os.path.join(os.curdir, "PyreLogs"), Level=logging.WARNING)
+    nornir_shared.misc.SetupLogging(Level=logging.WARNING)
 
     pyre.state.set_current_stos_config(pyre.state.StosState(transform_controller=stos_transform_controller,
                                                              image_manager=image_manager,
                                                              imageviewmodel_manager=imageviewmodel_manager))
     pyre.state.set_current_mosaic_config(pyre.state.MosaicState())
-
-    readmetxt = resource_paths.README()
-    print(readmetxt)
 
     # Run the QT application
     main_qt(window_manager=container.window_manager(), stos_transform_controller=stos_transform_controller)

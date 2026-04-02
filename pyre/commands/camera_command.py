@@ -12,13 +12,16 @@ import pyre.commands.uicommandbase as uicommand_base
 class CameraCommand(uicommand_base.UICommandBase):
     '''
     The user interface to adjust the camera
+
+    Legacy wx-era command kept for reference.  It is not part of the modern
+    command activation path and still uses old event semantics/APIs.
     '''
 
     def __init__(self, parent, completed_func, camera):
         super(CameraCommand, self).__init__(parent, completed_func)
         self.LastMousePosition = None
 
-    def on_key_press(self, e):
+    def on_key_down(self, e):
         keycode = e.GetKeyCode()
 
         symbol = ''
@@ -74,7 +77,7 @@ class CameraCommand(uicommand_base.UICommandBase):
 
             self.statusBar.update_status_bar(self.LastMousePosition)  # type: ignore[attr-defined]
 
-    def on_mouse_drag(self, e):
+    def on_mouse_motion(self, e):
         try:
             (y, x) = self.GetCorrectedMousePosition(e)  # type: ignore[attr-defined]
 
@@ -100,3 +103,11 @@ class CameraCommand(uicommand_base.UICommandBase):
         finally:
             # We always skip the event in case others care about mouse motion
             e.Skip()
+
+    # Legacy alias for wx-style call sites.
+    def on_key_press(self, e):
+        self.on_key_down(e)
+
+    # Legacy alias for wx-style call sites.
+    def on_mouse_drag(self, e):
+        self.on_mouse_motion(e)

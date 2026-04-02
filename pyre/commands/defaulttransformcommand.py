@@ -146,7 +146,7 @@ class DefaultTransformCommand(NavigationCommandBase):
             self._actionmap = transform_action_map_factory()  # type: ignore[call-arg]
 
         # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
-
+  
     # def _on_transform_controller_changed(self, *args, **kwargs):
     #     self._action_command_map = pyre.commands.container_overrides.action_command_map[self._transform_controller.type]
 

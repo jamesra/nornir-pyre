@@ -64,7 +64,7 @@ class StosState(StateEventsImpl):
     AlignmentTileSize: tuple[int, int] = (192, 192)
     AngleSearchStepSize: float = 3
     AngleSearchMax: float = 15
-    AnglesToSearch: NDArray[np.floating] = numpy.arange(start=-AngleSearchMax,
+    AnglesToSearch: NDArray[np.floating] = numpy.arange(-AngleSearchMax,
                                                         stop=AngleSearchMax + AngleSearchStepSize,
                                                         step=AngleSearchStepSize,
                                                         dtype=np.float64)  # numpy.linspace(-7.5, 7.5, 11)
