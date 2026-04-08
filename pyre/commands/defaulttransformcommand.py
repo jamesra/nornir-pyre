@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QMessageBox
 from PyQt6.QtGui import QMouseEvent, QKeyEvent, QCursor
 from dependency_injector.wiring import Provide, inject
 from dependency_injector.providers import Dict, Factory
@@ -11,13 +11,16 @@ from logging import Logger
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import IControlPointEdit, IControlPoints
+from nornir_imageregistration.transforms.transform_type import TransformType
+from nornir_imageregistration.transforms import ConvertTransform
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet
 from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair, SelectionEventKey
 from pyre.interfaces import ICommand, IInstantCommand, StatusChangeCallback
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IControlPointMapManager, \
-    IControlPointActionMap, ControlPointManagerKey
+    IControlPointActionMap, ControlPointManagerKey, IImageManager
+from pyre.interfaces.viewtype import ViewType
 from pyre.controllers import TransformController
 import pyre.views.pointview
 from pyre.space import Space
@@ -29,6 +32,7 @@ import pyre.ui
 DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
     ControlPointAction.NONE: Qt.CursorShape.ArrowCursor,
     ControlPointAction.CREATE: Qt.CursorShape.CrossCursor,
+    ControlPointAction.CREATE_REGISTER: Qt.CursorShape.CrossCursor,
     ControlPointAction.DELETE: Qt.CursorShape.ForbiddenCursor,
     ControlPointAction.TRANSLATE: Qt.CursorShape.OpenHandCursor,
     ControlPointAction.REGISTER: Qt.CursorShape.WhatsThisCursor,
@@ -59,6 +63,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _space: Space
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    _image_manager: IImageManager = Provide[IContainer.image_manager]
     _commandqueue: ICommandQueue
     # _action_command_map: dict[ControlPointAction, ICommand]
     _selected_points: ObservableSet[int]
@@ -108,7 +113,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
                  transform_control_point_action_maps=Provide[IContainer.transform_action_map].provider,
-                 transform_type_to_action_command_map=Provide[IContainer.action_command_map]
+                 transform_type_to_action_command_map=Provide[IContainer.action_command_map],
                  ):
         """
 
@@ -127,10 +132,10 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         self.cursor_action_map = _build_default_cursor_action_map()
 
+        self._action_command_map_by_type = transform_type_to_action_command_map
+        self._get_transform_action_map_dict = transform_control_point_action_maps
         self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
-        # self._action_command_map = pyre.commands.container_overrides.action_command_map[transform_controller.type]
         self._selection_event_history = {}
-        # self._action_command_map = action_command_map[transform_controller.type]
         self._commandqueue = commandqueue
         self._space = space
         self._selected_points = selected_points
@@ -139,7 +144,7 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         if isinstance(transform_controller.TransformModel, IControlPoints):
             controlpointmapkey = ControlPointManagerKey(transform_controller, space)
-            self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
+            self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
             self._actionmap = transform_action_map_factory(self._controlpointmap)
         else:
             self._actionmap = transform_action_map_factory()  # type: ignore[call-arg]
@@ -270,12 +275,87 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         self._last_mouse_press_event_args = event
 
+    def _point_edit_requires_mesh_conversion(self, action: ControlPointAction) -> bool:
+        t = self._transform_controller.type
+        if action in (ControlPointAction.CREATE, ControlPointAction.CREATE_REGISTER):
+            return t in (TransformType.GRID, TransformType.RIGID)
+        if action == ControlPointAction.DELETE:
+            return t == TransformType.GRID
+        return False
+
+    def _mesh_conversion_prompt(self, action: ControlPointAction) -> tuple[str, str]:
+        if action == ControlPointAction.DELETE:
+            return (
+                "Convert to mesh transform?",
+                "Refined grid transforms do not support removing control points in the view.\n\n"
+                "Convert this transform to a mesh transform so points can be removed?",
+            )
+        return (
+            "Convert to mesh transform?",
+            "This transform type does not support adding control points in the view.\n\n"
+            "Convert this transform to a mesh transform so points can be added?",
+        )
+
+    def _mesh_conversion_kwargs(self) -> dict:
+        kwargs: dict = {}
+        try:
+            source_image = self._image_manager[ViewType.Source]
+            kwargs["source_image_shape"] = source_image.shape
+        except Exception:
+            pass
+        return kwargs
+
+    def _convert_current_transform_to_mesh(self) -> bool:
+        current = self._transform_controller.TransformModel
+        if current.type == TransformType.MESH:
+            return True
+        try:
+            converted = ConvertTransform(current, TransformType.MESH, **self._mesh_conversion_kwargs())
+            self._transform_controller.TransformModel = converted
+            return True
+        except Exception as e:
+            self.log.exception("Convert to mesh transform failed")
+            QMessageBox.warning(
+                self.parent,
+                "Convert transform",
+                f"Unable to convert transform to mesh: {e}",
+            )
+            return False
+
+    def _rebind_maps_for_current_transform_type(self) -> None:
+        tc = self._transform_controller
+        self._action_to_command = self._action_command_map_by_type[tc.type]
+        map_factory = self._get_transform_action_map_dict()[tc.type]
+        if isinstance(tc.TransformModel, IControlPoints):
+            controlpointmapkey = ControlPointManagerKey(tc, self._space)
+            self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
+            self._actionmap = map_factory(self._controlpointmap)
+        else:
+            self._actionmap = map_factory()  # type: ignore[call-arg]
+
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
         if self.status != pyre.CommandStatus.Active:
             return False
 
         new_action = self._actionmap.get_action(selection_event_data)
+
+        if self._point_edit_requires_mesh_conversion(new_action.action):
+            title, message = self._mesh_conversion_prompt(new_action.action)
+            reply = QMessageBox.question(
+                self.parent,
+                title,
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+            if not self._convert_current_transform_to_mesh():
+                return False
+            self._rebind_maps_for_current_transform_type()
+            new_action = self._actionmap.get_action(selection_event_data)
+
         if new_action.action not in self._action_to_command:
             self.log.error(
                 f'Action {new_action.action} not in action to command map for {self._transform_controller.type} transforms')

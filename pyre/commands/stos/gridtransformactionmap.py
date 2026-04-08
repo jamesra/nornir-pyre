@@ -38,8 +38,10 @@ class GridTransformActionMap(IControlPointActionMap):
         return find_control_point_interactions(self.control_point_map, world_position, self.search_radius, scale)
 
     def can_delete(self, event: SelectionEventData, interactions: set[int]) -> bool:
-        """Grid refinement transforms do not support deleting control points in Pyre."""
-        return False
+        """True if deleting the indicated points would leave at least three control points (mesh/triangulation rule)."""
+        unique_selections = (event.existing_selections or set()) | interactions
+        num_selected = len(unique_selections)
+        return self.control_point_map.points.shape[0] - num_selected >= 3
 
     def get_possible_actions(self, event: SelectionEventData) -> ControlPointActionResult:
         """
@@ -48,24 +50,34 @@ class GridTransformActionMap(IControlPointActionMap):
         interactions = self.find_interactions(event.position, (1 / event.camera.scale))
 
         actions = ControlPointAction.NONE
-        # Check for creating a point
         if event.IsMouseInput | event.IsKeyboardInput:
-            if event.IsOnlyCtrlPressed:
-                actions |= ControlPointAction.TRANSLATE_ALL
-
-            elif len(interactions) == 0:
-                if event.existing_selections is not None and len(event.existing_selections) == 1:
-                    if event.IsOnlyAltPressed:
-                        actions = ControlPointAction.CALL_TO_MOUSE
-                    else:
-                        actions = ControlPointAction.NONE
-            elif len(interactions) >= 1:
-                if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
-                    actions |= ControlPointAction.REGISTER
+            if len(interactions) == 0:
+                if event.IsOnlyShiftPressed:
+                    actions = ControlPointAction.CREATE
+                elif event.IsOnlyAltPressed and len(event.existing_selections or set()) == 1:
+                    actions = ControlPointAction.CALL_TO_MOUSE
+                elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
+                    actions = ControlPointAction.CREATE_REGISTER
+                elif event.IsChordPressed(InputModifiers.ControlKey):
+                    actions |= ControlPointAction.TRANSLATE_ALL
                 else:
-                    actions |= ControlPointAction.TRANSLATE
+                    actions = ControlPointAction.NONE
 
-            # Check for translating points
+                return ControlPointActionResult(actions, interactions)
+            if len(interactions) >= 1:
+                if event.IsOnlyShiftPressed and self.can_delete(event, interactions):
+                    actions |= ControlPointAction.DELETE
+                elif event.IsLeftMousePressed:
+                    if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
+                        actions |= ControlPointAction.REGISTER
+                    elif event.IsOnlyCtrlPressed:
+                        actions |= ControlPointAction.TRANSLATE_ALL
+                    else:
+                        actions |= ControlPointAction.TRANSLATE
+                elif event.IsRightMousePressed:
+                    if event.IsOnlyShiftPressed and self.can_delete(event, interactions):
+                        actions |= ControlPointAction.DELETE
+
             return ControlPointActionResult(actions, interactions)
 
         return ControlPointActionResult(ControlPointAction.NONE, interactions)
@@ -88,11 +100,15 @@ class GridTransformActionMap(IControlPointActionMap):
                     if event.IsLeftMousePressed:
                         if event.IsOnlyAltPressed and event.existing_selections is not None and len(event.existing_selections) == 1:
                             action = ControlPointAction.CALL_TO_MOUSE
+                        elif event.IsOnlyShiftPressed:
+                            action = ControlPointAction.CREATE
+                        elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
+                            action = ControlPointAction.CREATE_REGISTER
                         elif event.NoModifierKeys:
                             action = ControlPointAction.REPLACE_SELECTION
                         else:
                             action = ControlPointAction.NONE
-                elif len(interactions) == 1:
+                elif len(interactions) >= 1:
                     if event.IsLeftMousePressed:
                         if event.IsChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
                             action = ControlPointAction.REGISTER
@@ -100,6 +116,9 @@ class GridTransformActionMap(IControlPointActionMap):
                             action = ControlPointAction.TOGGLE_SELECTION
                         elif event.NoModifierKeys:
                             action = ControlPointAction.REPLACE_SELECTION
+                    elif event.IsRightMousePressed:
+                        if event.IsOnlyShiftPressed and self.can_delete(event, interactions):
+                            action = ControlPointAction.DELETE
 
             elif event.input == InputEvent.Drag:
                 if event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton):

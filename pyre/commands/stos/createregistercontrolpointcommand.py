@@ -18,7 +18,7 @@ from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEvent
 
 
 class CreateRegisterControlPointCommand(InstantCommandBase):
-    """This command deletes a selection of control points"""
+    """Add a control point at the current mouse pair and queue registration for that point."""
 
     _space: Space
     _new_point_position: PointPair
@@ -43,17 +43,6 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
                  transform_controller: "pyre.viewmodels.TransformController" = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
                  **kwargs):
-        """
-
-        :param parent:
-        :param transform_controller:
-        :param camera:
-        :param bounds:
-        :param translate_origin:  Where the mouse was when the translation started
-        :param selected_points:
-        :param space:
-        :param completed_func:
-        """
         super().__init__(completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
@@ -71,7 +60,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         QTimer.singleShot(0, self.queue_registration_command)
 
     def __str__(self):
-        return "CreateControlPointCommand"
+        return "CreateRegisterControlPointCommand"
 
     def can_execute(self) -> bool:
         return True

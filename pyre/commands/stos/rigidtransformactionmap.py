@@ -39,18 +39,21 @@ class RigidTransformActionMap(IActionMap):
         For example: If hovering over a control point, TRANSLATE and DELETE might be returned as they would be triggered
         by a left click or SHIFT+right click respectively."""
 
+        interactions = set()
         actions = ControlPointAction.NONE
-        # Check for creating a point
         if event.IsMouseInput | event.IsKeyboardInput:
-            if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
-                actions |= ControlPointAction.REGISTER
+            if event.IsOnlyShiftPressed:
+                actions = ControlPointAction.CREATE
+            elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
+                actions = ControlPointAction.CREATE_REGISTER
+            elif event.IsChordPressed(InputModifiers.ControlKey):
+                actions |= ControlPointAction.TRANSLATE_ALL
             else:
-                actions |= ControlPointAction.TRANSLATE
+                actions = ControlPointAction.NONE
 
-            # Check for translating points
-            return ControlPointActionResult(actions, set())
+            return ControlPointActionResult(actions, interactions)
 
-        return ControlPointActionResult(ControlPointAction.NONE, set())
+        return ControlPointActionResult(ControlPointAction.NONE, interactions)
 
     def get_action(self, event: SelectionEventData) -> ControlPointActionResult:
         """
@@ -62,9 +65,14 @@ class RigidTransformActionMap(IActionMap):
             return register_action
 
         action = ControlPointAction.NONE
-        # Check for creating a point
         if event.IsMouseInput or event.IsKeyboardInput:
-            if event.input == InputEvent.Drag:
+            if event.input == InputEvent.Press:
+                if event.IsLeftMousePressed:
+                    if event.IsOnlyShiftPressed:
+                        action = ControlPointAction.CREATE
+                    elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
+                        action = ControlPointAction.CREATE_REGISTER
+            elif event.input == InputEvent.Drag:
                 if event.IsLeftMousePressed and event.NoModifierKeys:
                     action = ControlPointAction.TRANSLATE
                 # Check for translating a point
