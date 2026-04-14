@@ -3,6 +3,12 @@ Pyre
 
 A Python-based image registration and visualization tool for scientific image processing, developed as part of the Nornir project.
 
+Documentation
+~~~~~~~~~~~~~
+
+* **Full manual (umbrella):** https://nornir.github.io/
+* **Related overview:** https://nornir.github.io/packages/other_packages.html
+
 Overview
 ~~~~~~~~
 
