@@ -23,7 +23,7 @@ import nornir_imageregistration.stos_brute as stos
 import nornir_pools
 import pyre
 from pyre.container import IContainer
-from pyre.interfaces.managers import IImageManager
+from pyre.interfaces.managers import IImageManager, IWindowManager
 from pyre.interfaces.managers.command_history import ICommandHistory
 from pyre.controllers.transformcontroller import TransformController
 from pyre.interfaces.viewtype import ViewType
@@ -55,27 +55,34 @@ def _apply_lookat_to_window(window, lookat, scale: float):
     window.imagepanel.camera.scale = scale
 
 
-def SyncWindows(LookAt, scale: float, window_manager=None):
-    '''Make all windows look at the same spot with the same magnification, LookAt point should be in fixed space.
-    If window_manager is provided, uses ViewType-keyed windows; otherwise uses legacy pyre.Windows.'''
-    if window_manager is not None and ViewType.Composite in window_manager and ViewType.Source in window_manager and ViewType.Target in window_manager:
-        composite_win = window_manager[ViewType.Composite]
-        source_win = window_manager[ViewType.Source]
-        target_win = window_manager[ViewType.Target]
-        for win in (composite_win, source_win, target_win):
-            _apply_lookat_to_window(win, LookAt, scale)
-        if target_win.IsShown():
-            config = pyre.state.get_current_stos_config()
-            if config is not None and config._TransformViewModel is not None:
-                config._TransformViewModel.InverseTransform([LookAt])
-        return
-    # Legacy path: pyre.Windows
-    for key in ("Composite", "Fixed", "Warped"):
-        _apply_lookat_to_window(pyre.Windows[key], LookAt, scale)
-    if pyre.Windows["Warped"].IsShown():
+def SyncWindows(LookAt, scale: float, window_manager: IWindowManager) -> None:
+    """Make all windows look at the same spot with the same magnification; LookAt is in fixed space.
+
+    ``window_manager`` must register ViewType Source, Target, and Composite (the STOS layout).
+    """
+    if not (
+        ViewType.Composite in window_manager
+        and ViewType.Source in window_manager
+        and ViewType.Target in window_manager
+    ):
+        raise ValueError("window_manager must register Source, Target, and Composite views")
+    composite_win = window_manager[ViewType.Composite]
+    source_win = window_manager[ViewType.Source]
+    target_win = window_manager[ViewType.Target]
+    for win in (composite_win, source_win, target_win):
+        _apply_lookat_to_window(win, LookAt, scale)
+    if target_win.isVisible():
         config = pyre.state.get_current_stos_config()
         if config is not None and config._TransformViewModel is not None:
             config._TransformViewModel.InverseTransform([LookAt])
+
+
+def sync_stos_windows(LookAt, scale: float) -> None:
+    """Sync cameras using the current :class:`pyre.state.StosState` window manager."""
+    config = pyre.state.get_current_stos_config()
+    if config is None or config.window_manager is None:
+        raise RuntimeError("No STOS config with window_manager; cannot sync windows")
+    SyncWindows(LookAt, scale, config.window_manager)
 
 
 @inject

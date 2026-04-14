@@ -49,7 +49,8 @@ def set_current_mosaic_config(config: MosaicState | None) -> None:
 
 def init():
     global currentStosConfig
-    currentStosConfig = StosState()  # type: ignore[call-arg]
+    # StosState requires DI (image_loader, etc.); use set_current_stos_config from launcher/tests.
+    currentStosConfig = None
 
     global currentMosaicConfig
     currentMosaicConfig = MosaicState()  # type: ignore[call-arg, arg-type]

@@ -70,9 +70,9 @@ class IContainer(containers.DeclarativeContainer):
         IMousePositionHistoryManager)
     command_history: providers.AbstractSingleton[ICommandHistory] = providers.AbstractSingleton(ICommandHistory)
     image_manager: providers.AbstractSingleton[IImageManager] = providers.AbstractSingleton(IImageManager)
-    transform_glbuffermanager: providers.AbstractSingleton[
+    transform_gl_buffer_manager: providers.AbstractSingleton[
         ITransformControllerGLBufferManager] = providers.AbstractSingleton(ITransformControllerGLBufferManager)
-    imageviewmodel_manager: providers.AbstractSingleton[IImageViewModelManager] = providers.AbstractSingleton(
+    image_viewmodel_manager: providers.AbstractSingleton[IImageViewModelManager] = providers.AbstractSingleton(
         IImageViewModelManager)
     glcontext_manager: providers.AbstractSingleton[IGLContextManager] = providers.AbstractSingleton(IGLContextManager)
     window_manager: providers.AbstractSingleton[IWindowManager] = providers.AbstractSingleton(IWindowManager)
@@ -82,7 +82,7 @@ class IContainer(containers.DeclarativeContainer):
 
     control_point_manager_key = providers.AbstractFactory(
         ControlPointManagerKey)  # Returns the key for the configured transform controller and space
-    controlpointmap_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
+    control_point_map_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
 
     transform_control_point_action_maps: providers.Dict = providers.Dict()  # type: ignore[type-arg]
 

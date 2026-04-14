@@ -1,8 +1,14 @@
 """
 Legacy OpenGL draw helpers. Some functions depend on pyglet for vertex attributes/buffers.
 Used by pyre.views; re-exported there for backward compatibility.
+
+Environment:
+    PYRE_USE_PYGLET_LEGACY — If unset or ``1``/``true``/``yes``, pyglet is imported when available
+    and legacy helpers work as before. Set to ``0``/``false``/``no`` to disable the pyglet code path;
+    functions that require pyglet then raise :class:`RuntimeError` with a short explanation.
 """
 import ctypes
+import os
 from typing import Any, Iterable
 
 import OpenGL.GL as gl
@@ -14,11 +20,28 @@ import scipy.spatial
 
 from pyre.gl_engine.helpers import raise_on_error
 
+
+def _pyglet_legacy_enabled() -> bool:
+    v = os.environ.get("PYRE_USE_PYGLET_LEGACY", "1").strip().lower()
+    return v in ("1", "true", "yes", "")
+
+
+def _require_pyglet_legacy(operation: str) -> None:
+    if not _pyglet_legacy_enabled():
+        raise RuntimeError(
+            f"{operation} is disabled: set PYRE_USE_PYGLET_LEGACY=1 to enable pyglet legacy GL helpers"
+        )
+
+
 # Legacy code path: pyglet used for draw_indexed_custom, GetOrCreateAttribute, DrawRectangle
-try:
-    import pyglet  # type: ignore[reportMissingImports]
-except ImportError:
-    pyglet = None
+pyglet = None
+if _pyglet_legacy_enabled():
+    try:
+        import pyglet as _pyglet_mod  # type: ignore[reportMissingImports]
+
+        pyglet = _pyglet_mod
+    except ImportError:
+        pyglet = None
 
 
 def LineIndicesFromTri(T: scipy.spatial.Delaunay) -> list[int]:
@@ -64,8 +87,9 @@ def VertsForRectangle(rect):
 
 def DrawRectangle(rect, color):
     """Draw a rectangle. Legacy: uses pyglet."""
+    _require_pyglet_legacy("DrawRectangle")
     if pyglet is None:
-        raise RuntimeError("DrawRectangle requires pyglet")
+        raise RuntimeError("DrawRectangle requires pyglet when PYRE_USE_PYGLET_LEGACY is enabled")
     vertarray = VertsForRectangle(rect)
     line_indices = [0, 1, 1, 2, 2, 3, 3, 0]
     pyglet.gl.glColor4f(color[0], color[1], color[2], color[3])
@@ -155,8 +179,9 @@ _attribute_lookup = {}
 
 def GetOrCreateAttribute(fmt):
     global _attribute_lookup
+    _require_pyglet_legacy("GetOrCreateAttribute")
     if pyglet is None:
-        raise RuntimeError("GetOrCreateAttribute requires pyglet")
+        raise RuntimeError("GetOrCreateAttribute requires pyglet when PYRE_USE_PYGLET_LEGACY is enabled")
     if fmt not in _attribute_lookup:
         attribute = pyglet.graphics.vertexattribute.create_attribute(fmt)
         _attribute_lookup[fmt] = attribute
@@ -165,8 +190,9 @@ def GetOrCreateAttribute(fmt):
 
 def GetOrCreateBuffer(size: int, fmt: str, array: NDArray[numpy.floating]):
     """Generate the attributes used in the GL draw_indexed call. Legacy: uses pyglet."""
+    _require_pyglet_legacy("GetOrCreateBuffer")
     if pyglet is None:
-        raise RuntimeError("GetOrCreateBuffer requires pyglet")
+        raise RuntimeError("GetOrCreateBuffer requires pyglet when PYRE_USE_PYGLET_LEGACY is enabled")
     attribute = pyglet.graphics.vertexattribute.create_attribute(fmt)
     assert size == len(array) // attribute.count, f'Data for {fmt} is incorrect length'
     buffer = pyglet.graphics.vertexbuffer.create_mappable_buffer(int(size * attribute.stride), vbo=False)
@@ -188,8 +214,9 @@ def GetOrCreateBuffers(size: int, *data: tuple[str, NDArray[numpy.floating]]):
 
 def draw_indexed_custom(size, mode, indices, *data):
     """Draw a primitive with indexed vertices immediately. Legacy: uses pyglet."""
+    _require_pyglet_legacy("draw_indexed_custom")
     if pyglet is None:
-        raise RuntimeError("draw_indexed_custom requires pyglet")
+        raise RuntimeError("draw_indexed_custom requires pyglet when PYRE_USE_PYGLET_LEGACY is enabled")
     gl.glPushClientAttrib(gl.GL_CLIENT_VERTEX_ARRAY_BIT)
     raise_on_error("after glPushClientAttrib in draw_indexed_custom")
     size = int(size)

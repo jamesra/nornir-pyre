@@ -19,6 +19,8 @@ class ImageLoadResult(NamedTuple):
     image_original_fullpath: str  # Path to the original image file, this will be different if a path was substituted
     mask_fullpath: str | None  # Path to the mask file
     mask_original_fullpath: str | None  # Path to the original mask file, this will be different if a path was substituted
+    image_converted_from_color: bool = False  # RGB/RGBA (etc.) converted to grayscale via luminance
+    mask_converted_from_color: bool = False
 
     @property
     def image_dirname(self) -> str:

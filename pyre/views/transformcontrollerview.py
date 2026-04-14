@@ -52,7 +52,7 @@ class TransformControllerView:
     _transform_controller: pyre.controllers.TransformController | None
     _controlpoint_view: PointView | None
     _transformglbuffer_manager: pyre.interfaces.managers.ITransformControllerGLBufferManager = Provide[  # type: ignore[attr-defined]
-        IContainer.transform_glbuffermanager]
+        IContainer.transform_gl_buffer_manager]
     _gl_context_manager: pyre.interfaces.managers.IGLContextManager = Provide[IContainer.glcontext_manager]  # type: ignore[attr-defined]
 
     _initialized: bool = False

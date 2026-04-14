@@ -330,7 +330,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             config = pyre.state.get_current_stos_config()
             if config is not None:
                 config.WindowsLookAtFixedPoint(look_at, self.camera.scale)
-            # pyre.SyncWindows(LookAt, self.camera.scale)
+            # pyre.common.sync_stos_windows(look_at, self.camera.scale)
 
         elif symbol == 'z' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Undo()

@@ -28,7 +28,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
     """
     _selection_set: ObservableSet[int]  # The indices of the selected points
 
-    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.control_point_map_manager]
     # _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     # _config: Configuration = Provide[IContainer.config]
     _command_action_points: set[int]

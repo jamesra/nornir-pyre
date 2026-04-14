@@ -25,7 +25,7 @@ Project Structure:
 * pyre.space: Space enum (source/target) at package root for historical use; also re-exported via pyre.Space
 """
 
-__all__ = ['ui', 'viewmodels', 'views', 'Windows', 'state', 'resources', 'common', 'Space']
+__all__ = ['ui', 'viewmodels', 'views', 'state', 'resources', 'common', 'Space']
 
 import pydantic
 import numpy as np
@@ -70,6 +70,3 @@ import pyre.views as views
 import pyre.state as state
 import pyre.resources as resources
 import pyre.common as common
-
-# Legacy: dict of window title -> window. Kept in sync with IWindowManager in launcher. Prefer IWindowManager + ViewType.
-Windows = {}

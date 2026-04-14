@@ -122,7 +122,7 @@ class CompositeTransformView(IImageTransformView):
                  target_image_name: str,
                  transform_controller: TransformController,
                  gl_funcs: QOpenGLFunctions,
-                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+                 image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager],
                  ):
         """
         Constructor

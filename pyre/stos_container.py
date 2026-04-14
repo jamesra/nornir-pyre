@@ -48,12 +48,12 @@ class StosContainer(containers.DeclarativeContainer):
     mouse_position_history = providers.ThreadSafeSingleton(MousePositionHistoryManager)
     command_history = providers.ThreadSafeSingleton(CommandHistory)
     image_manager = providers.ThreadSafeSingleton(ImageManager)
-    transform_glbuffermanager = providers.ThreadSafeSingleton(
+    transform_gl_buffer_manager = providers.ThreadSafeSingleton(
         TransformControllerGLBufferManager, buffer_layouts={
             BufferType.ControlPoint: pyre.gl_engine.shaders.controlpointset_shader.pointset_layout,
             BufferType.Selection: pyre.gl_engine.shaders.controlpointset_shader.texture_index_layout
         })
-    imageviewmodel_manager = providers.ThreadSafeSingleton(ImageViewModelManager, )
+    image_viewmodel_manager = providers.ThreadSafeSingleton(ImageViewModelManager, )
     glcontext_manager = providers.ThreadSafeSingleton(GLContextManager)
     window_manager = providers.ThreadSafeSingleton(WindowManager)
 
@@ -65,7 +65,7 @@ class StosContainer(containers.DeclarativeContainer):
         transform_controller=transform_controller
     )
     # Returns the key for the configured transform controller and space
-    controlpointmap_manager = providers.ThreadSafeSingleton(ControlPointMapManager)
+    control_point_map_manager = providers.ThreadSafeSingleton(ControlPointMapManager)
 
     action_command_map = pyre.commands.container_overrides.action_command_dp_map
     # transform_control_point_action_maps: providers.Aggregate[providers.AbstractFactory[

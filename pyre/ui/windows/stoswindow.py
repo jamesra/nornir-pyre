@@ -39,7 +39,7 @@ class StosWindow(PyreWindowBase):
     _view_type: ViewType
     _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
-    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
+    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
     _history_manager: ICommandHistory = Provide[IContainer.history_manager]
     _config = Provide[IContainer.config]
     _settings: AppSettings = Provide[IContainer.settings]
@@ -436,7 +436,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadFixedImage(filename)  # type: ignore[attr-defined]
+                    config.LoadFixedImage(filename)
 
     def onOpenWarpedImage(self):
         """Handle Open Warped Image action"""
@@ -453,7 +453,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadWarpedImage(filename)  # type: ignore[attr-defined]
+                    config.LoadWarpedImage(filename)
 
     def onOpenFixedImageMask(self):
         """Handle Open Fixed Image Mask action"""
@@ -470,7 +470,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)  # type: ignore[attr-defined]
+                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)
 
     def onOpenWarpedImageMask(self):
         """Handle Open Warped Image Mask action"""
@@ -487,7 +487,7 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)  # type: ignore[attr-defined]
+                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)
 
     def onOpenStos(self):
         """Handle Open Stos File action"""

@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 import scipy.ndimage
 
 import nornir_imageregistration
+from nornir_imageregistration.core._core import RgbLikeToGrayscaleLuminance
 from nornir_shared.mathhelper import NearestPowerOfTwo
 import pyre.gl_engine as gl_engine
 from pyre.gl_engine.helpers import check_for_error, raise_on_error
@@ -37,6 +38,7 @@ class ImageViewModel:
     _ImageFilename: str | None = None
     _image_stats: nornir_imageregistration.ImageStats
     RawImageSize: NDArray[np.integer]
+    _rgb_like_converted_to_grayscale: bool
 
     # The largest dimension we allow a texture to have
     MaxTextureDimension: int = int(4096)
@@ -48,6 +50,11 @@ class ImageViewModel:
     @property
     def Stats(self) -> nornir_imageregistration.ImageStats:
         return self._image_stats
+
+    @property
+    def rgb_like_converted_to_grayscale(self) -> bool:
+        """True if the image had RGB/RGBA (or LA) layout and was reduced to one plane via luminance."""
+        return self._rgb_like_converted_to_grayscale
 
     @property
     def width(self) -> int:
@@ -142,11 +149,10 @@ class ImageViewModel:
 
             self._Image = nornir_imageregistration.LoadImage(input_image, dtype=np.float16) * 255  # //
 
-            # Old volumes, such as RC1, have RGB images instead of grayscale.
-            self._Image = nornir_imageregistration.ForceGrayscale(self._Image)
+            self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(self._Image)
             Logger.info("Loading done")
         elif isinstance(input_image, np.ndarray):
-            self._Image = input_image
+            self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(input_image)
         else:
             raise TypeError("Expected a path to an image file or a numpy ndarray")
 

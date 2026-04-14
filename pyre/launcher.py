@@ -294,8 +294,8 @@ def build_container() -> IContainer:
     stos_container.wire(modules=[__name__], packages=['pyre'])
 
     stos_transform_controller = container_interface.transform_controller()
-    transform_glbuffermanager = container_interface.transform_glbuffermanager()
-    transform_glbuffermanager.add(stos_transform_controller)
+    transform_gl_buffer_manager = container_interface.transform_gl_buffer_manager()
+    transform_gl_buffer_manager.add(stos_transform_controller)
 
     atexit.register(SaveSettings, settings_provider=container_interface.settings)
 
@@ -329,7 +329,7 @@ def DefineDefaultSurface():
 
 @inject
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
-        imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+        image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager],
         stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
     # Build the container first (before setting up logging to avoid pickling issues)
     container = build_container()
@@ -340,7 +340,7 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     # Get the required services from the container
     image_manager = container.image_manager()
-    imageviewmodel_manager = container.imageviewmodel_manager()
+    image_viewmodel_manager = container.image_viewmodel_manager()
 
     print("Starting Pyre")
 
@@ -348,9 +348,13 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     nornir_shared.misc.SetupLogging(Level=logging.WARNING)
 
-    pyre.state.set_current_stos_config(pyre.state.StosState(transform_controller=stos_transform_controller,
-                                                             image_manager=image_manager,
-                                                             imageviewmodel_manager=imageviewmodel_manager))
+    pyre.state.set_current_stos_config(pyre.state.StosState(
+        transform_controller=stos_transform_controller,
+        image_manager=image_manager,
+        image_viewmodel_manager=image_viewmodel_manager,
+        image_loader=container.image_loader(),
+        window_manager=container.window_manager(),
+    ))
     pyre.state.set_current_mosaic_config(pyre.state.MosaicState())
 
     # Run the QT application
@@ -385,12 +389,6 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     window_manager.add(ViewType.Source, source_window)
     window_manager.add(ViewType.Target, target_window)
     window_manager.add(ViewType.Composite, composite_window)
-
-    # Keep pyre.Windows in sync with window_manager for legacy code (state/stos, common.SyncWindows).
-    # Prefer IWindowManager and ViewType for new code.
-    pyre.Windows["Fixed"] = source_window
-    pyre.Windows["Warped"] = target_window
-    pyre.Windows["Composite"] = composite_window
 
     def process_arguments():
         pyre.state.UpdateSettingsFromArguments(arg_values)

@@ -62,7 +62,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _actionmap: IControlPointActionMap
     _space: Space
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
-    _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.control_point_map_manager]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _commandqueue: ICommandQueue
     # _action_command_map: dict[ControlPointAction, ICommand]

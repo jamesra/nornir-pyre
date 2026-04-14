@@ -71,9 +71,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _command_queue: CommandQueue
     _transform_controller: TransformController
 
-    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
+    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
     _glcontext_manager: IGLContextManager = Provide[IContainer.glcontext_manager]
-    _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_glbuffermanager]
+    _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_gl_buffer_manager]
 
     _view_type: ViewType
     _transform_type_to_command_action_map: dict[TransformType, dict[ControlPointAction, Factory]] = Provide[  # type: ignore[assignment]
