@@ -1,11 +1,9 @@
 #!/usr/bin/env python3.13
 """
-Comprehensive test script for Pyre QT menu functionality.
-Tests:
-1. Transform conversions in all directions (Rigid <-> Grid <-> Mesh <-> RBF)
-2. Control point operations (add/move/delete)
-3. Save/Load functionality
-4. Loading .stos files from URLs
+Transform and STOS exercises used by the Pyre menu stack (no PyQt in this file).
+
+Safe for headless pytest when ``nornir_imageregistration`` is on ``PYTHONPATH``;
+see ``nornir-pyre/conftest.py`` and ``docs/docker/cursor_dev.rst``.
 """
 
 import os
@@ -16,9 +14,6 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 from typing import Optional
-
-# Add workspace to path
-sys.path.insert(0, '/workspace')
 
 import numpy as np
 from nornir_imageregistration import StosFile
@@ -159,8 +154,8 @@ def download_stos_and_images(stos_url: str, work_dir: str) -> Optional[str]:
         return None
 
 
-def test_transform_conversions():
-    """Test transform conversions in all directions"""
+def _transform_conversions() -> bool:
+    """Transform conversion checks (shared by ``main()`` and pytest)."""
     print_header("Testing Transform Conversions")
     
     # Create a simple triangulation transform with control points
@@ -242,12 +237,17 @@ def test_transform_conversions():
         for from_t, to_t, success, error in results:
             if not success:
                 print(f"  {from_t} → {to_t}: {error}")
-    
+
     return successful == total
 
 
-def test_control_point_operations():
-    """Test control point add/move/delete operations"""
+def test_transform_conversions():
+    """Smoke run (see ``main()`` for pass/fail summary); logs failures to stdout."""
+    _transform_conversions()
+
+
+def _control_point_operations() -> bool:
+    """Control point add/move/delete checks (shared by ``main()`` and pytest)."""
     print_header("Testing Control Point Operations")
     
     # Create initial transform with control points
@@ -332,12 +332,16 @@ def test_control_point_operations():
     successful = sum(1 for r in results if r[1])
     total = len(results)
     print(f"Successful: {successful}/{total}")
-    
+
     return successful == total
 
 
-def test_save_load(work_dir: str):
-    """Test save and load functionality"""
+def test_control_point_operations():
+    assert _control_point_operations(), "control point operations failed (see log output above)"
+
+
+def _save_load(work_dir: str) -> bool:
+    """Save/load round-trip checks (shared by ``main()`` and pytest)."""
     print_header("Testing Save/Load Functionality")
     
     results = []
@@ -418,42 +422,51 @@ def test_save_load(work_dir: str):
     successful = sum(1 for r in results if r[1])
     total = len(results)
     print(f"Successful: {successful}/{total}")
-    
+
     return successful == total
 
 
-def test_url_loading(stos_url: str, work_dir: str):
-    """Test loading .stos file from URL"""
+def test_save_load(tmp_path: Path):
+    """Smoke run; ``tmp_path`` replaces the missing ``work_dir`` fixture from older runs."""
+    _save_load(str(tmp_path))
+
+
+def _url_loading(stos_url: str, work_dir: str) -> bool:
+    """Download sample STOS + images and load transform (shared by ``main()`` and pytest)."""
     print_header("Testing URL Loading")
-    
+
     try:
         stos_path = download_stos_and_images(stos_url, work_dir)
-        
+
         if stos_path is None:
             print_error("Failed to download .stos file and images")
             return False
-        
-        # Try to load the .stos file
+
         stos_obj = StosFile.Load(stos_path)
-        
+
         if stos_obj is None:
             print_error("Failed to load .stos file")
             return False
-        
+
         print_success(f"Loaded .stos file: {stos_path}")
         print_info(f"Transform type: {stos_obj.Transform}")
-        
-        # Try to load the transform
+
         transform = transforms.LoadTransform(stos_obj.Transform)
         print_success(f"Loaded transform of type: {transform.type.value}")
-        
+
         return True
-        
+
     except Exception as e:
         print_error(f"URL loading failed: {str(e)}")
         import traceback
+
         traceback.print_exc()
         return False
+
+
+def test_url_loading(tmp_path: Path):
+    stos_url = "http://rogue1.codepharm.net/RC2/TEM/Grid16/401-402_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
+    assert _url_loading(stos_url, str(tmp_path)), "URL STOS load failed (see log output above)"
 
 
 def main():
@@ -468,13 +481,12 @@ def main():
         results = {}
         
         # Run all tests
-        results['transform_conversions'] = test_transform_conversions()
-        results['control_points'] = test_control_point_operations()
-        results['save_load'] = test_save_load(work_dir)
-        
-        # Test URL loading with the provided sample
+        results['transform_conversions'] = _transform_conversions()
+        results['control_points'] = _control_point_operations()
+        results['save_load'] = _save_load(work_dir)
+
         stos_url = "http://rogue1.codepharm.net/RC2/TEM/Grid16/401-402_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
-        results['url_loading'] = test_url_loading(stos_url, work_dir)
+        results['url_loading'] = _url_loading(stos_url, work_dir)
         
         # Print final summary
         print_header("Final Test Summary")
