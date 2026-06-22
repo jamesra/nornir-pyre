@@ -17,6 +17,7 @@ from pyre.interfaces.viewtype import ViewType
 from ..container import IContainer
 import pyre.interfaces.managers
 from ..settings import ImageAndMaskPath
+from pyre.stos_registration import resolve_warped_and_fixed_image_data, sync_stos_registration_roles
 
 # The global gl_context_manager
 
@@ -122,6 +123,17 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                                                       mask_fullpath=load_result.source.mask_fullpath)
         settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                       mask_fullpath=load_result.target.mask_fullpath)
+        stos_config = get_current_stos_config()
+        if stos_config is not None:
+            warped, fixed = resolve_warped_and_fixed_image_data(
+                image_loader._image_manager,  # type: ignore[attr-defined]
+                ViewType.Source.value,
+                ViewType.Target.value,
+                stos_filename=settings.stos.stos_filename,
+                settings_source_image_path=settings.stos.source_image.image_fullpath,
+                settings_target_image_path=settings.stos.target_image.image_fullpath,
+            )
+            sync_stos_registration_roles(stos_config, warped, fixed)
     else:
         if settings.stos.target_image is not None and settings.stos.target_image.image_fullpath is not None:
             try:
@@ -135,3 +147,20 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                                                      mask_path=settings.stos.source_image.mask_fullpath)
             except (FileNotFoundError, ValueError) as e:
                 _log.warning("Saved source image not found — starting without it: %s", e)
+        stos_config = get_current_stos_config()
+        if stos_config is not None:
+            warped, fixed = resolve_warped_and_fixed_image_data(
+                image_loader._image_manager,  # type: ignore[attr-defined]
+                ViewType.Source.value,
+                ViewType.Target.value,
+                stos_filename=settings.stos.stos_filename,
+                settings_source_image_path=(
+                    settings.stos.source_image.image_fullpath
+                    if settings.stos.source_image is not None else None
+                ),
+                settings_target_image_path=(
+                    settings.stos.target_image.image_fullpath
+                    if settings.stos.target_image is not None else None
+                ),
+            )
+            sync_stos_registration_roles(stos_config, warped, fixed)

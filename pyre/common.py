@@ -5,6 +5,7 @@ Created on Oct 16, 2012
 '''
 import logging
 import tempfile
+import copy
 from typing import Iterable
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,10 @@ import pyre
 from pyre.container import IContainer
 from pyre.interfaces.managers import IImageManager, IWindowManager
 from pyre.interfaces.managers.command_history import ICommandHistory
-from pyre.controllers.transformcontroller import TransformController
 from pyre.interfaces.viewtype import ViewType
+from pyre.controllers.transformcontroller import TransformController
+from pyre.settings import AppSettings
+from pyre.stos_registration import resolve_warped_and_fixed_image_data
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: ITransform, warpedImage: NDArray):
@@ -90,7 +93,8 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                target_image_key: str,
                                settings: StosBruteSettings,
                                LimitImageSize: bool = False,
-                               image_manager: IImageManager = Provide[IContainer.image_manager]) -> ITransform | None:
+                               image_manager: IImageManager = Provide[IContainer.image_manager],
+                               app_settings: AppSettings = Provide[IContainer.settings]) -> ITransform | None:
     """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
     logger.debug("RotateTranslateWarpedImage entry source=%s target=%s", source_image_key, target_image_key)
     largestdimension = 2047
@@ -107,20 +111,41 @@ def RotateTranslateWarpedImage(source_image_key: str,
         logger.warning("RotateTranslateWarpedImage missing target image key=%s", target_image_key)
         return
 
-    source_image = image_manager[source_image_key]
-    target_image = image_manager[target_image_key]
-    settings._method = SliceToSliceMethod.LogPolar
-    alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=source_image,
-                                                                           target_image_data=target_image,
-                                                                           settings=settings,
-                                                                           SingleThread=False,
+    stos_settings = app_settings.stos
+    source_settings_path = (
+        stos_settings.source_image.image_fullpath if stos_settings.source_image is not None else None
+    )
+    target_settings_path = (
+        stos_settings.target_image.image_fullpath if stos_settings.target_image is not None else None
+    )
+    warped_image, fixed_image = resolve_warped_and_fixed_image_data(
+        image_manager=image_manager,
+        source_image_key=source_image_key,
+        target_image_key=target_image_key,
+        stos_filename=stos_settings.stos_filename,
+        settings_source_image_path=source_settings_path,
+        settings_target_image_path=target_settings_path,
+    )
+    working_settings = copy.copy(settings)
+    working_settings._method = SliceToSliceMethod.LogPolar
+    if LimitImageSize:
+        working_settings.larget_dimension = largestdimension
+    alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=warped_image,
+                                                                           target_image_data=fixed_image,
+                                                                           settings=working_settings,
+                                                                           SingleThread=True,
                                                                            Cluster=False,
                                                                            )
     # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
     print("Alignment found: " + str(alignRecord))
-    transform = alignRecord.ToImageTransform(source_image_shape=source_image.shape,
-                                             target_image_shape=target_image.shape)
-    logger.debug("RotateTranslateWarpedImage returning transform=%s", type(transform).__name__)
+    spatial_transform = alignRecord.ToSpatialTransform(source_shape=warped_image.shape,
+                                                       target_shape=fixed_image.shape)
+    transform = alignRecord.ToImageTransform(source_image_shape=warped_image.shape,
+                                             target_image_shape=fixed_image.shape)
+    logger.debug("RotateTranslateWarpedImage returning transform=%s flip_ud=%s angle_deg=%s",
+                 type(transform).__name__,
+                 getattr(transform, 'flip_ud', None),
+                 numpy.degrees(getattr(transform, 'angle', 0.0)))
     return transform
     # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 

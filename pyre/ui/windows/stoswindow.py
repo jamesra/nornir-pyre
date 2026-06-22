@@ -1,5 +1,6 @@
 import os
 import logging
+import numpy as np
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
@@ -382,6 +383,7 @@ class StosWindow(PyreWindowBase):
         """Handle Rotate Translate action"""
         logger.debug("Rotate translate estimate triggered")
         settings = self._settings.stos.brute_registration
+        current_transform = self._transform_controller.TransformModel
         try:
             resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
                                                                          target_image_key=Space.Target,  # type: ignore[arg-type]
@@ -393,7 +395,6 @@ class StosWindow(PyreWindowBase):
             QMessageBox.warning(self, "Rotate translate estimate", str(e))
             return
 
-        current_transform = self._transform_controller.TransformModel
         logger.debug(
             "Rotate translate estimate result_is_none=%s equals_current=%s",
             resulting_transform is None,
@@ -523,6 +524,18 @@ class StosWindow(PyreWindowBase):
                                                           mask_fullpath=load_result.source.mask_fullpath)
             settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                           mask_fullpath=load_result.target.mask_fullpath)
+            stos_config = pyre.state.get_current_stos_config()
+            if stos_config is not None:
+                from pyre.stos_registration import resolve_warped_and_fixed_image_data, sync_stos_registration_roles
+                warped, fixed = resolve_warped_and_fixed_image_data(
+                    image_loader._image_manager,  # type: ignore[attr-defined]
+                    ViewType.Source.value,
+                    ViewType.Target.value,
+                    stos_filename=filename,
+                    settings_source_image_path=load_result.source.image_fullpath,
+                    settings_target_image_path=load_result.target.image_fullpath,
+                )
+                sync_stos_registration_roles(stos_config, warped, fixed)
 
             return load_result
 
