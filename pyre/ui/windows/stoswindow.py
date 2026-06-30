@@ -38,6 +38,7 @@ class StosWindow(PyreWindowBase):
     _space: Space
     dirname: str = ''
     _view_type: ViewType
+    _folder_browser: 'StosFileBrowserWindow | None' = None  # shared across all StosWindow instances
     _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
     _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
@@ -239,6 +240,10 @@ class StosWindow(PyreWindowBase):
         menuOpenStos = filemenu.addAction("&Open stos file")
         menuOpenStos.triggered.connect(self.onOpenStos)  # type: ignore[union-attr]
 
+        # Open stos folder browser
+        menuOpenStosBrowser = filemenu.addAction("Open Stos &Folder Browser\u2026")
+        menuOpenStosBrowser.triggered.connect(self.onOpenStosFolderBrowser)  # type: ignore[union-attr]
+
         # Open fixed image action
         menuOpenFixedImage = filemenu.addAction("&Open Fixed Image")
         menuOpenFixedImage.triggered.connect(self.onOpenFixedImage)  # type: ignore[union-attr]
@@ -287,6 +292,31 @@ class StosWindow(PyreWindowBase):
         """Handle Show Composite Window action"""
         window = self._window_manager[ViewType.Composite.value]
         window.setVisible(not window.isVisible())
+
+    def _set_layout_position(self, position, desired_displays: int = 1):
+        """Position all rendering windows then, if the folder browser is visible,
+        tuck it to the left of the composite window at its current width."""
+        super()._set_layout_position(position, desired_displays)
+        if StosWindow._folder_browser is not None and StosWindow._folder_browser.isVisible():
+            self._position_folder_browser_beside_composite()
+
+    def _position_folder_browser_beside_composite(self):
+        """Move the folder browser to the left of the composite window and shrink
+        the composite by the browser's width so they sit flush without overlap."""
+        browser = StosWindow._folder_browser
+        if browser is None or not browser.isVisible():
+            return
+        if ViewType.Composite not in self._window_manager:
+            return
+        composite_win = self._window_manager[ViewType.Composite]
+        geom = composite_win.geometry()
+        browser_w = browser.width()
+        if geom.width() <= browser_w:
+            return  # composite too narrow to split — leave as-is
+        browser.move(geom.x(), geom.y())
+        browser.resize(browser_w, geom.height())
+        composite_win.move(geom.x() + browser_w, geom.y())
+        composite_win.resize(geom.width() - browser_w, geom.height())
 
     def onRestoreOrientation(self):
         """Handle Restore Orientation action"""
@@ -507,6 +537,17 @@ class StosWindow(PyreWindowBase):
                 self.dirname = os.path.dirname(filename)
                 StosWindow.stosfilename = os.path.basename(filename)
                 self.loadStos(filename)
+                if StosWindow._folder_browser is not None:
+                    StosWindow._folder_browser.set_current_file(filename)
+
+    def onOpenStosFolderBrowser(self):
+        """Show (or create) the Stos Folder Browser window."""
+        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+        if StosWindow._folder_browser is None:
+            StosWindow._folder_browser = StosFileBrowserWindow(parent=None)
+        StosWindow._folder_browser.show()
+        StosWindow._folder_browser.raise_()
+        StosWindow._folder_browser.activateWindow()
 
     @staticmethod
     def loadStos(filename: str,

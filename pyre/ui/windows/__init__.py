@@ -1,4 +1,5 @@
 from .stoswindow import StosWindow
+from .stosfilebrowser import StosFileBrowserWindow
 from . import mosaicwindow, pyrewindows, stoswindow
 from .filedrop import FileDrop
 from .textdrop import TextDrop

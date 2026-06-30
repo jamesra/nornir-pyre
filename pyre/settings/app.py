@@ -88,6 +88,7 @@ class UISettings(BaseModel):
     image_search_paths: list[str] = []  # field(default_factory=list)  # Paths to search for images
     replacement_paths: dict[
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files
+    stos_browser_folder: str | None = None  # Last folder opened in the Stos File Browser
 
 
 class AppSettings(BaseModel):

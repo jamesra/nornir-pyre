@@ -27,6 +27,7 @@ class ImageLoader(IImageLoader):
     _image_viewmodel_manager: IImageViewModelManager
     _search_dirs: list[str] | None
     _replacement_paths: dict[str, str] | None
+    _filepath_cache: dict[tuple[str, str | None], nornir_imageregistration.ImagePermutationHelper]
 
     @inject
     def __init__(self,
@@ -37,6 +38,7 @@ class ImageLoader(IImageLoader):
         self._image_viewmodel_manager = imageviewmodel_manager
         self._search_dirs = settings.ui.image_search_paths
         self._replacement_paths = settings.ui.replacement_paths
+        self._filepath_cache = {}
 
     def load_stos(self,
                   stos_path: str) -> LoadStosResult | None:
@@ -100,19 +102,29 @@ class ImageLoader(IImageLoader):
         if found_image_fullpath is None:
             raise ValueError("Image file not found: " + image_fullpath + "\n\tin" + str(search_dirs))
 
-        image = nornir_imageregistration.LoadImage(found_image_fullpath)
-        image, img_color = RgbLikeToGrayscaleLuminance(image)
-        if img_color:
-            logger.warning(
-                "Image had color channels; converted to grayscale (luminance): %s",
-                found_image_fullpath,
-            )
-
-        image_mask = None
-        found_mask_fullpath = None
-        msk_color = False
+        # Resolve mask path up front so we can compute the cache key before any disk I/O.
+        found_mask_fullpath: str | None = None
         if mask_fullpath is not None:
             found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
+
+        cache_key = (
+            os.path.normcase(found_image_fullpath),
+            os.path.normcase(found_mask_fullpath) if found_mask_fullpath is not None else None,
+        )
+
+        img_color = False
+        msk_color = False
+
+        if cache_key not in self._filepath_cache:
+            image = nornir_imageregistration.LoadImage(found_image_fullpath)
+            image, img_color = RgbLikeToGrayscaleLuminance(image)
+            if img_color:
+                logger.warning(
+                    "Image had color channels; converted to grayscale (luminance): %s",
+                    found_image_fullpath,
+                )
+
+            image_mask = None
             if found_mask_fullpath is not None:
                 image_mask = nornir_imageregistration.LoadImage(found_mask_fullpath)
                 image_mask, msk_color = RgbLikeToGrayscaleLuminance(image_mask)
@@ -122,12 +134,14 @@ class ImageLoader(IImageLoader):
                         found_mask_fullpath,
                     )
 
+            self._filepath_cache[cache_key] = nornir_imageregistration.ImagePermutationHelper(image, image_mask)
+
+        permutations = self._filepath_cache[cache_key]
+
         if key in self._image_manager:  # type: ignore[operator]
             del self._image_manager[key]  # type: ignore[arg-type]
 
-        permutations = self._image_manager.add(key=key,  # type: ignore[arg-type]
-                                               image=image,
-                                               mask=image_mask)
+        self._image_manager.add(key=key, image=permutations)  # type: ignore[arg-type]
         return ImageLoadResult(key=str(key),
                                permutations=permutations,
                                image_fullpath=found_image_fullpath,
