@@ -247,6 +247,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         # #region agent log
                         import json as _json, time as _time
                         try:
+                            model = self._transform_controller.TransformModel
+                            rot_center = None
+                            if isinstance(model, nornir_imageregistration.IRigidTransform):
+                                rc = model.source_space_center_of_rotation
+                                rot_center = [float(rc[0]), float(rc[1])]
                             with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
                                 _f.write(_json.dumps({
                                     "sessionId": "203327", "hypothesisId": "R",
@@ -257,6 +262,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                                         "view_type": self._view_type().value if self._view_type() else None,
                                         "rangle": float(rangle),
                                         "center_yx": [float(world_center[0]), float(world_center[1])],
+                                        "source_rot_center_yx": rot_center,
                                     },
                                     "timestamp": int(_time.time() * 1000),
                                 }) + "\n")
@@ -300,27 +306,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self.camera.lookat = self.camera.lookat - delta
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
-
-                # #region agent log
-                import json as _json, time as _time
-                try:
-                    with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
-                        _f.write(_json.dumps({
-                            "sessionId": "203327", "hypothesisId": "Z",
-                            "location": "navigationcommandbase.py:on_mouse_scroll",
-                            "message": "zoom applied",
-                            "data": {
-                                "space": self.space.name,
-                                "view_type": self._view_type().value if self._view_type() else None,
-                                "scroll_y": float(scroll_y),
-                                "new_scale": float(self.camera.scale),
-                            },
-                            "timestamp": int(_time.time() * 1000),
-                        }) + "\n")
-                except Exception:
-                    pass
-                # #endregion
-
                 self.parent.update()
                 self._last_mouse_position = mouse_y, mouse_x
         finally:

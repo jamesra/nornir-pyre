@@ -406,8 +406,7 @@ class ImageTransformView(IImageTransformView):
         use_rigid_path = False
         rigid_native_is_warped = self._image_space == Space.Target
         rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
-        rigid_warped_display_angle = 0.0
-        rigid_warped_rotation_pivot_yx = np.zeros(2, dtype=np.float32)
+        rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
         tc = self._transform_controller
         if use_rigid:
             rigid_forward, rigid_inverse = shaders.texture_shader.rigid_matrices_from_transform(self.transform)  # type: ignore[union-attr]
@@ -419,10 +418,8 @@ class ImageTransformView(IImageTransformView):
                 offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
                 rigid_interactive_native_shift = (
                     offset - tc.rigid_warped_display_baseline).astype(np.float32, copy=False)
-                rigid_warped_display_angle = float(tc.rigid_warped_display_angle)
-                pivot = tc.rigid_warped_rotation_pivot
-                if pivot is not None:
-                    rigid_warped_rotation_pivot_yx = np.asarray(pivot, dtype=np.float32)
+                rigid_warped_display_matrix = np.asarray(
+                    tc.rigid_warped_display_matrix, dtype=np.float32)
 
             if tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None:
                 if self._image_space != tc.interactive_edit_space:
@@ -470,8 +467,7 @@ class ImageTransformView(IImageTransformView):
                                                 rigid_native_is_warped=rigid_native_is_warped,
                                                 rigid_fixed_warped_into_target=rigid_composite_fixed_align,
                                                 rigid_interactive_native_shift=rigid_interactive_native_shift,
-                                                rigid_warped_display_angle=rigid_warped_display_angle,
-                                                rigid_warped_rotation_pivot_yx=rigid_warped_rotation_pivot_yx)
+                                                rigid_warped_display_matrix=rigid_warped_display_matrix)
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

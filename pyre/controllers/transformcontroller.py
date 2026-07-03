@@ -27,6 +27,19 @@ from pyre.interfaces.eventmanager import IEventManager
 from pyre.space import Space
 
 
+def _rigid_display_rotation_about_pivot_yx(
+        rangle: float,
+        pivot_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Return a 3x3 row-major homogeneous matrix rotating (Y,X) about pivot_yx."""
+    cy, cx = float(pivot_yx[0]), float(pivot_yx[1])
+    c, s = math.cos(rangle), math.sin(rangle)
+    return np.array([
+        [c, -s, cy - c * cy + s * cx],
+        [s, c, cx - s * cy - c * cx],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float32)
+
+
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
                            FixedShape: NDArray | None = None,
                            WarpedShape: NDArray | None = None):
@@ -101,8 +114,7 @@ class TransformController:
     _rigid_inverse_matrix_at_edit_start: NDArray[np.floating] | None = None
     _target_offset_at_edit_start: NDArray[np.floating] | None = None
     _rigid_warped_display_baseline: NDArray[np.floating] | None = None
-    _rigid_warped_display_angle: float = 0.0
-    _rigid_warped_rotation_pivot: NDArray[np.floating] | None = None
+    _rigid_warped_display_matrix: NDArray[np.floating]
     _tile_mesh_cache: TileMeshCpuCache
     _full_refresh_needed: bool = False
 
@@ -139,36 +151,48 @@ class TransformController:
         return self._rigid_warped_display_baseline
 
     @property
-    def rigid_warped_display_angle(self) -> float:
-        """Cumulative warped-layer display rotation (radians) for the warped panel only."""
-        return self._rigid_warped_display_angle
-
-    @property
-    def rigid_warped_rotation_pivot(self) -> NDArray[np.floating] | None:
-        """Warped-layer rotation pivot in target/native coordinates (Y,X)."""
-        return self._rigid_warped_rotation_pivot
+    def rigid_warped_display_matrix(self) -> NDArray[np.floating]:
+        """Affine display transform for the warped rigid panel (Y,X homogeneous)."""
+        return self._rigid_warped_display_matrix
 
     def _sync_rigid_warped_display_baseline(self) -> None:
         """Reset warped-layer display baseline to the current rigid target_offset."""
+        self._rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
         if isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
             self._rigid_warped_display_baseline = np.asarray(
                 self._TransformModel.target_offset, dtype=np.float32).copy()
-            self._rigid_warped_display_angle = 0.0
-            self._rigid_warped_rotation_pivot = None
         else:
             self._rigid_warped_display_baseline = None
-            self._rigid_warped_display_angle = 0.0
-            self._rigid_warped_rotation_pivot = None
 
     def record_warped_display_rotation(
             self,
             rangle: float,
             pivot_target_yx: NDArray[np.floating] | None) -> None:
-        """Track warped-panel visual rotation separately from fixed/composite edits."""
-        self._rigid_warped_display_angle += float(rangle)
-        if pivot_target_yx is not None:
-            self._rigid_warped_rotation_pivot = np.asarray(
-                pivot_target_yx, dtype=np.float32).ravel()[:2].copy()
+        """Compose an incremental warped-panel rotation about the cursor pivot."""
+        if pivot_target_yx is None:
+            return
+        pivot = np.asarray(pivot_target_yx, dtype=np.float32).ravel()[:2]
+        step = _rigid_display_rotation_about_pivot_yx(rangle, pivot)
+        self._rigid_warped_display_matrix = step @ self._rigid_warped_display_matrix
+
+    def reset_rigid_transform(self) -> None:
+        """Reset a rigid transform to zero offset and zero angle."""
+        model = self._TransformModel
+        if not isinstance(model, nornir_imageregistration.IRigidTransform):
+            return
+        model._target_offset = np.zeros(2, dtype=np.float32)  # type: ignore[attr-defined]
+        model._angle = 0.0  # type: ignore[attr-defined]
+        model._source_space_center_of_rotation = np.zeros(2, dtype=np.float32)  # type: ignore[attr-defined]
+        if hasattr(model, '_scalar'):
+            model._scalar = 1.0  # type: ignore[attr-defined]
+        if hasattr(model, '_flip_ud'):
+            model._flip_ud = False  # type: ignore[attr-defined]
+        update_matrix = getattr(model, '_update_transform_matrix', None)
+        if update_matrix is not None:
+            update_matrix()
+        model.OnTransformChanged()  # type: ignore[attr-defined]
+        self._sync_rigid_warped_display_baseline()
+        self.FireOnChangeEvent()
 
     def begin_interactive_edit(self, space: Space | None = None) -> None:
         """Mark the start of a continuous edit. Heavy display refresh is deferred until end."""
@@ -463,8 +487,7 @@ class TransformController:
         self._rigid_matrix_at_edit_start = None
         self._rigid_inverse_matrix_at_edit_start = None
         self._target_offset_at_edit_start = None
-        self._rigid_warped_display_angle = 0.0
-        self._rigid_warped_rotation_pivot = None
+        self._rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
         self._pending_moved_indices = set()
         self._tile_mesh_cache = TileMeshCpuCache()
         self._full_refresh_needed = False
@@ -540,6 +563,9 @@ class TransformController:
                 model.RotateSourcePoints(rangle, source_center)  # type: ignore[attr-defined]
                 self.record_warped_display_rotation(rangle, center)
             else:
+                if center is not None:
+                    center_yx = np.asarray(center, dtype=np.float32).ravel()[:2]
+                    model._source_space_center_of_rotation = center_yx.copy()  # type: ignore[attr-defined]
                 model.RotateFixed(rangle, center)  # type: ignore[attr-defined]
             return
         if edit_space == Space.Target:

@@ -246,8 +246,8 @@ class StosWindow(PyreWindowBase):
         menuClearMasked = menu.addAction("&Clear All Masked points")
         menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
 
-        menuClear = menu.addAction("&Clear All points")
-        menuClear.triggered.connect(self.onClearAllPoints)  # type: ignore[union-attr]
+        menuClear = menu.addAction("&Reset Transform")
+        menuClear.triggered.connect(self.onResetTransform)  # type: ignore[union-attr]
 
         return menu
 
@@ -347,18 +347,38 @@ class StosWindow(PyreWindowBase):
         """Open scrollable help scrolled to mouse and keyboard controls."""
         ControlsHelpDialog(self, self._config["readme"]).exec()
 
-    def onClearAllPoints(self):
-        """Handle Clear All Points action"""
+    def onResetTransform(self):
+        """Reset the transform. Rigid transforms return to zero offset and angle."""
         config = pyre.state.get_current_stos_config()
         if config is None:
             return
         transform_type = config.TransformType or nornir_imageregistration.transforms.TransformType.RIGID
-        sourceImageView = self._imageviewmodel_manager[ViewType.Source]
-        targetImageView = self._imageviewmodel_manager[ViewType.Target]
+        if transform_type == nornir_imageregistration.transforms.TransformType.RIGID:
+            self.transform_controller.reset_rigid_transform()
+            self.imagepanel._glpanel.update()
+            return
+
+        source_key = ViewType.Source.value
+        target_key = ViewType.Target.value
+        manager = self._imageviewmodel_manager
+        if source_key not in manager or target_key not in manager:
+            QMessageBox.warning(
+                self,
+                "Reset Transform",
+                "Load fixed and warped images before resetting a mesh transform.",
+            )
+            return
+        source_image_view = manager[source_key]
+        target_image_view = manager[target_key]
         self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(  # type: ignore[attr-defined]
             transform_type,
-            sourceImageView.Image.shape,
-            targetImageView.Image.shape)
+            source_image_view.Image.shape,
+            target_image_view.Image.shape)
+        self.imagepanel._glpanel.update()
+
+    def onClearAllPoints(self):
+        """Deprecated alias for onResetTransform."""
+        self.onResetTransform()
 
     def onClearMaskedPoints(self):
         """Handle Clear Masked Points action"""
