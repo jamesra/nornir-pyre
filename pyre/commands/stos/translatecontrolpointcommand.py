@@ -75,7 +75,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
         if len(self._command_points) == 0:
             raise RequiresSelectionError()
 
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.copy_points()
 
     def __str__(self):
         return "TranslateControlPointCommand"
@@ -157,6 +157,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
+        self._transform_controller.begin_interactive_edit(self._space)
         self._selected_point_set.update(
             self._command_points)  # Ensure the command points are included in the selected points
 
@@ -172,12 +173,13 @@ class TranslateControlPointCommand(NavigationCommandBase):
         return True
 
     def cancel(self):
+        self._transform_controller.end_interactive_edit()
         self._transform_controller.SetPoints(self._original_points)
         super().cancel()
         return
 
     def execute(self):
-        # self._transform_controller.points[self._selected_points] = self.translated_points
+        self._transform_controller.end_interactive_edit()
         super().execute()
 
     def subscribe_to_parent(self):

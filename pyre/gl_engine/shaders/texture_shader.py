@@ -11,15 +11,43 @@ from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 _texture_vertex_shader_program = """
         #version 330
-        uniform float tween; //The fractional amount of the tween between source and target space
+        uniform float tween;
+        uniform float use_rigid_path;
+        uniform float rigid_native_is_warped;
+        uniform float rigid_fixed_warped_into_target;
+        uniform mat3 rigid_source_to_target;
+        uniform mat3 rigid_target_to_source;
         uniform mat4 model_view_projection_matrix;
         out vec2 frag_texture_coordinate;
         in vec3 vertex_source_position;
         in vec3 vertex_target_position;
         in vec2 vertex_texture_coordinate;
         void main(){
-            gl_Position = model_view_projection_matrix * mix(vec4(vertex_source_position, 1),
-                                                             vec4(vertex_target_position, 1),
+            vec3 native_pos = vertex_source_position;
+            vec3 warped_pos = native_pos;
+            vec3 fixed_pos = native_pos;
+            if (use_rigid_path > 0.5) {
+                vec3 yx_in = vec3(native_pos.y, native_pos.x, 1.0);
+                fixed_pos = native_pos;
+                if (rigid_native_is_warped > 0.5) {
+                    // Target image tiles: corners are already in fixed/target space.
+                    warped_pos = native_pos;
+                } else {
+                    // Source/mapped image tiles: warped slot maps native corners through forward.
+                    vec3 yx_out = rigid_source_to_target * yx_in;
+                    warped_pos = vec3(yx_out.y, yx_out.x, native_pos.z);
+                }
+            } else {
+                warped_pos = vertex_source_position;
+                fixed_pos = vertex_target_position;
+            }
+            if (use_rigid_path > 0.5 && rigid_fixed_warped_into_target > 0.5 && rigid_native_is_warped < 0.5) {
+                // Composite source FBO: fixed image drawn at tween=1 must use transformed
+                // positions (old mesh target slot), not native fixed corners.
+                fixed_pos = warped_pos;
+            }
+            gl_Position = model_view_projection_matrix * mix(vec4(fixed_pos, 1),
+                                                             vec4(warped_pos, 1),
                                                              tween);
             frag_texture_coordinate = vertex_texture_coordinate;  
         }
@@ -50,6 +78,11 @@ class TextureShader(BaseShader):
     _texture_coord_location = None
     _tween_location = None
     _model_view_projection_matrix_location = None
+    _use_rigid_path_location = None
+    _rigid_native_is_warped_location = None
+    _rigid_fixed_warped_into_target_location = None
+    _rigid_matrix_location = None
+    _rigid_inverse_matrix_location = None
     _attributes: Sequence[VertexAttribute] | None = None
 
     def __init__(self):
@@ -123,8 +156,71 @@ class TextureShader(BaseShader):
                 raise ValueError("Could not find attribute")
         return self._model_view_projection_matrix_location
 
+    @property
+    def use_rigid_path_location(self) -> int:
+        if self._use_rigid_path_location is None:
+            self._use_rigid_path_location = gl.glGetUniformLocation(self.program, "use_rigid_path")
+            raise_on_error("after glGetUniformLocation(use_rigid_path) in texture_shader")
+        return self._use_rigid_path_location
+
+    @property
+    def rigid_matrix_location(self) -> int:
+        if self._rigid_matrix_location is None:
+            self._rigid_matrix_location = gl.glGetUniformLocation(self.program, "rigid_source_to_target")
+            raise_on_error("after glGetUniformLocation(rigid_source_to_target) in texture_shader")
+        return self._rigid_matrix_location
+
+    @property
+    def rigid_fixed_warped_into_target_location(self) -> int:
+        if self._rigid_fixed_warped_into_target_location is None:
+            self._rigid_fixed_warped_into_target_location = gl.glGetUniformLocation(
+                self.program, "rigid_fixed_warped_into_target")
+            raise_on_error("after glGetUniformLocation(rigid_fixed_warped_into_target) in texture_shader")
+        return self._rigid_fixed_warped_into_target_location
+
+    @property
+    def rigid_native_is_warped_location(self) -> int:
+        if self._rigid_native_is_warped_location is None:
+            self._rigid_native_is_warped_location = gl.glGetUniformLocation(self.program, "rigid_native_is_warped")
+            raise_on_error("after glGetUniformLocation(rigid_native_is_warped) in texture_shader")
+        return self._rigid_native_is_warped_location
+
+    @property
+    def rigid_inverse_matrix_location(self) -> int:
+        if self._rigid_inverse_matrix_location is None:
+            self._rigid_inverse_matrix_location = gl.glGetUniformLocation(self.program, "rigid_target_to_source")
+            raise_on_error("after glGetUniformLocation(rigid_target_to_source) in texture_shader")
+        return self._rigid_inverse_matrix_location
+
+    @staticmethod
+    def _as_numpy_mat3(matrix) -> NDArray[np.floating]:
+        mat = matrix.get() if hasattr(matrix, 'get') else np.asarray(matrix)
+        return np.asarray(mat, dtype=np.float32).reshape(3, 3)
+
+    @staticmethod
+    def rigid_matrices_from_transform(transform) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+        """Return (forward, inverse) 3x3 row-major matrices in Nornir (Y,X) homogeneous form."""
+        forward = np.eye(3, dtype=np.float32)
+        inverse = np.eye(3, dtype=np.float32)
+        fwd = getattr(transform, 'forward_matrix', None)
+        inv = getattr(transform, 'inverse_matrix', None)
+        if fwd is not None:
+            forward = TextureShader._as_numpy_mat3(fwd)
+        if inv is not None:
+            inverse = TextureShader._as_numpy_mat3(inv)
+        return forward, inverse
+
+    @staticmethod
+    def rigid_matrix_from_transform(transform) -> NDArray[np.floating]:
+        """Build 3x3 row-major matrix mapping source (X,Y,1) to target (X,Y) for rigid transforms."""
+        return TextureShader.rigid_matrices_from_transform(transform)[0]
+
     def draw(self, model_view_proj_matrix: NDArray[np.floating], texture: int, vertex_array_object: IVAO,
-             tween: float):
+             tween: float, use_rigid_path: bool = False,
+             rigid_source_to_target: NDArray[np.floating] | None = None,
+             rigid_target_to_source: NDArray[np.floating] | None = None,
+             rigid_native_is_warped: bool = False,
+             rigid_fixed_warped_into_target: bool = False):
         """Draws the texture using the vertex and index buffers."""
         try:
             gl.glUseProgram(self.program)
@@ -138,6 +234,23 @@ class TextureShader(BaseShader):
             vertex_array_object.bind()
 
             gl.glUniform1f(self.tween_location, float(tween))
+            check_for_error()
+            gl.glUniform1f(self.use_rigid_path_location, 1.0 if use_rigid_path else 0.0)
+            check_for_error()
+            gl.glUniform1f(self.rigid_native_is_warped_location, 1.0 if rigid_native_is_warped else 0.0)
+            check_for_error()
+            gl.glUniform1f(self.rigid_fixed_warped_into_target_location,
+                            1.0 if rigid_fixed_warped_into_target else 0.0)
+            check_for_error()
+            if rigid_source_to_target is None:
+                rigid_source_to_target = np.eye(3, dtype=np.float32)
+            if rigid_target_to_source is None:
+                rigid_target_to_source = np.eye(3, dtype=np.float32)
+            gl.glUniformMatrix3fv(self.rigid_matrix_location, 1, True,
+                                  rigid_source_to_target.astype(np.float32, copy=False))
+            check_for_error()
+            gl.glUniformMatrix3fv(self.rigid_inverse_matrix_location, 1, True,
+                                  rigid_target_to_source.astype(np.float32, copy=False))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()

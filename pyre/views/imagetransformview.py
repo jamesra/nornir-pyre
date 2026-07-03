@@ -27,6 +27,7 @@ from pyre.views.gltiles import RenderCache, RenderDataMap, TileGLObjects
 import pyre.views.gltiles as gltiles
 from pyre.views.interfaces import IImageTransformView
 from pyre.controllers.transformcontroller import TransformController
+from pyre.perf_debug import timed
 
 
 class ImageTransformView(IImageTransformView):
@@ -96,6 +97,7 @@ class ImageTransformView(IImageTransformView):
     def transform_controller(self, value: TransformController):
         if self._transform_controller is not None:
             self._transform_controller.RemoveOnChangeEventListener(self.OnTransformChanged)
+            self._transform_controller.RemoveOnPointMovedEventListener(self.OnPointMoved)
 
         self._transform_controller = value
 
@@ -103,6 +105,7 @@ class ImageTransformView(IImageTransformView):
             if not isinstance(value, TransformController):
                 raise ValueError(f"Expected _transform_controller type, got {value}")
             self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
+            self._transform_controller.AddOnPointMovedEventListener(self.OnPointMoved)
 
         self.OnTransformChanged(value)
 
@@ -139,6 +142,7 @@ class ImageTransformView(IImageTransformView):
 
         if self._transform_controller is not None:
             self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
+            self._transform_controller.AddOnPointMovedEventListener(self.OnPointMoved)
 
         self.Debug = False
 
@@ -154,12 +158,91 @@ class ImageTransformView(IImageTransformView):
 
         self.update_all_tile_buffers()
 
-    def OnTransformChanged(self, transform_controller: TransformController):
-        if self._gl_initialized:
-            self.update_all_tile_buffers()
+    def OnTransformChanged(self, transform_controller: TransformController | None = None):
+        """Full tile mesh rebuild after transform changes (skipped during interactive drag)."""
+        if not self._gl_initialized:
+            return
+        tc = transform_controller if transform_controller is not None else self._transform_controller
+        if tc is not None and tc.interactive_edit_in_progress:
+            return
+        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+            needs_rigid_init = not self._tile_render_data
+            if not needs_rigid_init:
+                for tile_data in self._tile_render_data.values():
+                    if not tile_data.is_rigid_quad:
+                        needs_rigid_init = True
+                        break
+            if needs_rigid_init:
+                self.update_all_tile_buffers()
+            return
+        self.update_all_tile_buffers()
 
-    def update_all_tile_buffers(self):
-        """Update the buffers for all tiles in the image viewmodel"""
+    def OnPointMoved(self, transform_controller: TransformController, indices: NDArray[np.integer]):
+        """Incremental tile patch update for control point drag."""
+        if not self._gl_initialized:
+            return
+        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+            return
+        self.update_tiles_for_point_indices(indices)
+
+    def _view_model_cache_id(self) -> int:
+        return id(self._image_viewmodel)
+
+    def _get_or_build_cpu_entry(self, grid_coords: tuple[int, int]) -> 'pyre.controllers.tile_mesh_cache.TileMeshCpuEntry':
+        from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
+
+        assert self._transform_controller is not None
+        assert self._image_viewmodel is not None
+        cache = self._transform_controller.tile_mesh_cache
+        vm_id = self._view_model_cache_id()
+        entry = cache.get(vm_id, self._image_space, grid_coords)
+        if entry is not None:
+            return entry
+        render_data = self.get_or_create_tile_globjects(grid_coords[0], grid_coords[1])
+        entry = gltiles.build_tile_mesh_cpu(
+            self.transform,
+            grid_coords,
+            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+            self._image_space,
+            cached_entry=render_data)
+        cache.put(vm_id, self._image_space, grid_coords, entry)
+        return entry
+
+    def update_tiles_for_point_indices(self, indices: NDArray[np.integer],
+                                       visible_rect: nornir_imageregistration.Rectangle | None = None):
+        """Update only tiles affected by moved control points."""
+        if self._image_viewmodel is None or self.transform is None or self._transform_controller is None:
+            return
+        self._activate_context()
+        if not isinstance(self.transform, nornir_imageregistration.IControlPoints):
+            self.update_all_tile_buffers(visible_rect=visible_rect)
+            return
+
+        tile_coords = gltiles.tile_coords_for_control_points(
+            self.height, self.width,
+            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+            indices,
+            self.transform)
+        visible = gltiles.tile_coords_for_visible_bounds(
+            self.height, self.width,
+            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+            visible_rect)
+        if visible is not None:
+            tile_coords &= visible
+
+        with timed(f'update_tiles_for_points n={len(tile_coords)}'):
+            for grid_coords in tile_coords:
+                cpu_entry = self._get_or_build_cpu_entry(grid_coords)
+                gltiles._update_tile_buffers(
+                    self.transform,
+                    grid_coords,
+                    self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+                    self._image_space,
+                    get_or_create_tile_globjects=self.get_or_create_tile_globjects,
+                    shared_cpu_entry=cpu_entry)
+
+    def update_all_tile_buffers(self, visible_rect: nornir_imageregistration.Rectangle | None = None):
+        """Update the buffers for all tiles in the image viewmodel (or visible subset)."""
         unused_grid_coords = set(self._tile_render_data.keys())
 
         # Ensure we have a valid context before proceeding
@@ -177,14 +260,24 @@ class ImageTransformView(IImageTransformView):
             #     qt_post_to_main(self.update_all_tile_buffers)
             #     return
 
-            for grid_coords in self._image_viewmodel.generate_grid_indicies():
-                gltiles._update_tile_buffers(self.transform,
-                                             grid_coords,
-                                             self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
-                                             self._image_space,
-                                             get_or_create_tile_globjects=self.get_or_create_tile_globjects)
-                if grid_coords in unused_grid_coords:
-                    unused_grid_coords.remove(grid_coords)
+            visible = gltiles.tile_coords_for_visible_bounds(
+                self.height, self.width,
+                self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+                visible_rect)
+
+            with timed(f'update_all_tile_buffers cols={self._image_viewmodel.NumCols} rows={self._image_viewmodel.NumRows}'):
+                for grid_coords in self._image_viewmodel.generate_grid_indicies():
+                    if visible is not None and grid_coords not in visible:
+                        continue
+                    cpu_entry = self._get_or_build_cpu_entry(grid_coords)
+                    gltiles._update_tile_buffers(self.transform,
+                                                 grid_coords,
+                                                 self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+                                                 self._image_space,
+                                                 get_or_create_tile_globjects=self.get_or_create_tile_globjects,
+                                                 shared_cpu_entry=cpu_entry)
+                    if grid_coords in unused_grid_coords:
+                        unused_grid_coords.remove(grid_coords)
 
             for grid_coord in unused_grid_coords:
                 del self._tile_render_data[grid_coord]
@@ -258,7 +351,9 @@ class ImageTransformView(IImageTransformView):
              bounding_box: nornir_imageregistration.Rectangle | None = None,
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
-             show_mesh_lines: bool = False):
+             show_mesh_lines: bool = False,
+             rigid_composite_fixed_align: bool = False,
+             force_live_rigid_matrix: bool = False):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param view_proj:
@@ -275,14 +370,19 @@ class ImageTransformView(IImageTransformView):
         self._draw_imageviewmodel(view_proj=view_proj,
                                   image_viewmodel=self._image_viewmodel,
                                   space=space,
-                                  show_mesh_lines=show_mesh_lines)
+                                  bounding_box=bounding_box,
+                                  show_mesh_lines=show_mesh_lines,
+                                  rigid_composite_fixed_align=rigid_composite_fixed_align,
+                                  force_live_rigid_matrix=force_live_rigid_matrix)
 
     def _draw_imageviewmodel(self,
                              view_proj: NDArray[np.floating],
                              image_viewmodel: pyre.viewmodels.ImageViewModel | None,
                              space: pyre.Space,
                              bounding_box: nornir_imageregistration.Rectangle | None = None,
-                             show_mesh_lines: bool = False):
+                             show_mesh_lines: bool = False,
+                             rigid_composite_fixed_align: bool = False,
+                             force_live_rigid_matrix: bool = False):
 
         if image_viewmodel is None:
             return
@@ -303,9 +403,33 @@ class ImageTransformView(IImageTransformView):
 
         # Space is IntFlag; coerce so GLSL tween uniform always gets 0.0 or 1.0 (not enum object).
         tween = float(int(space))
+        use_rigid = self.transform is not None and gltiles.is_rigid_transform(self.transform)
+        rigid_forward = None
+        rigid_inverse = None
+        use_rigid_path = False
+        rigid_native_is_warped = self._image_space == Space.Target
+        if use_rigid:
+            rigid_forward, rigid_inverse = shaders.texture_shader.rigid_matrices_from_transform(self.transform)  # type: ignore[union-attr]
+            use_rigid_path = True
+            tc = self._transform_controller
+            if (not force_live_rigid_matrix
+                    and tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None
+                    and self._image_space != tc.interactive_edit_space
+                    and tc.rigid_matrix_at_edit_start is not None
+                    and tc.rigid_inverse_matrix_at_edit_start is not None):
+                rigid_forward = tc.rigid_matrix_at_edit_start
+                rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
+
+        visible = gltiles.tile_coords_for_visible_bounds(
+            image_viewmodel.height, image_viewmodel.width,
+            image_viewmodel.TextureSize,
+            bounding_box)
+
         for ix in range(0, image_viewmodel.NumCols):
             column = image_array[ix]
             for iy in range(0, image_viewmodel.NumRows):
+                if visible is not None and (ix, iy) not in visible:
+                    continue
                 texture = column[iy]
 
                 # Skip if texture is invalid
@@ -319,7 +443,12 @@ class ImageTransformView(IImageTransformView):
                     continue
 
                 try:
-                    shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween)  # type: ignore[union-attr]
+                    shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween,  # type: ignore[union-attr]
+                                                use_rigid_path=use_rigid_path,
+                                                rigid_source_to_target=rigid_forward,
+                                                rigid_target_to_source=rigid_inverse,
+                                                rigid_native_is_warped=rigid_native_is_warped,
+                                                rigid_fixed_warped_into_target=rigid_composite_fixed_align)
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

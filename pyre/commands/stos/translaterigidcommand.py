@@ -74,7 +74,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         self._original_points = transform_controller.TransformModel
 
     def __str__(self):
-        return "TranslateControlPointCommand"
+        return "ManipulateRigidTransformCommand"
 
     def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
@@ -122,7 +122,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         world_point = point_pair.source if self.space == Space.Source else point_pair.target
         self._translate_origin = world_point
 
-        pass
+        self.parent.update()
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
@@ -167,6 +167,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
+        self._transform_controller.begin_interactive_edit(self.space)
 
     def on_mouse_scroll(self, event: QMouseEvent):
         """Called when the mouse wheel is scrolled"""
@@ -180,12 +181,13 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         return True
 
     def cancel(self):
+        self._transform_controller.end_interactive_edit()
         self._transform_controller.TransformModel = self._original_points  # type: ignore[assignment]
         super().cancel()
         return
 
     def execute(self):
-        # self._transform_controller.points[self._selected_points] = self.translated_points
+        self._transform_controller.end_interactive_edit()
         super().execute()
 
     def subscribe_to_parent(self):

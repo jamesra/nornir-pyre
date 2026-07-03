@@ -19,8 +19,10 @@ from PyQt6.QtCore import QTimer
 import nornir_imageregistration
 from nornir_imageregistration import ImagePermutationHelper
 from nornir_imageregistration.transforms.base import IControlPoints
+import nornir_imageregistration.interactive_edit
 import nornir_pools as pools
 import pyre.qt_eventmanager
+from pyre.controllers.tile_mesh_cache import TileMeshCpuCache
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.space import Space
 
@@ -68,6 +70,9 @@ def CreateDefaultMeshTransform(FixedShape=None, WarpedShape=None):
 
 TransformChangedCallback = Callable[['TransformController'], None]
 
+# Called during interactive edit (point drag) with the indices that moved.
+PointMovedCallback = Callable[['TransformController', NDArray[np.integer]], None]
+
 # Parameter order is the transform controller, the old transform, the new transform
 TransformModelChangedCallback = Callable[['TransformController',
                                           nornir_imageregistration.ITransform,
@@ -88,6 +93,75 @@ class TransformController:
     ShowWarped: bool
     DefaultToForwardTransform: bool
     _selected_points: set[int] = set()
+    _change_event_pending: bool = False  # True while a coalesced OnChange notification is queued
+    _point_moved_event_pending: bool = False
+    _interactive_edit_depth: int = 0
+    _interactive_edit_space: Space | None = None
+    _rigid_matrix_at_edit_start: NDArray[np.floating] | None = None
+    _rigid_inverse_matrix_at_edit_start: NDArray[np.floating] | None = None
+    _pending_moved_indices: set[int]
+    _tile_mesh_cache: TileMeshCpuCache
+    _full_refresh_needed: bool = False
+
+    @property
+    def interactive_edit_in_progress(self) -> bool:
+        """True while a command is performing continuous transform edits (e.g. point drag)."""
+        return self._interactive_edit_depth > 0
+
+    @property
+    def tile_mesh_cache(self) -> TileMeshCpuCache:
+        return self._tile_mesh_cache
+
+    @property
+    def interactive_edit_space(self) -> Space | None:
+        """Which display space is being edited during an interactive drag (Source=fixed, Target=warped)."""
+        return self._interactive_edit_space
+
+    @property
+    def rigid_matrix_at_edit_start(self) -> NDArray[np.floating] | None:
+        return self._rigid_matrix_at_edit_start
+
+    @property
+    def rigid_inverse_matrix_at_edit_start(self) -> NDArray[np.floating] | None:
+        return self._rigid_inverse_matrix_at_edit_start
+
+    def begin_interactive_edit(self, space: Space | None = None) -> None:
+        """Mark the start of a continuous edit. Heavy display refresh is deferred until end."""
+        if self._interactive_edit_depth == 0:
+            self._interactive_edit_space = space
+            if isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
+                from pyre.gl_engine.shaders.texture_shader import TextureShader
+                fwd, inv = TextureShader.rigid_matrices_from_transform(self._TransformModel)
+                self._rigid_matrix_at_edit_start = fwd
+                self._rigid_inverse_matrix_at_edit_start = inv
+        self._interactive_edit_depth += 1
+        nornir_imageregistration.interactive_edit.begin()
+        self._pending_moved_indices.clear()
+
+    def end_interactive_edit(self) -> None:
+        """End continuous edit and run any deferred full refresh."""
+        if self._interactive_edit_depth > 0:
+            self._interactive_edit_depth -= 1
+        nornir_imageregistration.interactive_edit.end()
+        if self._interactive_edit_depth == 0:
+            self._interactive_edit_space = None
+            self._rigid_matrix_at_edit_start = None
+            self._rigid_inverse_matrix_at_edit_start = None
+            if self._full_refresh_needed:
+                self._full_refresh_needed = False
+                self._run_post_interactive_refresh()
+
+    def _run_post_interactive_refresh(self) -> None:
+        if self.NumPoints > 25 and hasattr(self._TransformModel, 'InitializeDataStructures'):
+            self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
+        self._tile_mesh_cache.clear()
+        self.FireOnChangeEvent()
+
+    def copy_points(self) -> NDArray[np.floating]:
+        """Return a deep copy of control points (for undo/command snapshots)."""
+        if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
+            return copy.deepcopy(self.TransformModel.points)
+        return np.empty((0, 4))
 
     @staticmethod
     def swap_columns_to_XY(input: NDArray[np.floating]) -> NDArray[np.floating]:
@@ -131,21 +205,21 @@ class TransformController:
     @property
     def points(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return copy.deepcopy(self.TransformModel.points)
+            return np.asarray(self.TransformModel.points)
 
         return np.empty((0, 4))
 
     @property
     def SourcePoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return copy.deepcopy(self.TransformModel.SourcePoints)
+            return np.asarray(self.TransformModel.SourcePoints)
 
         return np.empty((0, 2))
 
     @property
     def TargetPoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return copy.deepcopy(self.TransformModel.TargetPoints)
+            return np.asarray(self.TransformModel.TargetPoints)
 
         return np.empty((0, 2))
 
@@ -206,6 +280,13 @@ class TransformController:
         """Unsubscribe to be called when the transform changes in a way that a point may be mapped to a new position"""
         self.__OnChangeEventListeners.remove(func)
 
+    def AddOnPointMovedEventListener(self, func: PointMovedCallback):
+        """Subscribe to lightweight notifications during interactive point drag."""
+        self.__OnPointMovedEventListeners.add(func)
+
+    def RemoveOnPointMovedEventListener(self, func: PointMovedCallback):
+        self.__OnPointMovedEventListeners.remove(func)
+
     def AddOnModelReplacedEventListener(self, func: Callable):
         """Unsubscribe to be called when the entire transform model changes, for example the transform type is changed"""
         self.__OnTransformModelReplacedEventListeners.add(func)
@@ -218,24 +299,66 @@ class TransformController:
         # If the transform is getting complicated then use
         # InitializeDataStructures to parallelize the
         # data structure creation as much as possible
+        if self.interactive_edit_in_progress:
+            self._full_refresh_needed = True
+            return
         if self.NumPoints > 25:
             self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
+        self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
 
+    def _record_point_moved(self, index: int | NDArray[np.integer]) -> None:
+        """Track moved control point indices during interactive edit."""
+        if isinstance(index, (int, np.integer)):
+            self._pending_moved_indices.add(int(index))
+        else:
+            self._pending_moved_indices.update(int(i) for i in np.atleast_1d(index).tolist())
+        self.FireOnPointMovedEvent()
+
+    def FireOnPointMovedEvent(self):
+        """Coalesced notification for incremental display updates during drag."""
+        if QApplication.instance() is None:
+            self._fire_pending_point_moved_event()
+            return
+        if self._point_moved_event_pending:
+            return
+        self._point_moved_event_pending = True
+        QTimer.singleShot(0, self._fire_pending_point_moved_event)
+
+    def _fire_pending_point_moved_event(self):
+        self._point_moved_event_pending = False
+        if not self._pending_moved_indices:
+            return
+        indices = np.array(sorted(self._pending_moved_indices), dtype=np.intp)
+        self._pending_moved_indices.clear()
+        self.__OnPointMovedEventListeners.invoke(self, indices)
+
     def FireOnChangeEvent(self):
-        """Calls every function registered to be notified when the transform changes."""
+        """Calls every function registered to be notified when the transform changes.
+
+        Notifications are coalesced: while one is already queued we do not queue another,
+        so a burst of changes (e.g. CTRL+scroll rotation firing one event per wheel notch)
+        results in a single listener pass against the latest transform state per event-loop
+        turn rather than one expensive pass (tile-buffer rebuild + lazy RBF solve) per notch.
+        """
 
         # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
-        #        Pool = pools.GetGlobalThreadPool()
-        # tlist = list()
         if QApplication.instance() is None:
             self.__OnChangeEventListeners.invoke(self)
-        else:
-            QTimer.singleShot(0, lambda: self.__OnChangeEventListeners.invoke(self))
-        #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
+            return
 
-        # for task in tlist:
-        # task.wait()
+        if self._change_event_pending:
+            return
+
+        self._change_event_pending = True
+        QTimer.singleShot(0, self._fire_pending_change_event)
+
+    def _fire_pending_change_event(self):
+        """Deliver the coalesced OnChange notification queued by FireOnChangeEvent."""
+        # Reset first so a change triggered *by* a listener queues a fresh pass instead of
+        # being dropped, and so an exception in a listener cannot leave the flag stuck.
+        self._change_event_pending = False
+        self.__OnChangeEventListeners.invoke(self)
 
     def FireOnTransformModelChangeEvent(self, old: nornir_imageregistration.ITransform,
                                         new: nornir_imageregistration.ITransform):
@@ -272,6 +395,7 @@ class TransformController:
         TransformController.debug_id += 1
 
         self.__OnChangeEventListeners = pyre.qt_eventmanager.QtEventManager[TransformChangedCallback]()
+        self.__OnPointMovedEventListeners = pyre.qt_eventmanager.QtEventManager[PointMovedCallback]()
         self.__OnTransformModelReplacedEventListeners = pyre.qt_eventmanager.QtEventManager[TransformModelChangedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
@@ -283,6 +407,15 @@ class TransformController:
 
         self.Debug = False
         self.ShowWarped = False
+        self._change_event_pending = False
+        self._point_moved_event_pending = False
+        self._interactive_edit_depth = 0
+        self._interactive_edit_space = None
+        self._rigid_matrix_at_edit_start = None
+        self._rigid_inverse_matrix_at_edit_start = None
+        self._pending_moved_indices = set()
+        self._tile_mesh_cache = TileMeshCpuCache()
+        self._full_refresh_needed = False
 
         # print("Create transform controller %d" % self._id)
 
@@ -343,10 +476,8 @@ class TransformController:
     def Rotate(self, rangle: float, center: NDArray[np.floating] | None = None):
         if isinstance(self._TransformModel, nornir_imageregistration.ITransformTargetRotation):
             self.TransformModel.RotateTargetPoints(-rangle, center)  # type: ignore[attr-defined]
-            self.FireOnChangeEvent()
         elif isinstance(self._TransformModel, nornir_imageregistration.ITransformSourceRotation):
             self.TransformModel.RotateSourcePoints(rangle, center)  # type: ignore[attr-defined]
-            self.FireOnChangeEvent()
         else:
             raise NotImplementedError("Current transform does not support rotation")
 
@@ -567,6 +698,10 @@ class TransformController:
                 # print(f'Dragged point {str(np_index)} {str(point)}')
 
         if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
-            return np.array([np_index], dtype=int)
+            result = np.array([np_index], dtype=int)
         else:
-            return np_index  # type: ignore[return-value]
+            result = np_index  # type: ignore[assignment]
+
+        if self.interactive_edit_in_progress:
+            self._record_point_moved(result)
+        return result

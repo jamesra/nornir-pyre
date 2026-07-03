@@ -10,8 +10,10 @@ import scipy.spatial
 import scipy.spatial.distance
 
 import nornir_imageregistration
+from nornir_imageregistration.transforms.base import IRigidTransform
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
 from pyre.space import Space
+from pyre.perf_debug import timed
 
 
 @dataclasses.dataclass
@@ -37,6 +39,9 @@ class TileGLObjects:
     vertex_buffer: GLBuffer
     index_buffer: GLIndexBuffer
     vao: DynamicVAO
+    cached_simplices: NDArray[np.integer] | None = None
+    point_count: int = 0
+    is_rigid_quad: bool = False
 
 
 RenderDataMap = dict[
@@ -117,6 +122,13 @@ def _points_to_numpy_f32(points: NDArray[np.floating]) -> NDArray[np.floating]:
     if cp.get_array_module(points) is cp:
         return np.asarray(cp.asnumpy(points), dtype=np.float32)
     return np.asarray(points, dtype=np.float32)
+
+
+def _point_pairs_to_numpy_f64(point_pairs: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Host float64 point pairs for scipy.Delaunay / OpenGL mesh build (CuPy -> NumPy)."""
+    if hasattr(point_pairs, 'get'):
+        point_pairs = point_pairs.get()  # type: ignore[union-attr]
+    return np.asarray(point_pairs, dtype=np.float64)
 
 
 def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
@@ -271,8 +283,7 @@ def _render_data_for_transform_point_pairs(point_pairs: NDArray[np.floating],
     :return: Verts3D, indices, Verts3d is Source (X,Y,Z), Target (X,Y,Z), Texture (U,V)
     """
     # Ensure numpy: transform may return CuPy arrays; scipy.Delaunay and np.vstack require numpy. OpenGL buffers need host memory.
-    point_pairs = point_pairs.get() if hasattr(point_pairs, "get") else point_pairs  # type: ignore[union-attr]
-    point_pairs = np.asarray(point_pairs, dtype=np.float64)
+    point_pairs = _point_pairs_to_numpy_f64(point_pairs)
 
     fixed_points_yx, warped_points_yx = np.hsplit(point_pairs, 2)
 
@@ -313,27 +324,293 @@ def _render_data_for_transform_point_pairs(point_pairs: NDArray[np.floating],
     return verts3d, indicies
 
 
+def is_rigid_transform(transform: nornir_imageregistration.ITransform) -> bool:
+    return isinstance(transform, IRigidTransform)
+
+
+def _rigid_tile_quad_render_data(tile_bounding_rect: nornir_imageregistration.Rectangle,
+                                 space: Space,
+                                 z: float | None = None) -> tuple[NDArray[np.floating], NDArray[np.uint16]]:
+    """Static two-triangle quad for a tile; warping is applied in the vertex shader for rigid transforms."""
+    (y, x) = tile_bounding_rect.BottomLeft
+    h = float(tile_bounding_rect.Height)
+    w = float(tile_bounding_rect.Width)
+    corners_yx = np.array([[y, x], [y, x + w], [y + h, x + w], [y + h, x]], dtype=np.float64)
+    texture_points = _texture_coordinates(corners_yx, tile_bounding_rect)
+    if z is not None:
+        z_array = np.ones((4, 1), dtype=np.float64) * z
+    else:
+        z_array = _z_values_for_points_by_texture(texture_points).reshape(-1, 1)
+    verts3d = np.hstack((
+        corners_yx[:, 1:2], corners_yx[:, 0:1], z_array,
+        corners_yx[:, 1:2], corners_yx[:, 0:1], z_array,
+        texture_points,
+    )).astype(np.float32)
+    indices = np.array([0, 1, 2, 0, 2, 3], dtype=np.uint16)
+    return verts3d, indices
+
+
+def _triangle_orientations(texture_points: NDArray[np.floating],
+                           simplices: NDArray[np.integer]) -> NDArray[np.floating]:
+    areas = []
+    for tri in simplices:
+        p = texture_points[tri]
+        areas.append((p[1, 0] - p[0, 0]) * (p[2, 1] - p[0, 1]) - (p[2, 0] - p[0, 0]) * (p[1, 1] - p[0, 1]))
+    return np.asarray(areas, dtype=np.float64)
+
+
+def _topology_still_valid(texture_points: NDArray[np.floating],
+                          simplices: NDArray[np.integer]) -> bool:
+    if simplices is None or simplices.size == 0:
+        return False
+    areas = _triangle_orientations(texture_points, simplices)
+    if areas.size == 0:
+        return False
+    signs = np.sign(areas)
+    if np.any(areas == 0):
+        return False
+    return bool(np.all(signs == signs[0]))
+
+
+def _edge_key(i: int, j: int) -> tuple[int, int]:
+    return (i, j) if i < j else (j, i)
+
+
+def _point_in_circumcircle(p: NDArray[np.floating],
+                           a: NDArray[np.floating],
+                           b: NDArray[np.floating],
+                           c: NDArray[np.floating]) -> bool:
+    """Return True if p lies inside the circumcircle of triangle abc."""
+    ax, ay = float(a[0] - p[0]), float(a[1] - p[1])
+    bx, by = float(b[0] - p[0]), float(b[1] - p[1])
+    cx, cy = float(c[0] - p[0]), float(c[1] - p[1])
+    det = (ax * ax + ay * ay) * (bx * cy - cx * by)
+    det -= (bx * bx + by * by) * (ax * cy - cx * ay)
+    det += (cx * cx + cy * cy) * (ax * by - bx * ay)
+    orient = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    if orient < 0:
+        det = -det
+    return det > 0
+
+
+def _repair_delaunay_by_edge_flips(texture_points: NDArray[np.floating],
+                                   simplices: NDArray[np.integer],
+                                   max_flips: int = 128) -> NDArray[np.integer] | None:
+    """Lawson edge-flip repair on a fixed point set; returns None if repair fails."""
+    simp = np.asarray(simplices, dtype=np.intp).copy()
+    flips = 0
+    changed = True
+    while changed and flips < max_flips:
+        changed = False
+        edge_to_tris: dict[tuple[int, int], list[int]] = {}
+        for ti, tri in enumerate(simp):
+            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+                edge_to_tris.setdefault(_edge_key(int(a), int(b)), []).append(ti)
+
+        for (i, j), tri_indices in edge_to_tris.items():
+            if len(tri_indices) != 2:
+                continue
+            t0, t1 = tri_indices
+            verts0 = set(int(v) for v in simp[t0])
+            verts1 = set(int(v) for v in simp[t1])
+            opp = list((verts0 ^ verts1) - {i, j})
+            if len(opp) != 2:
+                continue
+            k, l = opp
+            pi, pj, pk, pl = texture_points[i], texture_points[j], texture_points[k], texture_points[l]
+            if not (_point_in_circumcircle(pl, pi, pj, pk) or _point_in_circumcircle(pk, pi, pj, pl)):
+                continue
+            simp[t0] = np.array([k, l, i], dtype=np.intp)
+            simp[t1] = np.array([k, l, j], dtype=np.intp)
+            flips += 1
+            changed = True
+            break
+
+    if not _topology_still_valid(texture_points, simp):
+        return None
+    return simp
+
+
+def _render_data_with_cached_simplices(point_pairs: NDArray[np.floating],
+                                       tile_bounding_rect: nornir_imageregistration.Rectangle,
+                                       space: Space,
+                                       simplices: NDArray[np.integer],
+                                       z: float | None = None) -> NDArray[np.floating]:
+    point_pairs = _point_pairs_to_numpy_f64(point_pairs)
+    fixed_points_yx, warped_points_yx = np.hsplit(point_pairs, 2)
+    texture_points = _texture_coordinates(
+        warped_points_yx if space == Space.Source else fixed_points_yx,
+        bounding_rect=tile_bounding_rect)
+    if not _topology_still_valid(texture_points, simplices):
+        raise ValueError('topology invalid')
+    if z is not None:
+        z_array = np.ones((fixed_points_yx.shape[0], 1)) * z
+    else:
+        z_array = _z_values_for_points_by_texture(texture_points)
+    verts3d = np.vstack((fixed_points_yx[:, 1],
+                         fixed_points_yx[:, 0],
+                         z_array.flat,
+                         warped_points_yx[:, 1],
+                         warped_points_yx[:, 0],
+                         z_array.flat,
+                         texture_points[:, 0],
+                         texture_points[:, 1])).T.astype(np.float32)
+    return verts3d
+
+
+def tile_coords_for_control_points(image_height: int,
+                                   image_width: int,
+                                   texture_size: tuple[int, int],
+                                   point_indices: NDArray[np.integer],
+                                   transform: nornir_imageregistration.IControlPoints,
+                                   halo: int = 1) -> set[tuple[int, int]]:
+    """Return tile grid coordinates affected by moving the given control points."""
+    tile_h, tile_w = int(texture_size[0]), int(texture_size[1])
+    num_cols = int(np.ceil(image_width / float(tile_w)))
+    num_rows = int(np.ceil(image_height / float(tile_h)))
+    coords: set[tuple[int, int]] = set()
+    target_pts = nornir_imageregistration.EnsureNumpyArray(transform.TargetPoints)
+    for idx in np.atleast_1d(point_indices):
+        if idx < 0 or idx >= target_pts.shape[0]:
+            continue
+        y, x = target_pts[int(idx)]
+        ix = int(x // tile_w)
+        iy = int(y // tile_h)
+        for dx in range(-halo, halo + 1):
+            for dy in range(-halo, halo + 1):
+                cx, cy = ix + dx, iy + dy
+                if 0 <= cx < num_cols and 0 <= cy < num_rows:
+                    coords.add((cx, cy))
+    return coords
+
+
+def tile_coords_for_visible_bounds(image_height: int,
+                                   image_width: int,
+                                   texture_size: tuple[int, int],
+                                   visible_rect: nornir_imageregistration.Rectangle | None
+                                   ) -> set[tuple[int, int]] | None:
+    """Return tile coordinates intersecting visible_rect, or None to mean all tiles."""
+    if visible_rect is None:
+        return None
+    tile_h, tile_w = int(texture_size[0]), int(texture_size[1])
+    num_cols = int(np.ceil(image_width / float(tile_w)))
+    num_rows = int(np.ceil(image_height / float(tile_h)))
+    y0, x0 = visible_rect.BottomLeft
+    y1 = y0 + visible_rect.Height
+    x1 = x0 + visible_rect.Width
+    ix0 = max(0, int(np.floor(x0 / float(tile_w))))
+    ix1 = min(num_cols - 1, int(np.floor(max(x0, x1 - 1) / float(tile_w))))
+    iy0 = max(0, int(np.floor(y0 / float(tile_h))))
+    iy1 = min(num_rows - 1, int(np.floor(max(y0, y1 - 1) / float(tile_h))))
+    coords: set[tuple[int, int]] = set()
+    for ix in range(ix0, ix1 + 1):
+        for iy in range(iy0, iy1 + 1):
+            coords.add((ix, iy))
+    return coords
+
+
+def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
+                        grid_coords: tuple[int, int],
+                        texture_size: tuple[int, int],
+                        image_space: Space,
+                        cached_entry: TileGLObjects | None = None):
+    from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
+
+    if is_rigid_transform(transform):
+        ix, iy = grid_coords
+        x = texture_size[1] * ix
+        y = texture_size[0] * iy
+        tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+        verts, indices = _rigid_tile_quad_render_data(tile_bounding_rect, image_space)
+        return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
+                                point_count=4, is_rigid_quad=True)
+
+    vertarray, indices = _calculate_tile_render_data(transform, grid_coords, texture_size, image_space)
+    simplices = None
+    point_count = 0
+    if cached_entry is not None and cached_entry.cached_simplices is not None:
+        try:
+            ix, iy = grid_coords
+            x = texture_size[1] * ix
+            y = texture_size[0] * iy
+            tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+            all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
+            point_count = all_point_pairs.shape[0]
+            if point_count == cached_entry.point_count:
+                simplices = cached_entry.cached_simplices
+                vertarray = _render_data_with_cached_simplices(
+                    all_point_pairs, tile_bounding_rect, image_space, simplices)
+                indices = simplices.flatten().astype(np.uint16)
+                return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
+                                        point_count=point_count, is_rigid_quad=False)
+        except ValueError:
+            pass
+
+    ix, iy = grid_coords
+    x = texture_size[1] * ix
+    y = texture_size[0] * iy
+    tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+    all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
+    point_count = all_point_pairs.shape[0]
+    point_pairs_np = _point_pairs_to_numpy_f64(all_point_pairs)
+    fixed_points_yx, warped_points_yx = np.hsplit(point_pairs_np, 2)
+    texture_points = _texture_coordinates(
+        warped_points_yx if image_space == Space.Source else fixed_points_yx,
+        bounding_rect=tile_bounding_rect)
+
+    if cached_entry is not None and cached_entry.cached_simplices is not None:
+        repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
+        if repaired is not None:
+            try:
+                vertarray = _render_data_with_cached_simplices(
+                    all_point_pairs, tile_bounding_rect, image_space, repaired)
+                indices = repaired.flatten().astype(np.uint16)
+                return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
+                                        point_count=point_count, is_rigid_quad=False)
+            except ValueError:
+                pass
+
+    tri = scipy.spatial.Delaunay(texture_points)
+    simplices = tri.simplices.copy()
+    vertarray = _render_data_with_cached_simplices(
+        all_point_pairs, tile_bounding_rect, image_space, simplices)
+    indices = simplices.flatten().astype(np.uint16)
+    return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
+                            point_count=point_count, is_rigid_quad=False)
+
+
+def apply_tile_mesh_cpu(render_data: TileGLObjects, entry) -> None:
+    render_data.vertex_buffer.data = entry.vertices
+    render_data.index_buffer.data = entry.indices
+    render_data.cached_simplices = entry.simplices
+    render_data.point_count = entry.point_count
+    render_data.is_rigid_quad = entry.is_rigid_quad
+
+
 def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
                          grid_coords: tuple[int, int],
                          texture_size: tuple[int, int],
                          image_space: Space,
-                         get_or_create_tile_globjects: Callable[[int, int], TileGLObjects | None]):
+                         get_or_create_tile_globjects: Callable[[int, int], TileGLObjects | None],
+                         shared_cpu_entry: 'TileMeshCpuEntry | None' = None):
     """Create/Update the GL buffers for a given tile.
     :param get_or_create_tile_globjects: Function to get or create the TileGLObjects for a tile
+    :param shared_cpu_entry: Optional precomputed CPU mesh from TileMeshCpuCache
     """
-
-    vertarray, indicies = _calculate_tile_render_data(transform, grid_coords, texture_size, image_space)
-
-    if vertarray is None or vertarray.shape[0] == 0:
-        raise ValueError("No elements in vertex array object")
 
     ix, iy = grid_coords
     render_data = get_or_create_tile_globjects(ix, iy)
-    # Skip if render_data is None (shaders not initialized yet)
     if render_data is None:
         return
-    render_data.vertex_buffer.data = vertarray
-    render_data.index_buffer.data = indicies
+
+    with timed(f'tile_buffer ({ix},{iy})'):
+        if shared_cpu_entry is not None:
+            apply_tile_mesh_cpu(render_data, shared_cpu_entry)
+            return
+
+        from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
+        entry = build_tile_mesh_cpu(transform, grid_coords, texture_size, image_space, cached_entry=render_data)
+        apply_tile_mesh_cpu(render_data, entry)
 
 
 def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,

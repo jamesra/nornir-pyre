@@ -80,6 +80,7 @@ class TransformControllerView:
         self._controlpoint_view = None
         self._transform_controller = transform_controller
         self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)  # type: ignore[union-attr]
+        self._transform_controller.AddOnPointMovedEventListener(self._OnPointMoved)  # type: ignore[union-attr]
         self._transform_controller.AddOnModelReplacedEventListener(self._OnTransformModelReplaced)  # type: ignore[union-attr]
         self._initialized = False
         self._gl_context_manager.add_glcontext_added_event_listener(self.create_objects)
@@ -146,14 +147,25 @@ class TransformControllerView:
     def _OnTransformControllerChange(self, new_transform_controller: pyre.controllers.TransformController | None):
         if self._transform_controller is not None:
             self._transform_controller.RemoveOnChangeEventListener(self._OnTransformChange)
+            self._transform_controller.RemoveOnPointMovedEventListener(self._OnPointMoved)
 
         self._transform_controller = new_transform_controller
 
         if self._transform_controller is not None:
             self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)
+            self._transform_controller.AddOnPointMovedEventListener(self._OnPointMoved)
 
-    def _OnTransformChange(self, *args, **kwargs):
+    def _OnPointMoved(self, controller: TransformController, indices: NDArray[np.integer]):
+        """Update control point GL buffer during drag without a full transform refresh."""
         if self._controlpoint_view is None:
+            return
+        self._controlpoint_view.points = controller.points
+
+    def _OnTransformChange(self, controller: TransformController | None = None, *args, **kwargs):
+        if self._controlpoint_view is None:
+            return
+        tc = controller if controller is not None else self._transform_controller
+        if tc is not None and tc.interactive_edit_in_progress:
             return
 
         tc_points = self._transform_controller.points  # type: ignore[union-attr]

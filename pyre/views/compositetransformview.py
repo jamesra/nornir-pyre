@@ -17,6 +17,7 @@ from pyre.interfaces.action import Action
 from pyre.interfaces.managers import IImageViewModelManager
 from pyre.space import Space
 from pyre.controllers.transformcontroller import TransformController
+from pyre.perf_debug import timed
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 import pyre.qt_eventmanager
@@ -317,103 +318,110 @@ class CompositeTransformView(IImageTransformView):
         # 1. Render each image to a FrameBufferObject
         # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
         if self._source_image_view is not None and self._target_image_view is not None:
+            interactive = self._transform_controller.interactive_edit_in_progress
+            if interactive:
+                show_mesh_lines = False
 
-            height, width = client_size
+            with timed('composite_transform_draw'):
+                height, width = client_size
+
+                source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
+                # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
+                raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
             
-            source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
-            # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
-            raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
+                # Set viewport to match framebuffer size
+                gl.glViewport(0, 0, width, height)
+                raise_on_error("after glViewport(source) in compositetransformview.draw")
+
+                # Use glClearDepthf (not glClearDepth) - QOpenGLFunctions_4_1_Core uses the 'f' suffix
+                gl.glClearDepthf(10000.0)
+                raise_on_error("after glClearDepthf(source) in compositetransformview.draw")
+                gl.glClearColor(0, 0.1, 0, 1)
+                raise_on_error("after glClearColor(source) in compositetransformview.draw")
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
+                raise_on_error("after glClear(source) in compositetransformview.draw")
+
+                # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
+                # target space and aligns with the target image in the composite overlay.
+                self._source_image_view.draw(view_proj, space, client_size, bounding_box,
+                                             show_mesh_lines=show_mesh_lines,
+                                             rigid_composite_fixed_align=True,
+                                             force_live_rigid_matrix=interactive)
+
+                target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
+                # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(target_fbo))
+                raise_on_error("after glBindFramebuffer(target) in compositetransformview.draw")
             
-            # Set viewport to match framebuffer size
-            gl.glViewport(0, 0, width, height)
-            raise_on_error("after glViewport(source) in compositetransformview.draw")
+                # Set viewport to match framebuffer size
+                gl.glViewport(0, 0, width, height)
+                raise_on_error("after glViewport(target) in compositetransformview.draw")
 
-            # Use glClearDepthf (not glClearDepth) - QOpenGLFunctions_4_1_Core uses the 'f' suffix
-            gl.glClearDepthf(10000.0)
-            raise_on_error("after glClearDepthf(source) in compositetransformview.draw")
-            gl.glClearColor(0, 0.1, 0, 1)
-            raise_on_error("after glClearColor(source) in compositetransformview.draw")
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
-            raise_on_error("after glClear(source) in compositetransformview.draw")
+                # Use raw OpenGL for clear operations
+                gl.glClearDepthf(10000.0)
+                raise_on_error("after glClearDepthf(target) in compositetransformview.draw")
+                gl.glClearColor(0, 0.1, 0, 1)
+                raise_on_error("after glClearColor(target) in compositetransformview.draw")
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
+                raise_on_error("after glClear(target) in compositetransformview.draw")
 
-            # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
-            # target space and aligns with the target image in the composite overlay.
-            self._source_image_view.draw(view_proj, space, client_size, bounding_box,
-                                         show_mesh_lines=show_mesh_lines)
+                self._target_image_view.draw(view_proj, space, client_size, bounding_box,
+                                             show_mesh_lines=show_mesh_lines,
+                                             force_live_rigid_matrix=interactive)
 
-            target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
-            # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(target_fbo))
-            raise_on_error("after glBindFramebuffer(target) in compositetransformview.draw")
+                # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
+                # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
+                draw_fbo = int(default_fbo) if default_fbo is not None else 0
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, draw_fbo)
+                raise_on_error("after glBindFramebuffer(draw target) in compositetransformview.draw")
             
-            # Set viewport to match framebuffer size
-            gl.glViewport(0, 0, width, height)
-            raise_on_error("after glViewport(target) in compositetransformview.draw")
-
-            # Use raw OpenGL for clear operations
-            gl.glClearDepthf(10000.0)
-            raise_on_error("after glClearDepthf(target) in compositetransformview.draw")
-            gl.glClearColor(0, 0.1, 0, 1)
-            raise_on_error("after glClearColor(target) in compositetransformview.draw")
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
-            raise_on_error("after glClear(target) in compositetransformview.draw")
-
-            self._target_image_view.draw(view_proj, space, client_size, bounding_box,
-                                         show_mesh_lines=show_mesh_lines)
-
-            # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
-            # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
-            draw_fbo = int(default_fbo) if default_fbo is not None else 0
-            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, draw_fbo)
-            raise_on_error("after glBindFramebuffer(draw target) in compositetransformview.draw")
+                # Viewport must match resizeGL (physical pixels) so the overlay fills the widget after resize/hi-DPI.
+                # Otherwise we only draw to logical size and the top/right stay green.
+                ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
+                gl.glViewport(0, 0, ov_w, ov_h)
+                raise_on_error("after glViewport(restore) in compositetransformview.draw")
             
-            # Viewport must match resizeGL (physical pixels) so the overlay fills the widget after resize/hi-DPI.
-            # Otherwise we only draw to logical size and the top/right stay green.
-            ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
-            gl.glViewport(0, 0, ov_w, ov_h)
-            raise_on_error("after glViewport(restore) in compositetransformview.draw")
-            
-            # OK, we have two textures with the rendered+transformed images of source and target images.
-            # Inject textures into an overlay renderer and blend the images
-            # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
-            #                                                                -1, 1,
-            #                                                                -1, 1)
+                # OK, we have two textures with the rendered+transformed images of source and target images.
+                # Inject textures into an overlay renderer and blend the images
+                # ortho_projection = pyre.ui.camera.Camera.orthogonal_projection(-1, 1,
+                #                                                                -1, 1,
+                #                                                                -1, 1)
 
-            # Use identity so the full-screen quad (vertices in [-1,1]) is drawn 1:1 in NDC and fills the viewport.
-            # A non-identity scale (e.g. 2.0) would clip the quad and show only a central rectangle that can
-            # appear to move at a different rate than the intended overlay.
-            ortho_projection = np.identity(4, dtype=np.float32)
+                # Use identity so the full-screen quad (vertices in [-1,1]) is drawn 1:1 in NDC and fills the viewport.
+                # A non-identity scale (e.g. 2.0) would clip the quad and show only a central rectangle that can
+                # appear to move at a different rate than the intended overlay.
+                ortho_projection = np.identity(4, dtype=np.float32)
 
-            # Validate framebuffer textures are valid
-            if self._source_frame_buffer.fbo_texture == 0 or self._target_frame_buffer.fbo_texture == 0:
-                print(f"Warning: Invalid framebuffer textures - source: {self._source_frame_buffer.fbo_texture}, target: {self._target_frame_buffer.fbo_texture}")
-                return
+                # Validate framebuffer textures are valid
+                if self._source_frame_buffer.fbo_texture == 0 or self._target_frame_buffer.fbo_texture == 0:
+                    print(f"Warning: Invalid framebuffer textures - source: {self._source_frame_buffer.fbo_texture}, target: {self._target_frame_buffer.fbo_texture}")
+                    return
             
-            # Ensure overlay shader is initialized in this context (e.g. composite context added after first).
-            # OverlayShader.initialized is a regular method (not a @property) - must call it with ().
-            if not shaders.overlay_shader.initialized():
+                # Ensure overlay shader is initialized in this context (e.g. composite context added after first).
+                # OverlayShader.initialized is a regular method (not a @property) - must call it with ().
+                if not shaders.overlay_shader.initialized():
+                    try:
+                        shaders.overlay_shader.initialize_gl_objects()
+                    except Exception:
+                        pass
+                if not shaders.overlay_shader.initialized():
+                    return
+
+                # Depth test is only needed for tile overlap (Fixed/Warped). For the composite overlay
+                # we draw a single full-screen blend on top, so disable depth so it always draws on top.
+                gl.glDisable(gl.GL_DEPTH_TEST)
+                gl.glDepthMask(gl.GL_FALSE)
                 try:
-                    shaders.overlay_shader.initialize_gl_objects()
-                except Exception:
-                    pass
-            if not shaders.overlay_shader.initialized():
-                return
-
-            # Depth test is only needed for tile overlap (Fixed/Warped). For the composite overlay
-            # we draw a single full-screen blend on top, so disable depth so it always draws on top.
-            gl.glDisable(gl.GL_DEPTH_TEST)
-            gl.glDepthMask(gl.GL_FALSE)
-            try:
-                shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
-                                            source_texture=self._source_frame_buffer.fbo_texture,
-                                            target_texture=self._target_frame_buffer.fbo_texture,
-                                            overlay_type=shaders.OverlayType.Tween,
-                                            source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
-                                            target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
-            finally:
-                gl.glDepthMask(gl.GL_TRUE)
-                gl.glEnable(gl.GL_DEPTH_TEST)
+                    shaders.overlay_shader.draw(model_view_proj_matrix=ortho_projection,
+                                                source_texture=self._source_frame_buffer.fbo_texture,
+                                                target_texture=self._target_frame_buffer.fbo_texture,
+                                                overlay_type=shaders.OverlayType.Tween,
+                                                source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
+                                                target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
+                finally:
+                    gl.glDepthMask(gl.GL_TRUE)
+                    gl.glEnable(gl.GL_DEPTH_TEST)
 
         elif self._source_image_view is not None:
             self._source_image_view.draw(view_proj, space, client_size, bounding_box,

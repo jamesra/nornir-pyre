@@ -225,7 +225,12 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     center = area / 2.0
                     world_center = self.camera.ImageCoordsForMouse(center[0], center[1])
 
-                    self._transform_controller.Rotate(rangle, world_center)
+                    self._transform_controller.begin_interactive_edit(self.space)
+                    try:
+                        self._transform_controller.Rotate(rangle, world_center)
+                    finally:
+                        self._transform_controller.end_interactive_edit()
+                    self.parent.update()
                 except NotImplementedError:
                     print("Current transform does not support rotation")
                     pass
