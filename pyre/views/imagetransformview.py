@@ -352,8 +352,7 @@ class ImageTransformView(IImageTransformView):
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
              show_mesh_lines: bool = False,
-             rigid_composite_fixed_align: bool = False,
-             force_live_rigid_matrix: bool = False):
+             rigid_composite_fixed_align: bool = False):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param view_proj:
@@ -372,8 +371,7 @@ class ImageTransformView(IImageTransformView):
                                   space=space,
                                   bounding_box=bounding_box,
                                   show_mesh_lines=show_mesh_lines,
-                                  rigid_composite_fixed_align=rigid_composite_fixed_align,
-                                  force_live_rigid_matrix=force_live_rigid_matrix)
+                                  rigid_composite_fixed_align=rigid_composite_fixed_align)
 
     def _draw_imageviewmodel(self,
                              view_proj: NDArray[np.floating],
@@ -381,8 +379,7 @@ class ImageTransformView(IImageTransformView):
                              space: pyre.Space,
                              bounding_box: nornir_imageregistration.Rectangle | None = None,
                              show_mesh_lines: bool = False,
-                             rigid_composite_fixed_align: bool = False,
-                             force_live_rigid_matrix: bool = False):
+                             rigid_composite_fixed_align: bool = False):
 
         if image_viewmodel is None:
             return
@@ -408,17 +405,40 @@ class ImageTransformView(IImageTransformView):
         rigid_inverse = None
         use_rigid_path = False
         rigid_native_is_warped = self._image_space == Space.Target
+        rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
+        rigid_warped_display_angle = 0.0
+        rigid_warped_rotation_pivot_yx = np.zeros(2, dtype=np.float32)
+        tc = self._transform_controller
         if use_rigid:
             rigid_forward, rigid_inverse = shaders.texture_shader.rigid_matrices_from_transform(self.transform)  # type: ignore[union-attr]
             use_rigid_path = True
-            tc = self._transform_controller
-            if (not force_live_rigid_matrix
-                    and tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None
-                    and self._image_space != tc.interactive_edit_space
-                    and tc.rigid_matrix_at_edit_start is not None
-                    and tc.rigid_inverse_matrix_at_edit_start is not None):
-                rigid_forward = tc.rigid_matrix_at_edit_start
-                rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
+
+            # Warped standalone: tile corners are native; show registration offset as persistent shift.
+            if (rigid_native_is_warped and not rigid_composite_fixed_align
+                    and tc is not None and tc.rigid_warped_display_baseline is not None):
+                offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
+                rigid_interactive_native_shift = (
+                    offset - tc.rigid_warped_display_baseline).astype(np.float32, copy=False)
+                rigid_warped_display_angle = float(tc.rigid_warped_display_angle)
+                pivot = tc.rigid_warped_rotation_pivot
+                if pivot is not None:
+                    rigid_warped_rotation_pivot_yx = np.asarray(pivot, dtype=np.float32)
+
+            if tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None:
+                if self._image_space != tc.interactive_edit_space:
+                    if (tc.rigid_matrix_at_edit_start is not None
+                            and tc.rigid_inverse_matrix_at_edit_start is not None):
+                        rigid_forward = tc.rigid_matrix_at_edit_start
+                        rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
+                elif (tc.interactive_edit_space == Space.Target
+                      and not rigid_composite_fixed_align
+                      and tc.rigid_matrix_at_edit_start is not None
+                      and tc.rigid_inverse_matrix_at_edit_start is not None):
+                    rigid_forward = tc.rigid_matrix_at_edit_start
+                    rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
+        else:
+            rigid_forward = None
+            rigid_inverse = None
 
         visible = gltiles.tile_coords_for_visible_bounds(
             image_viewmodel.height, image_viewmodel.width,
@@ -448,7 +468,10 @@ class ImageTransformView(IImageTransformView):
                                                 rigid_source_to_target=rigid_forward,
                                                 rigid_target_to_source=rigid_inverse,
                                                 rigid_native_is_warped=rigid_native_is_warped,
-                                                rigid_fixed_warped_into_target=rigid_composite_fixed_align)
+                                                rigid_fixed_warped_into_target=rigid_composite_fixed_align,
+                                                rigid_interactive_native_shift=rigid_interactive_native_shift,
+                                                rigid_warped_display_angle=rigid_warped_display_angle,
+                                                rigid_warped_rotation_pivot_yx=rigid_warped_rotation_pivot_yx)
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

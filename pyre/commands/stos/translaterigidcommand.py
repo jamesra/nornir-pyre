@@ -5,7 +5,7 @@ import numpy as np
 from numpy._typing import NDArray
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QMouseEvent, QKeyEvent
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 
 import nornir_imageregistration
 from nornir_imageregistration import IRigidTransform
@@ -17,6 +17,7 @@ from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
+from pyre.transform_edit_policy import fixed_image_manipulation_locked
 
 
 class ManipulateRigidTransformCommand(NavigationCommandBase):
@@ -126,6 +127,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
+        if fixed_image_manipulation_locked(
+                self._transform_controller.type, self.space, self._view_type()):
+            return
+
         keycode = event.key()
 
         if (keycode == Qt.Key.Key_Left or
@@ -167,11 +172,15 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
+        if fixed_image_manipulation_locked(
+                self._transform_controller.type, self.space, self._view_type()):
+            self.cancel()
+            return
         self._transform_controller.begin_interactive_edit(self.space)
 
-    def on_mouse_scroll(self, event: QMouseEvent):
-        """Called when the mouse wheel is scrolled"""
-        pass
+    def on_mouse_scroll(self, event: QWheelEvent):
+        """Delegate zoom/rotate to navigation while a translate drag is active."""
+        NavigationCommandBase.on_mouse_scroll(self, event)
 
     def on_key_up(self, event: QKeyEvent):
         """Called when a key is released"""

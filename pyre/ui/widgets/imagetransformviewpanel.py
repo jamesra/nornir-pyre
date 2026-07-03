@@ -11,9 +11,9 @@ import PyQt6.QtGui
 import numpy as np
 
 import OpenGL.GL as gl
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QWheelEvent, QMouseEvent
+from PyQt6.QtGui import QWheelEvent, QMouseEvent, QResizeEvent
 
 from dependency_injector.wiring import Provide
 from dependency_injector.providers import Factory, Dict
@@ -42,6 +42,7 @@ from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
+from pyre.transform_edit_policy import fixed_image_manipulation_locked
 
 
 @dataclass
@@ -82,6 +83,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _imagename_space_mapping: dict[str, Space]  # Maps an image name to a space
 
     _transform_controller_view: TransformControllerView | None
+
+    _fixed_layer_hint: QLabel | None = None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
 
@@ -201,6 +204,34 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
 
+        if self._view_type == ViewType.Source and self._space == Space.Source:
+            self._fixed_layer_hint = QLabel(self)
+            self._fixed_layer_hint.setText("Fixed image — translate/rotate warped layer in Warped or Composite view")
+            self._fixed_layer_hint.setStyleSheet(
+                "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
+            self._fixed_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._fixed_layer_hint.hide()
+            self._update_fixed_layer_hint()
+
+    def _update_fixed_layer_hint(self) -> None:
+        """Show a corner hint when rigid/grid transforms lock fixed-layer manipulation."""
+        if self._fixed_layer_hint is None:
+            return
+        if fixed_image_manipulation_locked(
+                self._transform_controller.type, self._space, self._view_type):
+            self._fixed_layer_hint.adjustSize()
+            self._fixed_layer_hint.move(8, 8)
+            self._fixed_layer_hint.show()
+            self._fixed_layer_hint.raise_()
+        else:
+            self._fixed_layer_hint.hide()
+
+    def on_resize(self, event: QResizeEvent) -> None:
+        """Handle resize and keep the fixed-layer hint anchored."""
+        super().on_resize(event)
+        if self._fixed_layer_hint is not None and self._fixed_layer_hint.isVisible():
+            self._fixed_layer_hint.move(8, 8)
+
     def __del__(self):
         try:
             self._imageviewmodel_manager.remove_change_event_listener(self.on_imageviewmodelmanager_change)
@@ -218,6 +249,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                     new: ITransform):
         """Called when the model in the transform controller changes.  This is not called when the
         transform is modified, only when the model is replaced"""
+        self._update_fixed_layer_hint()
         # Cancel the active command
         if self._command is None:
             return
@@ -250,6 +282,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._command.add_completed_callback(self.activate_command)
         # Do not print here (e.g. "Activating command: ...") - reduces console noise
         self._command.activate()
+        self._update_fixed_layer_hint()
 
     def on_imageviewmodelmanager_change(self,
                                         name: str,
@@ -404,13 +437,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             default_fbo = self._glpanel.defaultFramebufferObject()
             ratio = self._glpanel.devicePixelRatio()
             overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
-            self._image_transform_view.draw(self.camera.view_proj,
-                                            space=self.space,
-                                            client_size=(gl_h, gl_w),
-                                            bounding_box=bounding_box,
-                                            default_fbo=default_fbo,
-                                            overlay_viewport_size=overlay_viewport_size,
-                                            show_mesh_lines=self.show_lines)
+            draw_kwargs: dict[str, object] = {
+                "space": self.space,
+                "client_size": (gl_h, gl_w),
+                "bounding_box": bounding_box,
+                "default_fbo": default_fbo,
+                "overlay_viewport_size": overlay_viewport_size,
+                "show_mesh_lines": self.show_lines,
+            }
+            self._image_transform_view.draw(self.camera.view_proj, **draw_kwargs)
 
             ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 

@@ -23,6 +23,8 @@ from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
 from pyre.container import IContainer
+from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre.interfaces.viewtype import ViewType
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
 
@@ -90,6 +92,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         if isinstance(cand, imagetransformviewpanel_module.ImageTransformViewPanel):
             return cand
         return None
+
+    def _view_type(self) -> ViewType | None:
+        """View type for the STOS panel hosting this command, if known."""
+        panel = self._stos_image_panel()
+        return panel.view_type if panel is not None else None
 
     @staticmethod
     def ParamToMousePosition(e: QMouseEvent | QWheelEvent | tuple[float, float]) -> tuple[float, float]:
@@ -202,6 +209,12 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             # Divide by 120 to get a similar scale to wx's GetWheelRotation
             scroll_y = e.angleDelta().y() / 120.0
 
+            # Keep camera pixel geometry aligned with the GL panel for zoom/rotate-to-cursor.
+            panel_w, panel_h = self.parent.size().width(), self.parent.size().height()
+            if panel_w > 0 and panel_h > 0:
+                self._width, self._height = panel_w, panel_h
+                self.camera.window_size = np.array((panel_h, panel_w))
+
             if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and (
                     e.modifiers() & Qt.KeyboardModifier.AltModifier) and isinstance(
                     self._transform_controller.TransformModel,
@@ -209,31 +222,50 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 self._transform_controller.TransformModel.ScaleWarped(scale_delta)
             elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # We rotate when command is down
-                angle = float(abs(scroll_y) * 2) ** 2.0
-                if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                    angle = float(abs(scroll_y) / 2) ** 2.0
-
-                rangle = (angle / 180.0) * 3.14159
-                if scroll_y < 0:
-                    rangle = -rangle
-
-                # print "Angle: " + str(angle)
-                try:
-                    width, height = self.parent.size().width(), self.parent.size().height()
-
-                    area = np.array([height, width])
-                    center = area / 2.0
-                    world_center = self.camera.ImageCoordsForMouse(center[0], center[1])
-
-                    self._transform_controller.begin_interactive_edit(self.space)
-                    try:
-                        self._transform_controller.Rotate(rangle, world_center)
-                    finally:
-                        self._transform_controller.end_interactive_edit()
-                    self.parent.update()
-                except NotImplementedError:
-                    print("Current transform does not support rotation")
+                if fixed_image_manipulation_locked(
+                        self._transform_controller.type, self.space, self._view_type()):
                     pass
+                else:
+                    angle = float(abs(scroll_y) * 2) ** 2.0
+                    if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        angle = float(abs(scroll_y) / 2) ** 2.0
+
+                    rangle = (angle / 180.0) * 3.14159
+                    if scroll_y < 0:
+                        rangle = -rangle
+
+                    # print "Angle: " + str(angle)
+                    try:
+                        world_center = np.asarray(self.get_space_position(e), dtype=np.float32)
+
+                        self._transform_controller.begin_interactive_edit(self.space)
+                        try:
+                            self._transform_controller.Rotate(rangle, world_center, space=self.space)
+                        finally:
+                            self._transform_controller.end_interactive_edit()
+                        self.parent.update()
+                        # #region agent log
+                        import json as _json, time as _time
+                        try:
+                            with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
+                                _f.write(_json.dumps({
+                                    "sessionId": "203327", "hypothesisId": "R",
+                                    "location": "navigationcommandbase.py:on_mouse_scroll",
+                                    "message": "rotate applied",
+                                    "data": {
+                                        "space": self.space.name,
+                                        "view_type": self._view_type().value if self._view_type() else None,
+                                        "rangle": float(rangle),
+                                        "center_yx": [float(world_center[0]), float(world_center[1])],
+                                    },
+                                    "timestamp": int(_time.time() * 1000),
+                                }) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
+                    except NotImplementedError:
+                        print("Current transform does not support rotation")
+                        pass
 
                 # if isinstance(self._transform_controller.TransformModel, nornir_imageregistration.ITransformTargetRotation):
                 #     self._transform_controller.TransformModel.RotateTargetPoints(-rangle,
@@ -249,12 +281,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             else:
                 zdelta = (1 + (scroll_y / 40))
 
-                # Use current parent size so zoom-to-cursor is correct on all panels (fixed/composite/warped).
-                # Command dimensions can be stale if resize fired before glpanel was laid out.
-                self._width, self._height = self.parent.size().width(), self.parent.size().height()
-
                 mouse_position = self.get_world_positions(e)
-                screen_center = self.get_world_positions((self.height / 2, self.width / 2))
 
                 new_scale = self.camera.scale * zdelta
                 max_image_dimension_value = max(self._bounds.Width, self._bounds.Height)
@@ -274,8 +301,27 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
 
-                # print(
-                #    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
+                # #region agent log
+                import json as _json, time as _time
+                try:
+                    with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({
+                            "sessionId": "203327", "hypothesisId": "Z",
+                            "location": "navigationcommandbase.py:on_mouse_scroll",
+                            "message": "zoom applied",
+                            "data": {
+                                "space": self.space.name,
+                                "view_type": self._view_type().value if self._view_type() else None,
+                                "scroll_y": float(scroll_y),
+                                "new_scale": float(self.camera.scale),
+                            },
+                            "timestamp": int(_time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+
+                self.parent.update()
                 self._last_mouse_position = mouse_y, mouse_x
         finally:
             e.accept()

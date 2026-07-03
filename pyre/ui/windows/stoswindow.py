@@ -17,12 +17,15 @@ from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
 from pyre.interfaces.managers import ICommandHistory, IImageManager, IImageViewModelManager, IImageLoader
+from pyre.interfaces.managers.window_manager import IWindowManager
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.named_tuples import LoadStosResult
 import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
+from pyre.ui.windows.help_dialog import ControlsHelpDialog
+from pyre.ui.window_geometry import apply_saved_browser_geometry
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
 from pyre.observable import ObservableSet
@@ -77,7 +80,7 @@ class StosWindow(PyreWindowBase):
         super(StosWindow, self).__init__(parent=parent, windowID=window_id, title=title)
 
         self._transform_controller = transform_controller
-        self._space = Space.Source if view_type == ViewType.Source else Space.Target
+        self._space = Space.Source if view_type in (ViewType.Source, ViewType.Composite) else Space.Target
         self._view_type = view_type
 
         self.FixedImageFullPath = None
@@ -113,9 +116,25 @@ class StosWindow(PyreWindowBase):
         # Add drag and drop support
         self.file_drop = FileDrop(self)
 
-        # Show the window and set position
+        # Show the window
         self.show()
-        self.setPosition()
+
+    @classmethod
+    def sync_window_visibility_menus(cls, window_manager: IWindowManager) -> None:
+        """Update Windows menu checkmarks to match each view's visibility."""
+        try:
+            source_visible = window_manager[ViewType.Source].isVisible()
+            target_visible = window_manager[ViewType.Target].isVisible()
+            composite_visible = window_manager[ViewType.Composite].isVisible()
+        except KeyError:
+            return
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            win = window_manager[view_type]
+            if not isinstance(win, StosWindow):
+                continue
+            win.menuShowFixedImage.setChecked(target_visible)  # type: ignore[union-attr]
+            win.menuShowWarpedImage.setChecked(source_visible)  # type: ignore[union-attr]
+            win.menuShowCompositeImage.setChecked(composite_visible)  # type: ignore[union-attr]
 
     def createMenu(self):
         """Create the menu bar and menus"""
@@ -221,7 +240,7 @@ class StosWindow(PyreWindowBase):
 
         menu.addSeparator()
 
-        menuInstructions = menu.addAction("&Keyboard Instructions")
+        menuInstructions = menu.addAction("&Mouse and Keyboard Help")
         menuInstructions.triggered.connect(self.onInstructions)  # type: ignore[union-attr]
 
         menuClearMasked = menu.addAction("&Clear All Masked points")
@@ -325,8 +344,8 @@ class StosWindow(PyreWindowBase):
         self._window_manager[ViewType.Source.value].setPosition()  # type: ignore[attr-defined]
 
     def onInstructions(self):
-        """Handle Keyboard Instructions action"""
-        QMessageBox.information(self, "Keyboard Instructions", self._config["readme"])
+        """Open scrollable help scrolled to mouse and keyboard controls."""
+        ControlsHelpDialog(self, self._config["readme"]).exec()
 
     def onClearAllPoints(self):
         """Handle Clear All Points action"""
@@ -536,28 +555,87 @@ class StosWindow(PyreWindowBase):
                 filename = selected_files[0]
                 self.dirname = os.path.dirname(filename)
                 StosWindow.stosfilename = os.path.basename(filename)
-                self.loadStos(filename)
+                self.loadStos(filename, browser_folder=None, browser_flat_manual=False)
                 if StosWindow._folder_browser is not None:
                     StosWindow._folder_browser.set_current_file(filename)
 
+    @classmethod
+    def _ensure_folder_browser(cls) -> 'StosFileBrowserWindow':
+        """Create the shared folder browser window if needed."""
+        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+        if cls._folder_browser is None:
+            cls._folder_browser = StosFileBrowserWindow(parent=None)
+        return cls._folder_browser
+
+    @classmethod
+    def show_folder_browser(cls, anchor_window: 'StosWindow | None' = None,
+                            settings: AppSettings | None = None) -> None:
+        """Show the shared folder browser and optionally dock it beside the composite view."""
+        browser = cls._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        browser.activateWindow()
+        if settings is None and anchor_window is not None:
+            settings = anchor_window._settings
+        if settings is not None and apply_saved_browser_geometry(settings, browser, force_visible=True):
+            return
+        if anchor_window is not None:
+            anchor_window._position_folder_browser_beside_composite()
+
+    @classmethod
+    def open_folder_browser_if_cached_folder_exists(
+            cls,
+            settings: AppSettings,
+            anchor_window: 'StosWindow',
+            *,
+            geometry_restored: bool = False,
+    ) -> None:
+        """Show the browser at startup when a saved folder path still exists."""
+        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+        if not StosFileBrowserWindow.has_cached_folder(settings):
+            return
+        browser = cls._ensure_folder_browser()
+        last_loaded = settings.stos.stos_fullpath
+        if last_loaded:
+            browser.set_current_file(last_loaded)
+        browser.show()
+        browser.raise_()
+        if apply_saved_browser_geometry(settings, browser, force_visible=True):
+            return
+        if not geometry_restored:
+            anchor_window._position_folder_browser_beside_composite()
+
     def onOpenStosFolderBrowser(self):
         """Show (or create) the Stos Folder Browser window."""
-        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
-        if StosWindow._folder_browser is None:
-            StosWindow._folder_browser = StosFileBrowserWindow(parent=None)
-        StosWindow._folder_browser.show()
-        StosWindow._folder_browser.raise_()
-        StosWindow._folder_browser.activateWindow()
+        StosWindow.show_folder_browser(anchor_window=self)
+
+    @classmethod
+    def close_folder_browser(cls) -> None:
+        """Close the shared Stos file browser window, if it is open."""
+        browser = cls._folder_browser
+        if browser is None:
+            return
+        browser.close()
+        cls._folder_browser = None
+
+    def onExit(self):
+        """Close the file browser, then exit the application."""
+        StosWindow.close_folder_browser()
+        super().onExit()
 
     @staticmethod
     def loadStos(filename: str,
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
                      StosContainer.transform_controller],
-                 settings: AppSettings = Provide[IContainer.settings]) -> LoadStosResult | None:
+                 settings: AppSettings = Provide[IContainer.settings],
+                 browser_folder: str | None = None,
+                 browser_flat_manual: bool = False) -> LoadStosResult | None:
         try:
             load_result = image_loader.load_stos(filename)
             settings.stos.stos_filename = filename
+            settings.stos.stos_opened_from_browser_folder = browser_folder
+            settings.stos.stos_browser_flat_manual = browser_flat_manual
             transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
             stos_transform_controller.TransformModel = transform
 
@@ -620,6 +698,14 @@ class StosWindow(PyreWindowBase):
                 dirname = os.getcwd()
                 filename = None
 
+            browser_folder = self._settings.stos.stos_opened_from_browser_folder
+            if browser_folder:
+                from pyre.stos_manual_paths import ensure_manual_directory
+                if self._settings.stos.stos_browser_flat_manual:
+                    dirname = browser_folder
+                else:
+                    dirname = ensure_manual_directory(browser_folder)
+
             dialog = QFileDialog(self)
             dialog.setWindowTitle("Choose a Directory")
             dialog.setDirectory(dirname)
@@ -642,5 +728,8 @@ class StosWindow(PyreWindowBase):
                             self._settings.stos.target_image.mask_fullpath,  # type: ignore[union-attr]
                             self._settings.stos.source_image.mask_fullpath, )  # type: ignore[union-attr]
                         stosObj.Save(fullpath)
+                        if StosWindow._folder_browser is not None:
+                            StosWindow._folder_browser.rescan()
+                            StosWindow._folder_browser.set_current_file(fullpath)
                 except ValueError:
                     prettyoutput.LogErr(f"Error saving stos file {fullpath}")

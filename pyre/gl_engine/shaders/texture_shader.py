@@ -17,6 +17,9 @@ _texture_vertex_shader_program = """
         uniform float rigid_fixed_warped_into_target;
         uniform mat3 rigid_source_to_target;
         uniform mat3 rigid_target_to_source;
+        uniform vec2 rigid_interactive_native_shift;
+        uniform float rigid_warped_display_angle;
+        uniform vec2 rigid_warped_rotation_pivot_yx;
         uniform mat4 model_view_projection_matrix;
         out vec2 frag_texture_coordinate;
         in vec3 vertex_source_position;
@@ -45,6 +48,27 @@ _texture_vertex_shader_program = """
                 // Composite source FBO: fixed image drawn at tween=1 must use transformed
                 // positions (old mesh target slot), not native fixed corners.
                 fixed_pos = warped_pos;
+            }
+            if (length(rigid_interactive_native_shift) > 0.001) {
+                // Uniform is (delta_y, delta_x); native_pos.x is image X, native_pos.y is image Y.
+                vec3 shift = vec3(rigid_interactive_native_shift.y,
+                                  rigid_interactive_native_shift.x, 0.0);
+                if (rigid_native_is_warped > 0.5) {
+                    warped_pos += shift;
+                } else if (rigid_fixed_warped_into_target < 0.5) {
+                    fixed_pos += shift;
+                }
+            }
+            if (use_rigid_path > 0.5 && rigid_native_is_warped > 0.5
+                    && abs(rigid_warped_display_angle) > 0.0001) {
+                float c = cos(rigid_warped_display_angle);
+                float s = sin(rigid_warped_display_angle);
+                float py = rigid_warped_rotation_pivot_yx.x;
+                float px = rigid_warped_rotation_pivot_yx.y;
+                float dy = warped_pos.y - py;
+                float dx = warped_pos.x - px;
+                warped_pos.y = py + c * dy - s * dx;
+                warped_pos.x = px + s * dy + c * dx;
             }
             gl_Position = model_view_projection_matrix * mix(vec4(fixed_pos, 1),
                                                              vec4(warped_pos, 1),
@@ -83,6 +107,9 @@ class TextureShader(BaseShader):
     _rigid_fixed_warped_into_target_location = None
     _rigid_matrix_location = None
     _rigid_inverse_matrix_location = None
+    _rigid_interactive_native_shift_location = None
+    _rigid_warped_display_angle_location = None
+    _rigid_warped_rotation_pivot_yx_location = None
     _attributes: Sequence[VertexAttribute] | None = None
 
     def __init__(self):
@@ -192,6 +219,30 @@ class TextureShader(BaseShader):
             raise_on_error("after glGetUniformLocation(rigid_target_to_source) in texture_shader")
         return self._rigid_inverse_matrix_location
 
+    @property
+    def rigid_interactive_native_shift_location(self) -> int:
+        if self._rigid_interactive_native_shift_location is None:
+            self._rigid_interactive_native_shift_location = gl.glGetUniformLocation(
+                self.program, "rigid_interactive_native_shift")
+            raise_on_error("after glGetUniformLocation(rigid_interactive_native_shift) in texture_shader")
+        return self._rigid_interactive_native_shift_location
+
+    @property
+    def rigid_warped_display_angle_location(self) -> int:
+        if self._rigid_warped_display_angle_location is None:
+            self._rigid_warped_display_angle_location = gl.glGetUniformLocation(
+                self.program, "rigid_warped_display_angle")
+            raise_on_error("after glGetUniformLocation(rigid_warped_display_angle) in texture_shader")
+        return self._rigid_warped_display_angle_location
+
+    @property
+    def rigid_warped_rotation_pivot_yx_location(self) -> int:
+        if self._rigid_warped_rotation_pivot_yx_location is None:
+            self._rigid_warped_rotation_pivot_yx_location = gl.glGetUniformLocation(
+                self.program, "rigid_warped_rotation_pivot_yx")
+            raise_on_error("after glGetUniformLocation(rigid_warped_rotation_pivot_yx) in texture_shader")
+        return self._rigid_warped_rotation_pivot_yx_location
+
     @staticmethod
     def _as_numpy_mat3(matrix) -> NDArray[np.floating]:
         mat = matrix.get() if hasattr(matrix, 'get') else np.asarray(matrix)
@@ -220,7 +271,10 @@ class TextureShader(BaseShader):
              rigid_source_to_target: NDArray[np.floating] | None = None,
              rigid_target_to_source: NDArray[np.floating] | None = None,
              rigid_native_is_warped: bool = False,
-             rigid_fixed_warped_into_target: bool = False):
+             rigid_fixed_warped_into_target: bool = False,
+             rigid_interactive_native_shift: NDArray[np.floating] | None = None,
+             rigid_warped_display_angle: float = 0.0,
+             rigid_warped_rotation_pivot_yx: NDArray[np.floating] | None = None):
         """Draws the texture using the vertex and index buffers."""
         try:
             gl.glUseProgram(self.program)
@@ -251,6 +305,18 @@ class TextureShader(BaseShader):
             check_for_error()
             gl.glUniformMatrix3fv(self.rigid_inverse_matrix_location, 1, True,
                                   rigid_target_to_source.astype(np.float32, copy=False))
+            check_for_error()
+            if rigid_interactive_native_shift is None:
+                rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
+            gl.glUniform2fv(self.rigid_interactive_native_shift_location, 1,
+                            rigid_interactive_native_shift.astype(np.float32, copy=False))
+            check_for_error()
+            gl.glUniform1f(self.rigid_warped_display_angle_location, float(rigid_warped_display_angle))
+            check_for_error()
+            if rigid_warped_rotation_pivot_yx is None:
+                rigid_warped_rotation_pivot_yx = np.zeros(2, dtype=np.float32)
+            gl.glUniform2fv(self.rigid_warped_rotation_pivot_yx_location, 1,
+                            rigid_warped_rotation_pivot_yx.astype(np.float32, copy=False))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()
