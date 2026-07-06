@@ -68,6 +68,8 @@ class StosSettings(BaseModel):
     point_registration: PointRegistrationSettings = PointRegistrationSettings()  # Used when the user selects a single point to register
     source_image: ImageAndMaskPath | None = None  # The last source image loaded by the user
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
+    stos_opened_from_browser_folder: str | None = None
+    stos_browser_flat_manual: bool = False
 
     @property
     def stos_fullpath(self) -> str | None:
@@ -82,6 +84,14 @@ class FloatRange(BaseModel):
     min: float
 
 
+class WindowGeometry(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+    visible: bool = True
+
+
 class UISettings(BaseModel):
     zoom_limits: FloatRange = FloatRange(min=0.00390625, max=16)  # Maximum and minimum zoom levels
     control_point_search_radius: float = 10.0  # Radius in pixels to search for control points
@@ -89,6 +99,7 @@ class UISettings(BaseModel):
     replacement_paths: dict[
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files
     stos_browser_folder: str | None = None  # Last folder opened in the Stos File Browser
+    window_geometry: dict[str, WindowGeometry] = {}
 
 
 class AppSettings(BaseModel):

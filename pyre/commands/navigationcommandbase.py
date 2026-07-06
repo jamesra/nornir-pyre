@@ -23,7 +23,7 @@ from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
 from pyre.container import IContainer
-from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre.transform_edit_policy import fixed_image_manipulation_locked, rigid_rotation_locked
 from pyre.interfaces.viewtype import ViewType
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
@@ -145,7 +145,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             return PointPair(target=position, source=position)
 
         if self._space == Space.Source:
-            return PointPair(target=np.squeeze(self._transform_controller.InverseTransform(position)),
+            return PointPair(target=np.squeeze(self._transform_controller.Transform(position)),
                              source=position)
         elif self._space == Space.Target:
             return PointPair(target=position,
@@ -225,6 +225,8 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 if fixed_image_manipulation_locked(
                         self._transform_controller.type, self.space, self._view_type()):
                     pass
+                elif rigid_rotation_locked(self._transform_controller.type, self._view_type()):
+                    pass
                 else:
                     angle = float(abs(scroll_y) * 2) ** 2.0
                     if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
@@ -236,7 +238,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                     # print "Angle: " + str(angle)
                     try:
-                        world_center = np.asarray(self.get_space_position(e), dtype=np.float32)
+                        point_pair = self.get_world_positions(e)
+                        if self.space == Space.Source:
+                            world_center = np.asarray(point_pair.source, dtype=np.float32)
+                        else:
+                            world_center = np.asarray(point_pair.target, dtype=np.float32)
 
                         self._transform_controller.begin_interactive_edit(self.space)
                         try:
@@ -244,31 +250,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         finally:
                             self._transform_controller.end_interactive_edit()
                         self.parent.update()
-                        # #region agent log
-                        import json as _json, time as _time
-                        try:
-                            model = self._transform_controller.TransformModel
-                            rot_center = None
-                            if isinstance(model, nornir_imageregistration.IRigidTransform):
-                                rc = model.source_space_center_of_rotation
-                                rot_center = [float(rc[0]), float(rc[1])]
-                            with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
-                                _f.write(_json.dumps({
-                                    "sessionId": "203327", "hypothesisId": "R",
-                                    "location": "navigationcommandbase.py:on_mouse_scroll",
-                                    "message": "rotate applied",
-                                    "data": {
-                                        "space": self.space.name,
-                                        "view_type": self._view_type().value if self._view_type() else None,
-                                        "rangle": float(rangle),
-                                        "center_yx": [float(world_center[0]), float(world_center[1])],
-                                        "source_rot_center_yx": rot_center,
-                                    },
-                                    "timestamp": int(_time.time() * 1000),
-                                }) + "\n")
-                        except Exception:
-                            pass
-                        # #endregion
                     except NotImplementedError:
                         print("Current transform does not support rotation")
                         pass

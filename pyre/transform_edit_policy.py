@@ -17,6 +17,15 @@ def fixed_image_manipulation_locked(
     return space == Space.Source and transform_type in (TransformType.RIGID, TransformType.GRID)
 
 
+def rigid_rotation_locked(
+        transform_type: TransformType,
+        view_type: ViewType | None = None) -> bool:
+    """True when Ctrl+scroll rotation must not run (rigid: Composite window only)."""
+    if transform_type != TransformType.RIGID:
+        return False
+    return view_type != ViewType.Composite
+
+
 def blocks_layer_translate_action(
         transform_type: TransformType,
         space: Space,

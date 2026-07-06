@@ -407,14 +407,36 @@ class ImageTransformView(IImageTransformView):
         rigid_native_is_warped = self._image_space == Space.Target
         rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
         rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
+        rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
         tc = self._transform_controller
         if use_rigid:
             rigid_forward, rigid_inverse = shaders.texture_shader.rigid_matrices_from_transform(self.transform)  # type: ignore[union-attr]
             use_rigid_path = True
 
-            # Warped standalone: tile corners are native; show registration offset as persistent shift.
-            if (rigid_native_is_warped and not rigid_composite_fixed_align
-                    and tc is not None and tc.rigid_warped_display_baseline is not None):
+            source_space_edit = (
+                tc is not None
+                and tc.interactive_edit_in_progress
+                and tc.interactive_edit_space == Space.Source
+            )
+            fixed_display_is_identity = (
+                tc is None
+                or np.allclose(tc.rigid_fixed_display_matrix, np.eye(3, dtype=np.float32))
+            )
+
+            # Composite fixed FBO: frozen baseline + display rotation; live matrix during translate drag.
+            if (not rigid_native_is_warped and rigid_composite_fixed_align
+                    and tc is not None and tc.rigid_fixed_display_baseline_matrix is not None):
+                if source_space_edit and fixed_display_is_identity:
+                    rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
+                else:
+                    rigid_forward = np.asarray(tc.rigid_fixed_display_baseline_matrix, dtype=np.float32)
+                    rigid_inverse = np.linalg.inv(rigid_forward).astype(np.float32, copy=False)
+                    rigid_fixed_display_matrix = np.asarray(tc.rigid_fixed_display_matrix, dtype=np.float32)
+
+            # Warped layer: shift from target_offset delta; skip during composite (Source) edits.
+            if (rigid_native_is_warped
+                    and tc is not None and tc.rigid_warped_display_baseline is not None
+                    and not source_space_edit):
                 offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
                 rigid_interactive_native_shift = (
                     offset - tc.rigid_warped_display_baseline).astype(np.float32, copy=False)
@@ -424,7 +446,8 @@ class ImageTransformView(IImageTransformView):
             if tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None:
                 if self._image_space != tc.interactive_edit_space:
                     if (tc.rigid_matrix_at_edit_start is not None
-                            and tc.rigid_inverse_matrix_at_edit_start is not None):
+                            and tc.rigid_inverse_matrix_at_edit_start is not None
+                            and not rigid_composite_fixed_align):
                         rigid_forward = tc.rigid_matrix_at_edit_start
                         rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
                 elif (tc.interactive_edit_space == Space.Target
@@ -467,7 +490,8 @@ class ImageTransformView(IImageTransformView):
                                                 rigid_native_is_warped=rigid_native_is_warped,
                                                 rigid_fixed_warped_into_target=rigid_composite_fixed_align,
                                                 rigid_interactive_native_shift=rigid_interactive_native_shift,
-                                                rigid_warped_display_matrix=rigid_warped_display_matrix)
+                                                rigid_warped_display_matrix=rigid_warped_display_matrix,
+                                                rigid_fixed_display_matrix=rigid_fixed_display_matrix)
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

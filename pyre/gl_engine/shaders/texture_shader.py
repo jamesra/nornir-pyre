@@ -19,6 +19,7 @@ _texture_vertex_shader_program = """
         uniform mat3 rigid_target_to_source;
         uniform vec2 rigid_interactive_native_shift;
         uniform mat3 rigid_warped_display_matrix;
+        uniform mat3 rigid_fixed_display_matrix;
         uniform mat4 model_view_projection_matrix;
         out vec2 frag_texture_coordinate;
         in vec3 vertex_source_position;
@@ -63,6 +64,12 @@ _texture_vertex_shader_program = """
                 vec3 yx_out = rigid_warped_display_matrix * yx_in;
                 warped_pos = vec3(yx_out.y, yx_out.x, warped_pos.z);
             }
+            if (use_rigid_path > 0.5 && rigid_native_is_warped < 0.5 && rigid_fixed_warped_into_target > 0.5) {
+                vec3 yx_in = vec3(fixed_pos.y, fixed_pos.x, 1.0);
+                vec3 yx_out = rigid_fixed_display_matrix * yx_in;
+                fixed_pos = vec3(yx_out.y, yx_out.x, fixed_pos.z);
+                warped_pos = fixed_pos;
+            }
             gl_Position = model_view_projection_matrix * mix(vec4(fixed_pos, 1),
                                                              vec4(warped_pos, 1),
                                                              tween);
@@ -102,6 +109,7 @@ class TextureShader(BaseShader):
     _rigid_inverse_matrix_location = None
     _rigid_interactive_native_shift_location = None
     _rigid_warped_display_matrix_location = None
+    _rigid_fixed_display_matrix_location = None
     _attributes: Sequence[VertexAttribute] | None = None
 
     def __init__(self):
@@ -227,6 +235,14 @@ class TextureShader(BaseShader):
             raise_on_error("after glGetUniformLocation(rigid_warped_display_matrix) in texture_shader")
         return self._rigid_warped_display_matrix_location
 
+    @property
+    def rigid_fixed_display_matrix_location(self) -> int:
+        if self._rigid_fixed_display_matrix_location is None:
+            self._rigid_fixed_display_matrix_location = gl.glGetUniformLocation(
+                self.program, "rigid_fixed_display_matrix")
+            raise_on_error("after glGetUniformLocation(rigid_fixed_display_matrix) in texture_shader")
+        return self._rigid_fixed_display_matrix_location
+
     @staticmethod
     def _as_numpy_mat3(matrix) -> NDArray[np.floating]:
         mat = matrix.get() if hasattr(matrix, 'get') else np.asarray(matrix)
@@ -257,7 +273,8 @@ class TextureShader(BaseShader):
              rigid_native_is_warped: bool = False,
              rigid_fixed_warped_into_target: bool = False,
              rigid_interactive_native_shift: NDArray[np.floating] | None = None,
-             rigid_warped_display_matrix: NDArray[np.floating] | None = None):
+             rigid_warped_display_matrix: NDArray[np.floating] | None = None,
+             rigid_fixed_display_matrix: NDArray[np.floating] | None = None):
         """Draws the texture using the vertex and index buffers."""
         try:
             gl.glUseProgram(self.program)
@@ -298,6 +315,11 @@ class TextureShader(BaseShader):
                 rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
             gl.glUniformMatrix3fv(self.rigid_warped_display_matrix_location, 1, True,
                                   rigid_warped_display_matrix.astype(np.float32, copy=False))
+            check_for_error()
+            if rigid_fixed_display_matrix is None:
+                rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
+            gl.glUniformMatrix3fv(self.rigid_fixed_display_matrix_location, 1, True,
+                                  rigid_fixed_display_matrix.astype(np.float32, copy=False))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()

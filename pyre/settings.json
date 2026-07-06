@@ -8,11 +8,42 @@
         },
         "control_point_search_radius": 10.0,
         "image_search_paths": [],
-        "replacement_paths": {}
+        "replacement_paths": {},
+        "stos_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
+        "window_geometry": {
+            "Source": {
+                "x": 3840,
+                "y": -90,
+                "width": 1280,
+                "height": 816,
+                "visible": true
+            },
+            "Target": {
+                "x": 5120,
+                "y": -90,
+                "width": 1280,
+                "height": 816,
+                "visible": true
+            },
+            "Composite": {
+                "x": 4540,
+                "y": 666,
+                "width": 1860,
+                "height": 816,
+                "visible": true
+            },
+            "StosBrowser": {
+                "x": 4190,
+                "y": 666,
+                "width": 350,
+                "height": 816,
+                "visible": false
+            }
+        }
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "D:/nornir-test-output/IDocBuildTestBootstrapDebugging/TEM/Grid8/690-691_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
+        "stos_filename": "Y:/Volumes/RPC3/TEM/StosBrute64\\16-17_ctrl-TEM_Blob_map-TEM_Blob.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -35,12 +66,14 @@
             }
         },
         "source_image": {
-            "image_fullpath": "D:\\nornir-test-output\\IDocBuildTestBootstrapDebugging\\TEM\\0690\\TEM\\Leveled\\Images\\008\\0690_TEM_Leveled.png",
-            "mask_fullpath": "D:\\nornir-test-output\\IDocBuildTestBootstrapDebugging\\TEM\\0690\\TEM\\Mask\\Images\\008\\0690_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0016\\TEM\\Blob\\Images\\064\\0016_TEM_Blob.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0016\\TEM\\Mask\\Images\\064\\0016_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "D:\\nornir-test-output\\IDocBuildTestBootstrapDebugging\\TEM\\0691\\TEM\\Leveled\\Images\\008\\0691_TEM_Leveled.png",
-            "mask_fullpath": "D:\\nornir-test-output\\IDocBuildTestBootstrapDebugging\\TEM\\0691\\TEM\\Mask\\Images\\008\\0691_TEM_Mask.png"
-        }
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0017\\TEM\\Blob\\Images\\064\\0017_TEM_Blob.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0017\\TEM\\Mask\\Images\\064\\0017_TEM_Mask.png"
+        },
+        "stos_opened_from_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
+        "stos_browser_flat_manual": false
     }
 }

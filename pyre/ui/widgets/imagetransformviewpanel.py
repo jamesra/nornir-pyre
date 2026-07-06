@@ -42,7 +42,7 @@ from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
-from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre.transform_edit_policy import fixed_image_manipulation_locked, rigid_rotation_locked
 
 
 @dataclass
@@ -203,34 +203,58 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.subscribe_context_activation(self._glcontext_manager)
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
+        transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
 
         if self._view_type == ViewType.Source and self._space == Space.Source:
             self._fixed_layer_hint = QLabel(self)
-            self._fixed_layer_hint.setText("Fixed image — translate/rotate warped layer in Warped or Composite view")
+            self._fixed_layer_hint.setText(
+                "Fixed image — translate warped layer in Warped or Composite; rotate in Composite view")
             self._fixed_layer_hint.setStyleSheet(
                 "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
             self._fixed_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self._fixed_layer_hint.hide()
-            self._update_fixed_layer_hint()
+            self._update_layer_policy_hints()
+        elif self._view_type == ViewType.Target and self._space == Space.Target:
+            self._warped_layer_hint = QLabel(self)
+            self._warped_layer_hint.setText(
+                "Rigid transform — translate here; rotate in Composite view (Ctrl+scroll)")
+            self._warped_layer_hint.setStyleSheet(
+                "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
+            self._warped_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._warped_layer_hint.hide()
+            self._update_layer_policy_hints()
+
+    def _update_layer_policy_hints(self) -> None:
+        """Show corner hints when transform-edit policy blocks actions in this panel."""
+        if getattr(self, '_fixed_layer_hint', None) is not None:
+            if fixed_image_manipulation_locked(
+                    self._transform_controller.type, self._space, self._view_type):
+                self._fixed_layer_hint.adjustSize()
+                self._fixed_layer_hint.move(8, 8)
+                self._fixed_layer_hint.show()
+                self._fixed_layer_hint.raise_()
+            else:
+                self._fixed_layer_hint.hide()
+        if getattr(self, '_warped_layer_hint', None) is not None:
+            if rigid_rotation_locked(self._transform_controller.type, self._view_type):
+                self._warped_layer_hint.adjustSize()
+                self._warped_layer_hint.move(8, 8)
+                self._warped_layer_hint.show()
+                self._warped_layer_hint.raise_()
+            else:
+                self._warped_layer_hint.hide()
 
     def _update_fixed_layer_hint(self) -> None:
-        """Show a corner hint when rigid/grid transforms lock fixed-layer manipulation."""
-        if self._fixed_layer_hint is None:
-            return
-        if fixed_image_manipulation_locked(
-                self._transform_controller.type, self._space, self._view_type):
-            self._fixed_layer_hint.adjustSize()
-            self._fixed_layer_hint.move(8, 8)
-            self._fixed_layer_hint.show()
-            self._fixed_layer_hint.raise_()
-        else:
-            self._fixed_layer_hint.hide()
+        """Backward-compatible alias for layer policy hint refresh."""
+        self._update_layer_policy_hints()
 
     def on_resize(self, event: QResizeEvent) -> None:
         """Handle resize and keep the fixed-layer hint anchored."""
         super().on_resize(event)
-        if self._fixed_layer_hint is not None and self._fixed_layer_hint.isVisible():
+        if getattr(self, '_fixed_layer_hint', None) is not None and self._fixed_layer_hint.isVisible():
             self._fixed_layer_hint.move(8, 8)
+        if getattr(self, '_warped_layer_hint', None) is not None and self._warped_layer_hint.isVisible():
+            self._warped_layer_hint.move(8, 8)
 
     def __del__(self):
         try:
@@ -242,6 +266,18 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self._transform_controller.RemoveOnModelReplacedEventListener(self._on_transform_model_changed)
         except ValueError:
             pass
+
+        try:
+            self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
+        except ValueError:
+            pass
+
+    def _on_transform_controller_changed(self, controller: TransformController) -> None:
+        """Repaint when registration or display overlays change in another STOS view."""
+        if controller.interactive_edit_in_progress:
+            self._glpanel.repaint()
+        else:
+            self._glpanel.update()
 
     def _on_transform_model_changed(self,
                                     controller: TransformController,

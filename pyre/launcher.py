@@ -63,6 +63,7 @@ from pyre.container import IContainer
 from pyre.stos_container import StosContainer
 import pyre.commands.stos
 from pyre.settings import AppSettings
+from pyre.ui.window_geometry import apply_saved_window_geometry, capture_window_geometry
 
 from pyre.ui.windows.mosaicwindow import MosaicWindow
 from pyre.ui.windows.stoswindow import StosWindow
@@ -362,7 +363,8 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
 
 def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
-            stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
+            stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller],
+            settings: AppSettings = Provide[IContainer.settings]):
     """Main entry point for the QT version of the application"""
     # Context Sharing must be set before creating QApplication
     args = ProcessArgs()
@@ -390,6 +392,20 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     window_manager.add(ViewType.Target, target_window)
     window_manager.add(ViewType.Composite, composite_window)
 
+    geometry_restored = apply_saved_window_geometry(settings, window_manager)
+    if geometry_restored:
+        StosWindow.sync_window_visibility_menus(window_manager)
+
+    for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+        if view_type in window_manager:
+            window_manager[view_type].show()
+            window_manager[view_type].raise_()
+
+    def _persist_window_geometry() -> None:
+        capture_window_geometry(settings, window_manager)
+
+    app.aboutToQuit.connect(_persist_window_geometry)
+
     def process_arguments():
         pyre.state.UpdateSettingsFromArguments(arg_values)
         try:
@@ -408,6 +424,16 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
                 f"The saved STOS file could not be parsed:\n\n{e}"
                 f"\n\nPyre will start with an empty workspace.",
             )
+        if ViewType.Composite in window_manager:
+            from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+            StosWindow.open_folder_browser_if_cached_folder_exists(
+                settings,
+                window_manager[ViewType.Composite],
+                geometry_restored=geometry_restored,
+            )
+            if not geometry_restored and not StosFileBrowserWindow.has_cached_folder(settings):
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                    window_manager[view_type].setPosition()
         # Force repaint so control-point draw-time sync runs with loaded transform
         for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
             if view_type in window_manager:
@@ -415,12 +441,6 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
 
     # Schedule the initialization to occur after the event loop starts
     QTimer.singleShot(0, process_arguments)
-
-    # Show the windows
-    #    mosaic_window.show()
-    source_window.show()
-    target_window.show()
-    composite_window.show()
 
     # Run the application
     exit_code = app.exec()

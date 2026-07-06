@@ -611,6 +611,7 @@ class StosWindow(PyreWindowBase):
             geometry_restored: bool = False,
     ) -> None:
         """Show the browser at startup when a saved folder path still exists."""
+        del geometry_restored  # kept for call-site compatibility
         from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
         if not StosFileBrowserWindow.has_cached_folder(settings):
             return
@@ -620,10 +621,30 @@ class StosWindow(PyreWindowBase):
             browser.set_current_file(last_loaded)
         browser.show()
         browser.raise_()
-        if apply_saved_browser_geometry(settings, browser, force_visible=True):
+        restored_saved = apply_saved_browser_geometry(settings, browser, force_visible=True)
+        # #region agent log
+        import json as _json, time as _time
+        try:
+            composite = anchor_window._window_manager.get(ViewType.Composite)
+            with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({
+                    "sessionId": "203327", "hypothesisId": "B",
+                    "location": "stoswindow.py:open_folder_browser_if_cached_folder_exists",
+                    "message": "startup browser placement",
+                    "data": {
+                        "restored_saved_geometry": restored_saved,
+                        "browser_x": browser.x(),
+                        "browser_y": browser.y(),
+                        "composite_x": None if composite is None else composite.x(),
+                    },
+                    "timestamp": int(_time.time() * 1000),
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        if restored_saved:
             return
-        if not geometry_restored:
-            anchor_window._position_folder_browser_beside_composite()
+        anchor_window._position_folder_browser_beside_composite()
 
     def onOpenStosFolderBrowser(self):
         """Show (or create) the Stos Folder Browser window."""
@@ -639,8 +660,7 @@ class StosWindow(PyreWindowBase):
         cls._folder_browser = None
 
     def onExit(self):
-        """Close the file browser, then exit the application."""
-        StosWindow.close_folder_browser()
+        """Exit the application; folder-browser geometry is captured on aboutToQuit."""
         super().onExit()
 
     @staticmethod

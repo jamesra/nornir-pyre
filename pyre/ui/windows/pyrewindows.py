@@ -1,6 +1,6 @@
 from dependency_injector.wiring import Provide
 from typing import cast
-from PyQt6.QtWidgets import QMainWindow, QWidget
+from PyQt6.QtWidgets import QMainWindow, QWidget, QApplication
 from PyQt6.QtCore import Qt, QEvent, QObject, pyqtSignal, QSize, QPoint
 from PyQt6.QtGui import QCloseEvent
 
@@ -230,8 +230,11 @@ class PyreWindowBase(QMainWindow):
             event.accept()  # Accept the close event (window is hidden, not destroyed)
     
     def onExit(self):
-        """Exit the application"""
+        """Close managed windows and end the Qt event loop."""
         self._window_manager.exit()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
 
 if __name__ == '__main__':

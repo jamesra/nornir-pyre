@@ -27,6 +27,48 @@ def _strip_rst_for_plain_text(text: str) -> str:
     return out
 
 
+CONTROLS_HELP_ANCHOR = "Mouse Controls"
+
+# Section headings that end the mouse/keyboard help block (first match wins).
+_CONTROLS_SECTION_END_MARKERS = (
+    "Troubleshooting",
+    "About",
+)
+
+
+def controls_help_anchor_index(text: str, anchor: str = CONTROLS_HELP_ANCHOR) -> int:
+    """Return the line index of ``anchor`` in plain help text, or ``0`` if missing."""
+    for index, line in enumerate(text.splitlines()):
+        if line.strip() == anchor:
+            return index
+    return 0
+
+
+def controls_help_section(text: str) -> str | None:
+    """Return the Mouse Controls through Keyboard Controls block, or ``None`` if absent."""
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == CONTROLS_HELP_ANCHOR:
+            start = index
+            break
+    if start is None:
+        return None
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].strip() in _CONTROLS_SECTION_END_MARKERS:
+            end = index
+            break
+
+    section_lines = lines[start:end]
+    while section_lines and not section_lines[-1].strip():
+        section_lines.pop()
+    if not section_lines:
+        return None
+    return "\n".join(section_lines)
+
+
 def readme_text_with_fallback(relative_to_pyre_package: str = "README.txt") -> str:
     """
     Prefer the repository README.rst next to the installed ``pyre`` package (nornir-pyre/README.rst),
