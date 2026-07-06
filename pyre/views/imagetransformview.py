@@ -423,15 +423,17 @@ class ImageTransformView(IImageTransformView):
                 or np.allclose(tc.rigid_fixed_display_matrix, np.eye(3, dtype=np.float32))
             )
 
-            # Composite fixed FBO: frozen baseline + display rotation; live matrix during translate drag.
+            # Composite fixed FBO: frozen baseline + display rotation; translate shift during drag.
             if (not rigid_native_is_warped and rigid_composite_fixed_align
                     and tc is not None and tc.rigid_fixed_display_baseline_matrix is not None):
-                if source_space_edit and fixed_display_is_identity:
-                    rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
-                else:
-                    rigid_forward = np.asarray(tc.rigid_fixed_display_baseline_matrix, dtype=np.float32)
-                    rigid_inverse = np.linalg.inv(rigid_forward).astype(np.float32, copy=False)
-                    rigid_fixed_display_matrix = np.asarray(tc.rigid_fixed_display_matrix, dtype=np.float32)
+                rigid_forward = np.asarray(tc.rigid_fixed_display_baseline_matrix, dtype=np.float32)
+                rigid_inverse = np.linalg.inv(rigid_forward).astype(np.float32, copy=False)
+                rigid_fixed_display_matrix = np.asarray(tc.rigid_fixed_display_matrix, dtype=np.float32)
+                if (source_space_edit and fixed_display_is_identity
+                        and tc.target_offset_at_edit_start is not None):
+                    offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
+                    rigid_interactive_native_shift = (
+                        offset - tc.target_offset_at_edit_start).astype(np.float32, copy=False)
 
             # Warped layer: shift from target_offset delta; skip during composite (Source) edits.
             if (rigid_native_is_warped

@@ -274,10 +274,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _on_transform_controller_changed(self, controller: TransformController) -> None:
         """Repaint when registration or display overlays change in another STOS view."""
-        if controller.interactive_edit_in_progress:
-            self._glpanel.repaint()
-        else:
-            self._glpanel.update()
+        self._glpanel.update()
 
     def _on_transform_model_changed(self,
                                     controller: TransformController,

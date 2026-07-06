@@ -15,9 +15,10 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
-from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.container import IContainer
 from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre import common as pyre_common
 
 
 class ManipulateRigidTransformCommand(NavigationCommandBase):
@@ -32,6 +33,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         return self._transform_controller.transform  # type: ignore[attr-defined]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
+    _window_manager: IWindowManager = Provide[IContainer.window_manager]
 
     @property
     def translated_points(self) -> NDArray[np.floating]:
@@ -124,6 +126,8 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         self._translate_origin = world_point
 
         self.parent.update()
+        if self.space == Space.Target:
+            pyre_common.repaint_peer_stos_gl_panels(self._window_manager, exclude_gl_panel=self.parent)
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""

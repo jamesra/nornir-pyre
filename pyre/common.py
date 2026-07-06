@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 from dependency_injector.wiring import Provide, inject
 import numpy
 from numpy.typing import NDArray
+from PyQt6.QtWidgets import QWidget
 
 import nornir_imageregistration
 from nornir_imageregistration import ITransform, PointLike, AreaLike, ImageStats
@@ -86,6 +87,33 @@ def sync_stos_windows(LookAt, scale: float) -> None:
     if config is None or config.window_manager is None:
         raise RuntimeError("No STOS config with window_manager; cannot sync windows")
     SyncWindows(LookAt, scale, config.window_manager)
+
+
+def repaint_peer_stos_gl_panels(
+        window_manager: IWindowManager,
+        exclude_gl_panel: QWidget | None = None) -> None:
+    """Synchronously repaint visible STOS GL panels except the one driving the drag.
+
+    QOpenGLWidget.update() on peer windows is often deferred until mouse release
+    while another STOS panel holds the grab during translate drags.
+    """
+    from pyre.ui.windows.stoswindow import StosWindow
+
+    for vt in (ViewType.Composite, ViewType.Source, ViewType.Target):
+        if vt not in window_manager:
+            continue
+        win = window_manager[vt]
+        if not isinstance(win, StosWindow) or not win.isVisible():
+            continue
+        glpanel = win.imagepanel.glcanvas
+        if exclude_gl_panel is not None and glpanel is exclude_gl_panel:
+            continue
+        glpanel.repaint()
+
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
 
 
 @inject

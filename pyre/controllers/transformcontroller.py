@@ -113,6 +113,7 @@ class TransformController:
     DefaultToForwardTransform: bool
     _selected_points: set[int] = set()
     _change_event_pending: bool = False  # True while a coalesced OnChange notification is queued
+    _interactive_repaint_pending: bool = False
     _point_moved_event_pending: bool = False
     _interactive_edit_depth: int = 0
     _interactive_edit_space: Space | None = None
@@ -507,11 +508,21 @@ class TransformController:
         self.__OnChangeEventListeners.invoke(self)
 
     def notify_interactive_rigid_repaint(self) -> None:
-        """Repaint all transform view panels immediately during rigid drag.
+        """Queue repaint of all transform view panels during rigid drag.
 
-        FireOnChangeEvent coalesces via QTimer; during continuous mouse drag the composite
-        window may not paint until release unless listeners run synchronously.
+        Deferred to the next event-loop turn so we never re-enter paintGL on the
+        panel handling the mouse drag; FireOnChangeEvent coalescing can defer too long.
         """
+        if QApplication.instance() is None:
+            self.__OnChangeEventListeners.invoke(self)
+            return
+        if self._interactive_repaint_pending:
+            return
+        self._interactive_repaint_pending = True
+        QTimer.singleShot(0, self._fire_interactive_repaint)
+
+    def _fire_interactive_repaint(self) -> None:
+        self._interactive_repaint_pending = False
         self.__OnChangeEventListeners.invoke(self)
 
     def FireOnTransformModelChangeEvent(self, old: nornir_imageregistration.ITransform,
@@ -631,6 +642,8 @@ class TransformController:
             self.TransformModel.TranslateFixed(offset)  # type: ignore[attr-defined]
         if self.interactive_edit_in_progress and isinstance(
                 self._TransformModel, nornir_imageregistration.IRigidTransform):
+            if self._interactive_edit_space == Space.Target:
+                self._refresh_rigid_fixed_display_baseline_from_model()
             self.notify_interactive_rigid_repaint()
 
     def Rotate(self, rangle: float, center: NDArray[np.floating] | None = None, space: Space | None = None):

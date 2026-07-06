@@ -622,26 +622,6 @@ class StosWindow(PyreWindowBase):
         browser.show()
         browser.raise_()
         restored_saved = apply_saved_browser_geometry(settings, browser, force_visible=True)
-        # #region agent log
-        import json as _json, time as _time
-        try:
-            composite = anchor_window._window_manager.get(ViewType.Composite)
-            with open(r"d:\src\git\nornir\debug-203327.log", "a", encoding="utf-8") as _f:
-                _f.write(_json.dumps({
-                    "sessionId": "203327", "hypothesisId": "B",
-                    "location": "stoswindow.py:open_folder_browser_if_cached_folder_exists",
-                    "message": "startup browser placement",
-                    "data": {
-                        "restored_saved_geometry": restored_saved,
-                        "browser_x": browser.x(),
-                        "browser_y": browser.y(),
-                        "composite_x": None if composite is None else composite.x(),
-                    },
-                    "timestamp": int(_time.time() * 1000),
-                }) + "\n")
-        except Exception:
-            pass
-        # #endregion
         if restored_saved:
             return
         anchor_window._position_folder_browser_beside_composite()
