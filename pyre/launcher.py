@@ -330,8 +330,7 @@ def DefineDefaultSurface():
 
 @inject
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
-        image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager],
-        stos_transform_controller: pyre.state.TransformController = Provide[IContainer.transform_controller]):
+        image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]):
     # Build the container first (before setting up logging to avoid pickling issues)
     container = build_container()
 
@@ -339,9 +338,10 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
     # Done after container build to avoid dependency injection pickling issues
     _setup_console_logging()
 
-    # Get the required services from the container
+    # Resolve services from the wired container (not @inject defaults — wiring happens in build_container).
     image_manager = container.image_manager()
     image_viewmodel_manager = container.image_viewmodel_manager()
+    stos_transform_controller = container.transform_controller()
 
     print("Starting Pyre")
 
