@@ -180,7 +180,8 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                 self._transform_controller.type, self.space, self._view_type()):
             self.cancel()
             return
-        self._transform_controller.begin_interactive_edit(self.space)
+        self._transform_controller.begin_interactive_edit(
+            self.space, view_type=self._view_type())
 
     def on_mouse_scroll(self, event: QWheelEvent):
         """Delegate zoom/rotate to navigation while a translate drag is active."""

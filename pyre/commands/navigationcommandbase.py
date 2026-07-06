@@ -23,7 +23,12 @@ from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
 from pyre.container import IContainer
-from pyre.transform_edit_policy import fixed_image_manipulation_locked, rigid_rotation_locked
+from pyre.transform_edit_policy import (
+    fixed_image_manipulation_locked,
+    rigid_rotation_locked,
+    wheel_rotate_locked,
+)
+from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
@@ -222,10 +227,8 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 self._transform_controller.TransformModel.ScaleWarped(scale_delta)
             elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # We rotate when command is down
-                if fixed_image_manipulation_locked(
+                if wheel_rotate_locked(
                         self._transform_controller.type, self.space, self._view_type()):
-                    pass
-                elif rigid_rotation_locked(self._transform_controller.type, self._view_type()):
                     pass
                 else:
                     angle = float(abs(scroll_y) * 2) ** 2.0
@@ -244,7 +247,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         else:
                             world_center = np.asarray(point_pair.target, dtype=np.float32)
 
-                        self._transform_controller.begin_interactive_edit(self.space)
+                        self._transform_controller.begin_interactive_edit(
+                            self.space,
+                            view_type=self._view_type(),
+                            gesture=gesture_for_wheel_rotate(
+                                self.space, self._view_type(), self._transform_controller.type))
                         try:
                             self._transform_controller.Rotate(rangle, world_center, space=self.space)
                         finally:

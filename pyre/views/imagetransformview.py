@@ -27,6 +27,8 @@ from pyre.views.gltiles import RenderCache, RenderDataMap, TileGLObjects
 import pyre.views.gltiles as gltiles
 from pyre.views.interfaces import IImageTransformView
 from pyre.controllers.transformcontroller import TransformController
+from pyre.controllers.transform_display import TileRefreshHint
+from pyre.interfaces.viewtype import ViewType
 from pyre.perf_debug import timed
 
 
@@ -164,8 +166,14 @@ class ImageTransformView(IImageTransformView):
             return
         tc = transform_controller if transform_controller is not None else self._transform_controller
         if tc is not None and tc.interactive_edit_in_progress:
-            return
-        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+            hint = tc.display_strategy.on_model_changed(interactive=True)
+            if hint == TileRefreshHint.NONE:
+                return
+        uses_quads = (
+            tc is not None
+            and tc.display_strategy.uses_static_tile_quads()
+        ) or (self.transform is not None and gltiles.is_rigid_transform(self.transform))
+        if uses_quads:
             needs_rigid_init = not self._tile_render_data
             if not needs_rigid_init:
                 for tile_data in self._tile_render_data.values():
@@ -181,7 +189,10 @@ class ImageTransformView(IImageTransformView):
         """Incremental tile patch update for control point drag."""
         if not self._gl_initialized:
             return
-        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+        hint = transform_controller.display_strategy.on_point_moved(indices)
+        if hint != TileRefreshHint.INCREMENTAL:
+            return
+        if self.transform is not None and transform_controller.display_strategy.uses_static_tile_quads():
             return
         self.update_tiles_for_point_indices(indices)
 
@@ -352,7 +363,8 @@ class ImageTransformView(IImageTransformView):
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
              show_mesh_lines: bool = False,
-             rigid_composite_fixed_align: bool = False):
+             rigid_composite_fixed_align: bool = False,
+             view_type: ViewType | None = None):
         """
         Draw the image in either source (fixed) or target (warped) space
         :param view_proj:
@@ -371,7 +383,8 @@ class ImageTransformView(IImageTransformView):
                                   space=space,
                                   bounding_box=bounding_box,
                                   show_mesh_lines=show_mesh_lines,
-                                  rigid_composite_fixed_align=rigid_composite_fixed_align)
+                                  rigid_composite_fixed_align=rigid_composite_fixed_align,
+                                  view_type=view_type)
 
     def _draw_imageviewmodel(self,
                              view_proj: NDArray[np.floating],
@@ -379,7 +392,8 @@ class ImageTransformView(IImageTransformView):
                              space: pyre.Space,
                              bounding_box: nornir_imageregistration.Rectangle | None = None,
                              show_mesh_lines: bool = False,
-                             rigid_composite_fixed_align: bool = False):
+                             rigid_composite_fixed_align: bool = False,
+                             view_type: ViewType | None = None):
 
         if image_viewmodel is None:
             return
@@ -400,67 +414,30 @@ class ImageTransformView(IImageTransformView):
 
         # Space is IntFlag; coerce so GLSL tween uniform always gets 0.0 or 1.0 (not enum object).
         tween = float(int(space))
-        use_rigid = self.transform is not None and gltiles.is_rigid_transform(self.transform)
-        rigid_forward = None
-        rigid_inverse = None
-        use_rigid_path = False
-        rigid_native_is_warped = self._image_space == Space.Target
-        rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
-        rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
-        rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
         tc = self._transform_controller
-        if use_rigid:
-            rigid_forward, rigid_inverse = shaders.texture_shader.rigid_matrices_from_transform(self.transform)  # type: ignore[union-attr]
-            use_rigid_path = True
+        if tc is None:
+            return
 
-            source_space_edit = (
-                tc is not None
-                and tc.interactive_edit_in_progress
-                and tc.interactive_edit_space == Space.Source
-            )
-            fixed_display_is_identity = (
-                tc is None
-                or np.allclose(tc.rigid_fixed_display_matrix, np.eye(3, dtype=np.float32))
-            )
-
-            # Composite fixed FBO: frozen baseline + display rotation; translate shift during drag.
-            if (not rigid_native_is_warped and rigid_composite_fixed_align
-                    and tc is not None and tc.rigid_fixed_display_baseline_matrix is not None):
-                rigid_forward = np.asarray(tc.rigid_fixed_display_baseline_matrix, dtype=np.float32)
-                rigid_inverse = np.linalg.inv(rigid_forward).astype(np.float32, copy=False)
-                rigid_fixed_display_matrix = np.asarray(tc.rigid_fixed_display_matrix, dtype=np.float32)
-                if (source_space_edit and fixed_display_is_identity
-                        and tc.target_offset_at_edit_start is not None):
-                    offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
-                    rigid_interactive_native_shift = (
-                        offset - tc.target_offset_at_edit_start).astype(np.float32, copy=False)
-
-            # Warped layer: shift from target_offset delta; skip during composite (Source) edits.
-            if (rigid_native_is_warped
-                    and tc is not None and tc.rigid_warped_display_baseline is not None
-                    and not source_space_edit):
-                offset = np.asarray(self.transform.target_offset, dtype=np.float32)  # type: ignore[union-attr]
-                rigid_interactive_native_shift = (
-                    offset - tc.rigid_warped_display_baseline).astype(np.float32, copy=False)
-                rigid_warped_display_matrix = np.asarray(
-                    tc.rigid_warped_display_matrix, dtype=np.float32)
-
-            if tc is not None and tc.interactive_edit_in_progress and tc.interactive_edit_space is not None:
-                if self._image_space != tc.interactive_edit_space:
-                    if (tc.rigid_matrix_at_edit_start is not None
-                            and tc.rigid_inverse_matrix_at_edit_start is not None
-                            and not rigid_composite_fixed_align):
-                        rigid_forward = tc.rigid_matrix_at_edit_start
-                        rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
-                elif (tc.interactive_edit_space == Space.Target
-                      and not rigid_composite_fixed_align
-                      and tc.rigid_matrix_at_edit_start is not None
-                      and tc.rigid_inverse_matrix_at_edit_start is not None):
-                    rigid_forward = tc.rigid_matrix_at_edit_start
-                    rigid_inverse = tc.rigid_inverse_matrix_at_edit_start
+        draw_state = tc.resolve_draw_state(
+            image_space=self._image_space,
+            view_type=view_type,
+            composite_fixed_align=rigid_composite_fixed_align,
+            tween=tween,
+        )
+        use_rigid_path = draw_state.use_rigid_path
+        rigid_forward = draw_state.source_to_target
+        rigid_inverse = draw_state.target_to_source
+        rigid_native_is_warped = draw_state.rigid_native_is_warped
+        rigid_composite_align = draw_state.rigid_fixed_warped_into_target
+        overlay = draw_state.rigid_overlay
+        if overlay is not None:
+            rigid_interactive_native_shift = overlay.interactive_native_shift
+            rigid_warped_display_matrix = overlay.warped_display_matrix
+            rigid_fixed_display_matrix = overlay.fixed_display_matrix
         else:
-            rigid_forward = None
-            rigid_inverse = None
+            rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
+            rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
+            rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
 
         visible = gltiles.tile_coords_for_visible_bounds(
             image_viewmodel.height, image_viewmodel.width,
@@ -490,7 +467,7 @@ class ImageTransformView(IImageTransformView):
                                                 rigid_source_to_target=rigid_forward,
                                                 rigid_target_to_source=rigid_inverse,
                                                 rigid_native_is_warped=rigid_native_is_warped,
-                                                rigid_fixed_warped_into_target=rigid_composite_fixed_align,
+                                                rigid_fixed_warped_into_target=rigid_composite_align,
                                                 rigid_interactive_native_shift=rigid_interactive_native_shift,
                                                 rigid_warped_display_matrix=rigid_warped_display_matrix,
                                                 rigid_fixed_display_matrix=rigid_fixed_display_matrix)

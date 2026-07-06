@@ -48,12 +48,6 @@ _texture_vertex_shader_program = """
                 // Composite source FBO: fixed image drawn at tween=1 must use transformed
                 // positions (old mesh target slot), not native fixed corners.
                 fixed_pos = warped_pos;
-                if (length(rigid_interactive_native_shift) > 0.001) {
-                    vec3 shift = vec3(rigid_interactive_native_shift.y,
-                                      rigid_interactive_native_shift.x, 0.0);
-                    fixed_pos += shift;
-                    warped_pos = fixed_pos;
-                }
             }
             if (length(rigid_interactive_native_shift) > 0.001) {
                 // Uniform is (delta_y, delta_x); native_pos.x is image X, native_pos.y is image Y.

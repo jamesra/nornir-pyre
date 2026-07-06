@@ -23,27 +23,17 @@ import nornir_imageregistration.interactive_edit
 import nornir_pools as pools
 import pyre.qt_eventmanager
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache
+from pyre.controllers.transform_display import (
+    TransformDisplayStrategy,
+    TransformDrawState,
+    TransformGesture,
+    TileRefreshHint,
+    display_strategy_for_model,
+    gesture_for_interactive_edit,
+)
 from pyre.interfaces.eventmanager import IEventManager
+from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
-
-
-def _rigid_display_rotation_about_pivot_yx(
-        rangle: float,
-        pivot_yx: NDArray[np.floating]) -> NDArray[np.floating]:
-    """Return a 3x3 row-major homogeneous matrix rotating (Y,X) about pivot_yx.
-
-    Uses the same (Y,X) convention as ``nornir_imageregistration.transforms.utils.RotationMatrix``.
-    """
-    from nornir_imageregistration.transforms.utils import RotationMatrix, TranslateMatrixXY
-
-    cy, cx = float(pivot_yx[0]), float(pivot_yx[1])
-    rot = RotationMatrix(rangle)
-    to_origin = TranslateMatrixXY((-cy, -cx))
-    back = TranslateMatrixXY((cy, cx))
-    matrix = back @ rot @ to_origin
-    if hasattr(matrix, "get"):
-        matrix = matrix.get()
-    return np.asarray(matrix, dtype=np.float32)
 
 
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
@@ -117,13 +107,7 @@ class TransformController:
     _point_moved_event_pending: bool = False
     _interactive_edit_depth: int = 0
     _interactive_edit_space: Space | None = None
-    _rigid_matrix_at_edit_start: NDArray[np.floating] | None = None
-    _rigid_inverse_matrix_at_edit_start: NDArray[np.floating] | None = None
-    _target_offset_at_edit_start: NDArray[np.floating] | None = None
-    _rigid_warped_display_baseline: NDArray[np.floating] | None = None
-    _rigid_warped_display_matrix: NDArray[np.floating]
-    _rigid_fixed_display_baseline_matrix: NDArray[np.floating] | None = None
-    _rigid_fixed_display_matrix: NDArray[np.floating]
+    _display_strategy: TransformDisplayStrategy
     _tile_mesh_cache: TileMeshCpuCache
     _full_refresh_needed: bool = False
 
@@ -142,95 +126,47 @@ class TransformController:
         return self._interactive_edit_space
 
     @property
-    def rigid_matrix_at_edit_start(self) -> NDArray[np.floating] | None:
-        return self._rigid_matrix_at_edit_start
+    def display_strategy(self) -> TransformDisplayStrategy:
+        return self._display_strategy
 
-    @property
-    def rigid_inverse_matrix_at_edit_start(self) -> NDArray[np.floating] | None:
-        return self._rigid_inverse_matrix_at_edit_start
+    def _rebind_display_strategy(self) -> None:
+        """Select the display strategy for the current transform model."""
+        self._display_strategy = display_strategy_for_model(self._TransformModel)
+        self._display_strategy.on_model_bound(self._TransformModel)
 
-    @property
-    def target_offset_at_edit_start(self) -> NDArray[np.floating] | None:
-        """Rigid target_offset snapshot at interactive edit start (Y,X)."""
-        return self._target_offset_at_edit_start
-
-    @property
-    def rigid_warped_display_baseline(self) -> NDArray[np.floating] | None:
-        """Rigid target_offset when the warped layer display baseline was last reset (Y,X)."""
-        return self._rigid_warped_display_baseline
-
-    @property
-    def rigid_warped_display_matrix(self) -> NDArray[np.floating]:
-        """Affine display transform for the warped rigid panel (Y,X homogeneous)."""
-        return self._rigid_warped_display_matrix
-
-    @property
-    def rigid_fixed_display_baseline_matrix(self) -> NDArray[np.floating] | None:
-        """Frozen registration matrix for composite fixed-layer display (Y,X homogeneous)."""
-        return self._rigid_fixed_display_baseline_matrix
-
-    @property
-    def rigid_fixed_display_matrix(self) -> NDArray[np.floating]:
-        """Incremental composite fixed-layer rotation composed about the cursor (Y,X homogeneous)."""
-        return self._rigid_fixed_display_matrix
-
-    def _sync_rigid_warped_display_baseline(self) -> None:
-        """Reset warped-layer display baseline to the current rigid target_offset."""
-        from pyre.gl_engine.shaders.texture_shader import TextureShader
-
-        self._rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
-        self._rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
-        if isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
-            self._rigid_warped_display_baseline = np.asarray(
-                self._TransformModel.target_offset, dtype=np.float32).copy()
-            fwd, _ = TextureShader.rigid_matrices_from_transform(self._TransformModel)
-            self._rigid_fixed_display_baseline_matrix = fwd.astype(np.float32, copy=True)
-        else:
-            self._rigid_warped_display_baseline = None
-            self._rigid_fixed_display_baseline_matrix = None
-
-    def record_warped_display_rotation(
+    def resolve_draw_state(
             self,
-            rangle: float,
-            pivot_target_yx: NDArray[np.floating] | None) -> None:
-        """Compose an incremental warped-panel rotation about the cursor pivot."""
-        if pivot_target_yx is None:
-            return
-        pivot = np.asarray(pivot_target_yx, dtype=np.float32).ravel()[:2]
-        step = _rigid_display_rotation_about_pivot_yx(rangle, pivot)
-        self._rigid_warped_display_matrix = step @ self._rigid_warped_display_matrix
+            *,
+            image_space: Space,
+            view_type: ViewType | None,
+            composite_fixed_align: bool,
+            tween: float) -> TransformDrawState:
+        """Resolve GPU draw uniforms via the active display strategy."""
+        return self._display_strategy.resolve_draw_state(
+            image_space=image_space,
+            view_type=view_type,
+            composite_fixed_align=composite_fixed_align,
+            model=self.TransformModel,
+            tween=tween,
+            interactive_edit_in_progress=self.interactive_edit_in_progress,
+            edit_space=self._interactive_edit_space,
+        )
 
-    def record_fixed_display_rotation(
+    def begin_gesture(
             self,
-            rangle: float,
-            pivot_target_yx: NDArray[np.floating] | None) -> None:
-        """Compose an incremental composite fixed-layer rotation about the cursor pivot."""
-        if pivot_target_yx is None:
-            return
-        pivot = np.asarray(pivot_target_yx, dtype=np.float32).ravel()[:2]
-        step = _rigid_display_rotation_about_pivot_yx(rangle, pivot)
-        self._rigid_fixed_display_matrix = step @ self._rigid_fixed_display_matrix
+            gesture: TransformGesture,
+            space: Space | None = None,
+            view_type: ViewType | None = None) -> None:
+        """Begin a display gesture on the active strategy."""
+        self._display_strategy.begin_gesture(gesture, space, view_type)
+        from pyre.controllers.transform_display import RigidDisplayStrategy
 
-    def _commit_rigid_fixed_display_matrix(self) -> None:
-        """Fold pending composite fixed display rotation into the frozen baseline matrix."""
-        if self._rigid_fixed_display_baseline_matrix is None:
-            return
-        if np.allclose(self._rigid_fixed_display_matrix, np.eye(3, dtype=np.float32)):
-            return
-        self._rigid_fixed_display_baseline_matrix = (
-            self._rigid_fixed_display_matrix @ self._rigid_fixed_display_baseline_matrix
-        ).astype(np.float32, copy=False)
-        self._rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
+        if isinstance(self._display_strategy, RigidDisplayStrategy):
+            self._display_strategy.snapshot_edit_matrices(self.TransformModel)
 
-    def _refresh_rigid_fixed_display_baseline_from_model(self) -> None:
-        """Align composite fixed display baseline with the current registration matrix."""
-        if not isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
-            return
-        from pyre.gl_engine.shaders.texture_shader import TextureShader
-
-        fwd, _ = TextureShader.rigid_matrices_from_transform(self._TransformModel)
-        self._rigid_fixed_display_baseline_matrix = fwd.astype(np.float32, copy=True)
-        self._rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
+    def end_gesture(self) -> None:
+        """End the active display gesture."""
+        self._display_strategy.end_gesture()
 
     def reset_rigid_transform(self) -> None:
         """Reset a rigid transform to zero offset and zero angle."""
@@ -248,53 +184,36 @@ class TransformController:
         if update_matrix is not None:
             update_matrix()
         model.OnTransformChanged()  # type: ignore[attr-defined]
-        self._sync_rigid_warped_display_baseline()
+        self._display_strategy.end_gesture()
         self.FireOnChangeEvent()
 
-    def begin_interactive_edit(self, space: Space | None = None) -> None:
+    def begin_interactive_edit(
+            self,
+            space: Space | None = None,
+            view_type: ViewType | None = None,
+            gesture: TransformGesture | None = None) -> None:
         """Mark the start of a continuous edit. Heavy display refresh is deferred until end."""
         if self._interactive_edit_depth == 0:
             self._interactive_edit_space = space
-            if isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
-                from pyre.gl_engine.shaders.texture_shader import TextureShader
-                fwd, inv = TextureShader.rigid_matrices_from_transform(self._TransformModel)
-                self._rigid_matrix_at_edit_start = fwd
-                self._rigid_inverse_matrix_at_edit_start = inv
-                self._target_offset_at_edit_start = np.asarray(
-                    self._TransformModel.target_offset, dtype=np.float32).copy()
+            resolved = gesture if gesture is not None else gesture_for_interactive_edit(
+                space, view_type, self.type)
+            self.begin_gesture(resolved, space, view_type)
         self._interactive_edit_depth += 1
         nornir_imageregistration.interactive_edit.begin()
         self._pending_moved_indices.clear()
 
     def end_interactive_edit(self) -> None:
         """End continuous edit and run any deferred full refresh."""
-        edit_space = self._interactive_edit_space
-        had_fixed_display_rotation = not np.allclose(
-            self._rigid_fixed_display_matrix, np.eye(3, dtype=np.float32))
         if self._interactive_edit_depth > 0:
             self._interactive_edit_depth -= 1
         nornir_imageregistration.interactive_edit.end()
         if self._interactive_edit_depth == 0:
             self._interactive_edit_space = None
-            self._rigid_matrix_at_edit_start = None
-            self._rigid_inverse_matrix_at_edit_start = None
-            self._target_offset_at_edit_start = None
-            self._commit_rigid_fixed_display_matrix()
-            rebased_composite_fixed = False
-            if edit_space == Space.Target:
-                self._refresh_rigid_fixed_display_baseline_from_model()
-                rebased_composite_fixed = True
-            elif edit_space == Space.Source and not had_fixed_display_rotation:
-                self._refresh_rigid_fixed_display_baseline_from_model()
-                rebased_composite_fixed = True
+            self.end_gesture()
             if self._full_refresh_needed:
                 self._full_refresh_needed = False
                 self._run_post_interactive_refresh()
-            elif rebased_composite_fixed and isinstance(
-                    self._TransformModel, nornir_imageregistration.IRigidTransform):
-                self.FireOnChangeEvent()
-            elif had_fixed_display_rotation and isinstance(
-                    self._TransformModel, nornir_imageregistration.IRigidTransform):
+            elif isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
                 self.FireOnChangeEvent()
 
     def _run_post_interactive_refresh(self) -> None:
@@ -404,7 +323,7 @@ class TransformController:
 
         old_transform = self._TransformModel
         self._TransformModel = value
-        self._sync_rigid_warped_display_baseline()
+        self._rebind_display_strategy()
 
         if self._TransformModel is not None:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
@@ -446,8 +365,12 @@ class TransformController:
         # If the transform is getting complicated then use
         # InitializeDataStructures to parallelize the
         # data structure creation as much as possible
-        if self.interactive_edit_in_progress:
+        hint = self._display_strategy.on_model_changed(
+            interactive=self.interactive_edit_in_progress)
+        if hint == TileRefreshHint.FULL and self.interactive_edit_in_progress:
             self._full_refresh_needed = True
+            return
+        if hint == TileRefreshHint.NONE and self.interactive_edit_in_progress:
             return
         if self.NumPoints > 25:
             self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
@@ -565,6 +488,7 @@ class TransformController:
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 
+        self._display_strategy = display_strategy_for_model(None)
         self.TransformModel = TransformModel
 
         if TransformModel is None:
@@ -576,11 +500,6 @@ class TransformController:
         self._point_moved_event_pending = False
         self._interactive_edit_depth = 0
         self._interactive_edit_space = None
-        self._rigid_matrix_at_edit_start = None
-        self._rigid_inverse_matrix_at_edit_start = None
-        self._target_offset_at_edit_start = None
-        self._rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
-        self._rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
         self._pending_moved_indices = set()
         self._tile_mesh_cache = TileMeshCpuCache()
         self._full_refresh_needed = False
@@ -642,8 +561,7 @@ class TransformController:
             self.TransformModel.TranslateFixed(offset)  # type: ignore[attr-defined]
         if self.interactive_edit_in_progress and isinstance(
                 self._TransformModel, nornir_imageregistration.IRigidTransform):
-            if self._interactive_edit_space == Space.Target:
-                self._refresh_rigid_fixed_display_baseline_from_model()
+            self._display_strategy.on_translate_step()
             self.notify_interactive_rigid_repaint()
 
     def Rotate(self, rangle: float, center: NDArray[np.floating] | None = None, space: Space | None = None):
@@ -659,7 +577,6 @@ class TransformController:
                     source_center = np.squeeze(model.InverseTransform(  # type: ignore[union-attr]
                         np.asarray(center, dtype=np.float64).reshape(1, 2)))
                 model.RotateSourcePoints(rangle, source_center)  # type: ignore[attr-defined]
-                self.record_warped_display_rotation(rangle, center)
             else:
                 if center is not None:
                     center_tgt = np.asarray(center, dtype=np.float32).ravel()[:2]
@@ -667,7 +584,6 @@ class TransformController:
                         np.asarray(center_tgt, dtype=np.float64).reshape(1, 2)))
                     model._source_space_center_of_rotation = np.asarray(  # type: ignore[attr-defined]
                         source_pivot, dtype=np.float32).ravel()[:2]
-                    self.record_fixed_display_rotation(-rangle, center_tgt)
                     model.RotateFixed(rangle, center_tgt)  # type: ignore[attr-defined]
                 else:
                     model.RotateFixed(rangle, None)  # type: ignore[attr-defined]

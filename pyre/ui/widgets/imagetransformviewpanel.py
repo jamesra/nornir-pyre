@@ -477,6 +477,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 "default_fbo": default_fbo,
                 "overlay_viewport_size": overlay_viewport_size,
                 "show_mesh_lines": self.show_lines,
+                "view_type": self.view_type,
             }
             self._image_transform_view.draw(self.camera.view_proj, **draw_kwargs)
 

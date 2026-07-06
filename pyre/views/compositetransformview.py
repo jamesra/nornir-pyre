@@ -15,6 +15,7 @@ from nornir_imageregistration.transforms import *
 from pyre.gl_engine import FrameBuffer, raise_on_error  
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import IImageViewModelManager
+from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.controllers.transformcontroller import TransformController
 from pyre.perf_debug import timed
@@ -346,7 +347,8 @@ class CompositeTransformView(IImageTransformView):
                 # target space and aligns with the target image in the composite overlay.
                 self._source_image_view.draw(view_proj, space, client_size, bounding_box,
                                              show_mesh_lines=show_mesh_lines,
-                                             rigid_composite_fixed_align=True)
+                                             rigid_composite_fixed_align=True,
+                                             view_type=ViewType.Composite)
 
                 target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
                 # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
@@ -366,7 +368,8 @@ class CompositeTransformView(IImageTransformView):
                 raise_on_error("after glClear(target) in compositetransformview.draw")
 
                 self._target_image_view.draw(view_proj, space, client_size, bounding_box,
-                                             show_mesh_lines=show_mesh_lines)
+                                             show_mesh_lines=show_mesh_lines,
+                                             view_type=ViewType.Composite)
 
                 # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
                 # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
