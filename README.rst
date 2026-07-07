@@ -148,7 +148,7 @@ Mosaic Viewing
 2. Navigate the mosaic:
 
    * Use WASD keys or right-click drag to pan
-   * Use mouse wheel to zoom; Shift+scroll scales the transform when supported; Ctrl+scroll (and Ctrl+Shift+scroll for finer steps) rotates the transform when supported
+   * Use mouse wheel to zoom; Shift+scroll scales the transform about the cursor when supported; Ctrl+scroll (and Ctrl+Shift+scroll for finer steps) rotates the transform when supported
    * Use Page Up / Page Down to change magnification
 
 Usage
@@ -173,7 +173,7 @@ Right Button:
 
 Scroll wheel:
     * Zoom
-    * Shift+scroll to scale warped image (rigid / similarity transforms)
+    * Shift+scroll to scale warped image about the cursor (rigid / similarity transforms)
     * Ctrl+scroll to rotate warped image
     * Ctrl+Shift+scroll to slowly rotate warped image
 

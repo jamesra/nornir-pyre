@@ -596,6 +596,31 @@ class TransformController:
         else:
             raise NotImplementedError("Current transform does not support rotation")
 
+    def ScaleWarped(
+            self,
+            scale_factor: float,
+            center: NDArray[np.floating] | None = None,
+            space: Space | None = None) -> None:
+        """Scale the warped layer; optional center pins that point in target space."""
+        edit_space = space if space is not None else self._interactive_edit_space
+        if edit_space is None:
+            edit_space = Space.Source
+        model = self._TransformModel
+        if isinstance(model, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
+            if center is not None:
+                source_pivot = np.asarray(center, dtype=np.float32).ravel()[:2]
+                if edit_space == Space.Target:
+                    source_pivot = np.squeeze(model.InverseTransform(  # type: ignore[union-attr]
+                        np.asarray(center, dtype=np.float64).reshape(1, 2))).astype(np.float32)
+                model.ScaleWarpedAboutSourcePoint(scale_factor, source_pivot)  # type: ignore[attr-defined]
+            else:
+                model.ScaleWarped(scale_factor)  # type: ignore[attr-defined]
+            return
+        if isinstance(model, nornir_imageregistration.ITransformRelativeScaling):
+            model.ScaleWarped(scale_factor)  # type: ignore[attr-defined]
+            return
+        raise NotImplementedError("Current transform does not support warped scaling")
+
     def FlipWarped(self):
         """
         Flip the target points

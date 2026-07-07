@@ -228,8 +228,33 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             )
             if shift_scale and scroll_y != 0.0:
                 scale_delta = (1.0 + (-scroll_y / 50.0))
-                self._transform_controller.TransformModel.ScaleWarped(scale_delta)
-                self.parent.update()
+                try:
+                    point_pair = self.get_world_positions(e)
+                    view = self._view_type()
+                    if view == ViewType.Composite:
+                        draw_world_yx = np.asarray(point_pair.source, dtype=np.float32)
+                        source_pivot = np.squeeze(
+                            self._transform_controller.InverseTransform(
+                                draw_world_yx.reshape(1, 2))
+                        ).astype(np.float32)
+                    elif self.space == Space.Source:
+                        source_pivot = np.asarray(point_pair.source, dtype=np.float32)
+                    else:
+                        source_pivot = np.asarray(point_pair.target, dtype=np.float32)
+
+                    self._transform_controller.begin_interactive_edit(
+                        self.space,
+                        view_type=self._view_type(),
+                        gesture=gesture_for_wheel_rotate(
+                            self.space, self._view_type(), self._transform_controller.type))
+                    try:
+                        self._transform_controller.ScaleWarped(
+                            scale_delta, source_pivot, space=self.space)
+                    finally:
+                        self._transform_controller.end_interactive_edit()
+                    self.parent.update()
+                except NotImplementedError:
+                    pass
             elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # rotate
                 if wheel_rotate_locked(
                         self._transform_controller.type, self.space, self._view_type()):
