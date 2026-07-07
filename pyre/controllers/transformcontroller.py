@@ -579,12 +579,8 @@ class TransformController:
                 model.RotateSourcePoints(rangle, source_center)  # type: ignore[attr-defined]
             else:
                 if center is not None:
-                    center_tgt = np.asarray(center, dtype=np.float32).ravel()[:2]
-                    source_pivot = np.squeeze(model.InverseTransform(  # type: ignore[union-attr]
-                        np.asarray(center_tgt, dtype=np.float64).reshape(1, 2)))
-                    model._source_space_center_of_rotation = np.asarray(  # type: ignore[attr-defined]
-                        source_pivot, dtype=np.float32).ravel()[:2]
-                    model.RotateFixed(rangle, center_tgt)  # type: ignore[attr-defined]
+                    source_pivot = np.asarray(center, dtype=np.float32).ravel()[:2]
+                    model.RotateFixedAboutSourcePoint(rangle, source_pivot)  # type: ignore[attr-defined]
                 else:
                     model.RotateFixed(rangle, None)  # type: ignore[attr-defined]
             return

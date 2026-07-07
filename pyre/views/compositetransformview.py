@@ -309,7 +309,9 @@ class CompositeTransformView(IImageTransformView):
              bounding_box: nornir_imageregistration.Rectangle | None = None,
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
-             show_mesh_lines: bool = False):
+             show_mesh_lines: bool = False,
+             rigid_composite_fixed_align: bool = False,
+             view_type: ViewType | None = None):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
         :param client_size: Size of the client area in pixels. (height, width) logical.

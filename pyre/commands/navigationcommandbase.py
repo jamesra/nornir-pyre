@@ -242,7 +242,16 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     # print "Angle: " + str(angle)
                     try:
                         point_pair = self.get_world_positions(e)
-                        if self.space == Space.Source:
+                        view = self._view_type()
+                        if view == ViewType.Composite:
+                            # Composite shares fixed-space camera lookat but draws purple at
+                            # Transform(source); cursor world coords match that draw position.
+                            draw_world_yx = np.asarray(point_pair.source, dtype=np.float32)
+                            world_center = np.squeeze(
+                                self._transform_controller.InverseTransform(
+                                    draw_world_yx.reshape(1, 2))
+                            ).astype(np.float32)
+                        elif self.space == Space.Source:
                             world_center = np.asarray(point_pair.source, dtype=np.float32)
                         else:
                             world_center = np.asarray(point_pair.target, dtype=np.float32)
