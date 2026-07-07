@@ -657,6 +657,13 @@ class StosWindow(PyreWindowBase):
             settings.stos.stos_opened_from_browser_folder = browser_folder
             settings.stos.stos_browser_flat_manual = browser_flat_manual
             transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
+            if isinstance(transform, (
+                    nornir_imageregistration.transforms.RigidTranslation,
+                    nornir_imageregistration.transforms.Rigid,
+            )) and not isinstance(
+                    transform, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
+                transform = nornir_imageregistration.transforms.ConvertRigidTransformToCenteredSimilarityTransform(
+                    transform)
             stos_transform_controller.TransformModel = transform
 
             settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,

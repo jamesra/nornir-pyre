@@ -30,6 +30,7 @@ from pyre.transform_edit_policy import (
 )
 from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
+from pyre.commands.extensions import wheel_scroll_steps
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
 
@@ -210,9 +211,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             if self.camera is None:
                 return
 
-            # Qt wheel events use angleDelta which is in eighths of a degree
-            # Divide by 120 to get a similar scale to wx's GetWheelRotation
-            scroll_y = e.angleDelta().y() / 120.0
+            scroll_y = wheel_scroll_steps(e)
 
             # Keep camera pixel geometry aligned with the GL panel for zoom/rotate-to-cursor.
             panel_w, panel_h = self.parent.size().width(), self.parent.size().height()
@@ -220,13 +219,18 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self._width, self._height = panel_w, panel_h
                 self.camera.window_size = np.array((panel_h, panel_w))
 
-            if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) and (
-                    e.modifiers() & Qt.KeyboardModifier.AltModifier) and isinstance(
+            shift_scale = (
+                (e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                and not (e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                and isinstance(
                     self._transform_controller.TransformModel,
-                    nornir_imageregistration.ITransformRelativeScaling):
+                    nornir_imageregistration.ITransformRelativeScaling)
+            )
+            if shift_scale and scroll_y != 0.0:
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 self._transform_controller.TransformModel.ScaleWarped(scale_delta)
-            elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # We rotate when command is down
+                self.parent.update()
+            elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # rotate
                 if wheel_rotate_locked(
                         self._transform_controller.type, self.space, self._view_type()):
                     pass
@@ -373,4 +377,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             self._transform_controller.FlipWarped()
             self.history_manager.SaveState(self._transform_controller.FlipWarped)
 
+        e.accept()
+
+    def on_key_up(self, e: QKeyEvent) -> None:
         e.accept()
