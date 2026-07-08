@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt
 from nornir_shared import prettyoutput
 import nornir_imageregistration
 from nornir_imageregistration import StosFile
-from nornir_imageregistration.settings import GridRefinement
+from nornir_imageregistration.settings import GridRefinement, SliceToSliceMethod
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
@@ -232,8 +232,14 @@ class StosWindow(PyreWindowBase):
 
         menu.addSeparator()
 
-        menuRotationTranslation = menu.addAction("&Rotate translate estimate")
-        menuRotationTranslation.triggered.connect(self.onRotateTranslate)  # type: ignore[union-attr]
+        rotateTranslateSubmenu = menu.addMenu("&Rotate translate estimate")
+        assert rotateTranslateSubmenu is not None
+        menuLogPolar = rotateTranslateSubmenu.addAction("Log Polar (Fast)")
+        menuLogPolar.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.LogPolar))
+        menuBruteForce = rotateTranslateSubmenu.addAction("Brute Force (Slow)")
+        menuBruteForce.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.BruteForce))
 
         menuGridRefine = menu.addAction("&Convert to refined grid")
         menuGridRefine.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
@@ -448,26 +454,28 @@ class StosWindow(PyreWindowBase):
         """Convert the current transform to an RBF transform."""
         self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RBF)
 
-    def onRotateTranslate(self):
-        """Handle Rotate Translate action"""
-        logger.debug("Rotate translate estimate triggered")
+    def onRotateTranslate(self, method: SliceToSliceMethod = SliceToSliceMethod.LogPolar):
+        """Run rotate-translate estimate using the selected registration method."""
+        logger.debug("Rotate translate estimate triggered method=%s", method.name)
         settings = self._settings.stos.brute_registration
         current_transform = self._transform_controller.TransformModel
         try:
             resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
                                                                          target_image_key=Space.Target,  # type: ignore[arg-type]
                                                                          settings=settings,
-                                                                         LimitImageSize=True
+                                                                         LimitImageSize=True,
+                                                                         method=method,
                                                                          )
         except Exception as e:
-            logger.exception("Rotate translate estimate failed")
+            logger.exception("Rotate translate estimate failed method=%s", method.name)
             QMessageBox.warning(self, "Rotate translate estimate", str(e))
             return
 
         logger.debug(
-            "Rotate translate estimate result_is_none=%s equals_current=%s",
+            "Rotate translate estimate result_is_none=%s equals_current=%s method=%s",
             resulting_transform is None,
-            resulting_transform == current_transform if resulting_transform is not None else None
+            resulting_transform == current_transform if resulting_transform is not None else None,
+            method.name,
         )
 
         if resulting_transform is not None:
@@ -657,13 +665,6 @@ class StosWindow(PyreWindowBase):
             settings.stos.stos_opened_from_browser_folder = browser_folder
             settings.stos.stos_browser_flat_manual = browser_flat_manual
             transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
-            if isinstance(transform, (
-                    nornir_imageregistration.transforms.RigidTranslation,
-                    nornir_imageregistration.transforms.Rigid,
-            )) and not isinstance(
-                    transform, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
-                transform = nornir_imageregistration.transforms.ConvertRigidTransformToCenteredSimilarityTransform(
-                    transform)
             stos_transform_controller.TransformModel = transform
 
             settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,

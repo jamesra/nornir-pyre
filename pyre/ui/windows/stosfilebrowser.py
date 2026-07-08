@@ -9,6 +9,8 @@ Future (not implemented): sortable columns for filename and overall quality scor
 - Opening a folder named ``Manual`` prompts to use the parent STOS group instead; flat
   browse mode avoids nested ``Manual/Manual`` behavior.
 - Page Up / Page Down navigate while this window has focus.
+- Mouse back / forward buttons step the list when a folder is loaded (application-wide,
+  same as ``+`` / ``-``).
 - ``+`` / ``-`` / ``=`` step one transform when a folder is loaded (application-wide).
   On US QWERTY, unshifted ``=`` and ``-`` step down; ``Shift+=`` (``+``) steps up.
   ``Shift++`` / ``Shift+-`` step ten transforms (numpad; main keyboard ``Shift+-`` only).
@@ -24,8 +26,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QListWidget, QListWidgetItem, QFileDialog,
     QMessageBox, QMenu,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QKeyEvent, QColor, QKeySequence, QShortcut
+from PyQt6.QtCore import Qt, QObject, QEvent
+from PyQt6.QtGui import QKeyEvent, QColor, QKeySequence, QShortcut, QMouseEvent
 
 from pyre.container import IContainer
 from pyre.settings import AppSettings
@@ -38,6 +40,32 @@ from pyre.stos_manual_paths import (
 )
 
 
+class StosBrowserMouseNavigationFilter(QObject):
+    """Application-wide filter: mouse back/forward step the STOS list when a folder is loaded."""
+
+    _browser: StosFileBrowserWindow
+
+    def __init__(self, browser: StosFileBrowserWindow):
+        super().__init__(browser)
+        self._browser = browser
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        del watched
+        if event.type() != QEvent.Type.MouseButtonPress:
+            return False
+        if not isinstance(event, QMouseEvent):
+            return False
+        if not self._browser.list_navigation_available():
+            return False
+        if event.button() == Qt.MouseButton.BackButton:
+            self._browser.navigate_previous()
+            return True
+        if event.button() == Qt.MouseButton.ForwardButton:
+            self._browser.navigate_next()
+            return True
+        return False
+
+
 class StosFileBrowserWindow(QMainWindow):
     """Floating Stos Directory window listing transforms in a STOS group folder."""
 
@@ -47,6 +75,7 @@ class StosFileBrowserWindow(QMainWindow):
     _current_index: int
     _settings: AppSettings
     _nav_shortcuts: list[QShortcut]
+    _mouse_nav_filter: StosBrowserMouseNavigationFilter | None
     _manual_override_color = QColor("#c9a227")
 
     @staticmethod
@@ -73,8 +102,10 @@ class StosFileBrowserWindow(QMainWindow):
         self._browse_mode = BrowseMode.stos_group
         self._folder = None
         self._nav_shortcuts = []
+        self._mouse_nav_filter = None
 
         self._setup_ui()
+        self._install_mouse_navigation_filter()
 
         cached = StosFileBrowserWindow.cached_folder_path(settings)
         if cached:
@@ -127,9 +158,33 @@ class StosFileBrowserWindow(QMainWindow):
         shortcut.activated.connect(lambda d=delta: self.navigate_by_delta(d))
         self._nav_shortcuts.append(shortcut)
 
+    def _install_mouse_navigation_filter(self) -> None:
+        """Listen for mouse back/forward anywhere in the app while a folder is loaded."""
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        self._mouse_nav_filter = StosBrowserMouseNavigationFilter(self)
+        app.installEventFilter(self._mouse_nav_filter)
+
+    def _remove_mouse_navigation_filter(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+
+        if self._mouse_nav_filter is None:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self._mouse_nav_filter)
+        self._mouse_nav_filter = None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def list_navigation_available(self) -> bool:
+        """True when the browser has a folder scan with at least one transform row."""
+        return bool(self._folder and self._rows)
 
     @property
     def browse_mode(self) -> BrowseMode:
@@ -162,7 +217,7 @@ class StosFileBrowserWindow(QMainWindow):
 
     def navigate_by_delta(self, delta: int) -> None:
         """Load the transform *delta* rows from the current selection (clamped to list bounds)."""
-        if not self._folder or not self._rows:
+        if not self.list_navigation_available():
             return
         target = max(0, min(self._current_index + delta, len(self._rows) - 1))
         self._load_stos_at_index(target)
@@ -329,3 +384,8 @@ class StosFileBrowserWindow(QMainWindow):
             self.navigate_previous()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event) -> None:
+        """Drop the application event filter when the browser window closes."""
+        self._remove_mouse_navigation_filter()
+        super().closeEvent(event)

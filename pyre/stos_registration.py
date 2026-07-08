@@ -80,3 +80,17 @@ def sync_stos_registration_roles(
         return
     stos_state._warped_image_permutations = warped  # type: ignore[attr-defined]
     stos_state._fixed_image_permutations = fixed  # type: ignore[attr-defined]
+
+
+def normalize_rigid_transform_for_pyre_editing(
+        transform: nornir_imageregistration.ITransform,
+) -> nornir_imageregistration.ITransform:
+    """Upgrade legacy rigid models to CenteredSimilarity2D for Pyre interactive scale."""
+    if isinstance(transform, (
+            nornir_imageregistration.transforms.RigidTranslation,
+            nornir_imageregistration.transforms.Rigid,
+    )) and not isinstance(
+            transform, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
+        return nornir_imageregistration.transforms.ConvertRigidTransformToCenteredSimilarityTransform(
+            transform)
+    return transform

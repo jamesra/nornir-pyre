@@ -6,12 +6,16 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPointF
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 
 from pyre.settings.app import AppSettings
 from pyre.stos_manual_paths import BrowseMode, StosBrowserRow
-from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+from pyre.ui.windows.stosfilebrowser import (
+    StosBrowserMouseNavigationFilter,
+    StosFileBrowserWindow,
+)
 
 
 def _make_rows(count: int) -> list[StosBrowserRow]:
@@ -72,6 +76,41 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
         self.assertEqual(len(browser._nav_shortcuts), 5)
         for shortcut in browser._nav_shortcuts:
             self.assertEqual(shortcut.context(), Qt.ShortcutContext.ApplicationShortcut)
+
+    def _mouse_button_press(self, button: Qt.MouseButton) -> QMouseEvent:
+        return QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(0.0, 0.0),
+            QPointF(0.0, 0.0),
+            QPointF(0.0, 0.0),
+            button,
+            button,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+    def test_mouse_back_forward_navigate_when_folder_loaded(self) -> None:
+        browser = self._browser_with_rows(4, current_index=1)
+        loaded: list[int] = []
+        browser._load_stos_at_index = MagicMock(side_effect=lambda i: loaded.append(i))
+        event_filter = StosBrowserMouseNavigationFilter(browser)
+
+        handled_back = event_filter.eventFilter(browser, self._mouse_button_press(Qt.MouseButton.BackButton))
+        handled_forward = event_filter.eventFilter(browser, self._mouse_button_press(Qt.MouseButton.ForwardButton))
+
+        self.assertTrue(handled_back)
+        self.assertTrue(handled_forward)
+        self.assertEqual(loaded, [0, 2])
+
+    def test_mouse_back_forward_ignored_without_folder(self) -> None:
+        browser = self._browser_with_rows(4, current_index=1)
+        browser._folder = None
+        browser._load_stos_at_index = MagicMock()
+        event_filter = StosBrowserMouseNavigationFilter(browser)
+
+        handled = event_filter.eventFilter(browser, self._mouse_button_press(Qt.MouseButton.BackButton))
+
+        self.assertFalse(handled)
+        browser._load_stos_at_index.assert_not_called()
 
 
 if __name__ == "__main__":

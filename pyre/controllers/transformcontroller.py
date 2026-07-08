@@ -22,6 +22,7 @@ from nornir_imageregistration.transforms.base import IControlPoints
 import nornir_imageregistration.interactive_edit
 import nornir_pools as pools
 import pyre.qt_eventmanager
+from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache
 from pyre.controllers.transform_display import (
     TransformDisplayStrategy,
@@ -314,6 +315,9 @@ class TransformController:
 
     @TransformModel.setter
     def TransformModel(self, value: nornir_imageregistration.ITransform | None):
+        if value is not None:
+            value = normalize_rigid_transform_for_pyre_editing(value)
+
         if self._TransformModel == value:
             # No change
             return

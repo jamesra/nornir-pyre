@@ -30,7 +30,7 @@ from pyre.interfaces.managers.command_history import ICommandHistory
 from pyre.interfaces.viewtype import ViewType
 from pyre.controllers.transformcontroller import TransformController
 from pyre.settings import AppSettings
-from pyre.stos_registration import resolve_warped_and_fixed_image_data
+from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_warped_and_fixed_image_data
 
 
 def SaveRegisteredWarpedImage(fileFullPath: str, transform: ITransform, warpedImage: NDArray):
@@ -121,10 +121,16 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                target_image_key: str,
                                settings: StosBruteSettings,
                                LimitImageSize: bool = False,
+                               method: SliceToSliceMethod | None = None,
                                image_manager: IImageManager = Provide[IContainer.image_manager],
                                app_settings: AppSettings = Provide[IContainer.settings]) -> ITransform | None:
     """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
-    logger.debug("RotateTranslateWarpedImage entry source=%s target=%s", source_image_key, target_image_key)
+    logger.debug(
+        "RotateTranslateWarpedImage entry source=%s target=%s method=%s",
+        source_image_key,
+        target_image_key,
+        method if method is not None else settings.method,
+    )
     largestdimension = 2047
     if LimitImageSize:
         largestdimension = 818
@@ -155,7 +161,8 @@ def RotateTranslateWarpedImage(source_image_key: str,
         settings_target_image_path=target_settings_path,
     )
     working_settings = copy.copy(settings)
-    working_settings._method = SliceToSliceMethod.LogPolar
+    if method is not None:
+        working_settings.method = method
     if LimitImageSize:
         working_settings.larget_dimension = largestdimension
     alignRecord = stos.SliceToSliceRigidRegistrationWithPreprocessedImages(source_image_data=warped_image,
@@ -174,7 +181,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
                  type(transform).__name__,
                  getattr(transform, 'flip_ud', None),
                  numpy.degrees(getattr(transform, 'angle', 0.0)))
-    return transform
+    return normalize_rigid_transform_for_pyre_editing(transform)
     # pyre.state.currentStosConfig._transform_controller.SetPoints(transform.points)
 
     # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.transform,
