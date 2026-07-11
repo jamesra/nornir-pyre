@@ -7,6 +7,8 @@ Documentation
 ~~~~~~~~~~~~~
 
 * **Full manual (umbrella):** https://nornir.github.io/
+* **Windows install (end users):** https://nornir.github.io/packages/pyre_install.html
+* **Development and packaging:** https://nornir.github.io/development/pyre_development.html
 * **Related overview:** https://nornir.github.io/packages/other_packages.html
 
 Overview
@@ -38,76 +40,40 @@ The nornir-pyre package is organized into several key modules:
 Installation
 ~~~~~~~~~~~~
 
-Pre-Install Requirements
------------------------
-    **Install git:** `http://git-scm.com/ <https://git-scm.com>`_
+Windows (recommended for lab users)
+-----------------------------------
 
-    **Open command Prompt or Terminal Window**
+Download and run ``Pyre-<version>-Setup.exe`` from GitHub Releases. No Python, Git,
+or virtual environment is required. See the install guide:
 
-    1. Check active Python (version needs to be >= 3.9)::
+https://nornir.github.io/packages/pyre_install.html
 
-        python --version
+Development install (monorepo)
+------------------------------
 
-    2. If Python is not >= 3.9, install latest python: https://www.python.org/downloads/
-        a. Be sure to check the option to add python to the environment variables.
-    3. Close and reopen the prompt/terminal.
-    4. Ensure new python is returned when executing --version command above.
+Requires Python **3.13+** and an umbrella Nornir checkout with sibling packages.
+Full setup, editable installs, and debugging are documented at:
 
+https://nornir.github.io/development/pyre_development.html
 
-Installing Pyre and its dependencies
-------------------------------------
-1. Create a new Python environment (recommended)::
+Quick start after editable installs::
 
-    **Open a Command Prompt or Terminal Window**
-
-    # Using venv
-    python -m venv pyre-env
-
-    # Activate the environment
-    # On Windows:
-    pyre-env\Scripts\activate
-    # On Linux/Mac:
-    source pyre-env/bin/activate
-
-2. Install dependencies using the requirements file
-    Download the requirements file directly from GitHub
-    `requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
-
-    Run the install command below from the same folder you downloaded the requirements into::
-
-        pip install -r requirements-v1.5.2.txt
-
+    pyre
+    python -m pyre
 
 Running Pyre
 ------------
-    Ensure python environment is active::
 
-        pyre-env\Scripts\activate
+With the environment active::
 
-    Start Pyre with the QT interface (recommended)::
+    pyre
+    python -m pyre
+    python -m pyre -stos path\to\section.stos
 
-        python -m pyre.main_qt
+Software OpenGL fallback (development troubleshooting)::
 
-    Or use the legacy interface::
-
-        python -m pyre
-
-
-Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 2025)
-
-
-Alternative Installation Methods
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Using pip directly with git repositories**:
-
-If you prefer to install the latest development versions directly, you can use::
-
-    pip install git+https://github.com/jamesra/nornir-shared.git@dev-v1.5.2
-    pip install git+https://github.com/jamesra/nornir-pools.git@dev-v1.5.2
-    pip install git+https://github.com/jamesra/nornir-imageregistration.git@cupy-v1.6.5
-    pip install git+https://github.com/jamesra/nornir-buildmanager.git@dev-v1.6.5
-    pip install git+https://github.com/jamesra/nornir-pyre.git@dev-v1.5.2
+    set PYOPENGL_PLATFORM=software
+    pyre
 
 
 Common Workflows
@@ -206,7 +172,10 @@ OpenGL Issues
 If you encounter OpenGL-related errors:
 
 1. Ensure your graphics drivers are up to date
-2. Try running with software rendering: `PYOPENGL_PLATFORM=software python -m pyre.main_qt`
+2. Try running with software rendering::
+
+    set PYOPENGL_PLATFORM=software
+    pyre
 3. Check the console output for specific OpenGL context errors
 
 Image Loading Issues

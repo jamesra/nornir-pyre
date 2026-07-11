@@ -59,14 +59,13 @@ class ControlPointMap:
 
     @staticmethod
     def tweened_points(transform_controller: TransformController, tween: float | Space) -> NDArray[np.floating]:
-        """The control points in the transform, mapped as necessary"""
+        """Control points for hit-testing in Pyre panel space (Source=fixed, Target=warped)."""
         if tween == Space.Source:
-            return transform_controller.SourcePoints
-        elif tween == Space.Target:
             return transform_controller.TargetPoints
-        else:
-            return (transform_controller.SourcePoints * (1.0 - tween) +
-                    transform_controller.TargetPoints * tween)
+        elif tween == Space.Target:
+            return transform_controller.SourcePoints
+        return (transform_controller.TargetPoints * (1.0 - tween) +
+                transform_controller.SourcePoints * tween)
 
     def create_kdtree(self):
         """Create a KDTree from the current control points, if they have changed"""

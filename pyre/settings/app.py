@@ -70,6 +70,8 @@ class StosSettings(BaseModel):
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
     stos_opened_from_browser_folder: str | None = None
     stos_browser_flat_manual: bool = False
+    stos_file_source: str = "auto"
+    stos_browser_basename: str | None = None
 
     @property
     def stos_fullpath(self) -> str | None:

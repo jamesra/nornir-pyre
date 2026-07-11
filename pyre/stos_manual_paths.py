@@ -20,6 +20,24 @@ class BrowseMode(Enum):
     flat_manual = "flat_manual"
 
 
+class StosFileSource(str, Enum):
+    """Which STOS file variant to load for a browser row."""
+
+    auto = "auto"
+    original = "original"
+    manual = "manual"
+
+    @classmethod
+    def from_settings_value(cls, value: str | None) -> StosFileSource:
+        """Parse a persisted settings value, defaulting to auto."""
+        if value is None:
+            return cls.auto
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.auto
+
+
 def _basename_sort_key(name: str) -> tuple:
     lowered = name.lower()
     match = _SECTION_PAIR_RE.search(lowered)
@@ -68,6 +86,67 @@ def resolve_default_load_path(auto_path: str | None, manual_path: str | None) ->
     return auto_path
 
 
+def resolve_load_path(
+        auto_path: str | None,
+        manual_path: str | None,
+        source: StosFileSource,
+) -> str | None:
+    """Return the STOS path for *source* when the backing file exists."""
+    if source == StosFileSource.auto:
+        return resolve_default_load_path(auto_path, manual_path)
+    if source == StosFileSource.original:
+        if auto_path and os.path.isfile(auto_path):
+            return auto_path
+        return None
+    if source == StosFileSource.manual:
+        if manual_path and os.path.isfile(manual_path):
+            return manual_path
+        return None
+    return None
+
+
+def resolve_stos_path_in_group(
+        stos_group_folder: str,
+        basename: str,
+        source: StosFileSource,
+        *,
+        flat_manual: bool = False,
+) -> str | None:
+    """Resolve auto/manual paths for *basename* under a browser folder."""
+    if flat_manual:
+        manual_path = os.path.join(stos_group_folder, basename)
+        manual_path = manual_path if os.path.isfile(manual_path) else None
+        return resolve_load_path(None, manual_path, source)
+
+    auto_path = os.path.join(stos_group_folder, basename)
+    auto_path = auto_path if os.path.isfile(auto_path) else None
+    manual_path = path_to_manual_transform(stos_group_folder, basename)
+    return resolve_load_path(auto_path, manual_path, source)
+
+
+def resolve_stos_restore_path(
+        stos_filename: str,
+        *,
+        stos_group_folder: str | None,
+        stos_browser_basename: str | None,
+        stos_file_source: str | None,
+        flat_manual: bool,
+) -> str:
+    """Re-resolve a saved STOS path using browser context and file-source preference."""
+    if not stos_group_folder or not os.path.isdir(stos_group_folder):
+        return stos_filename
+
+    basename = stos_browser_basename or os.path.basename(stos_filename)
+    source = StosFileSource.from_settings_value(stos_file_source)
+    resolved = resolve_stos_path_in_group(
+        stos_group_folder,
+        basename,
+        source,
+        flat_manual=flat_manual,
+    )
+    return resolved if resolved is not None else stos_filename
+
+
 @dataclass(frozen=True)
 class StosBrowserRow:
     """One logical row in the Stos Directory listing."""
@@ -82,8 +161,19 @@ class StosBrowserRow:
         return self.manual_path is not None and os.path.isfile(self.manual_path)
 
     @property
+    def is_manual_only(self) -> bool:
+        """True when a manual override exists and no automatic file is present."""
+        has_manual = self.manual_path is not None and os.path.isfile(self.manual_path)
+        has_auto = self.auto_path is not None and os.path.isfile(self.auto_path)
+        return has_manual and not has_auto
+
+    @property
     def default_load_path(self) -> str | None:
         return resolve_default_load_path(self.auto_path, self.manual_path)
+
+    def load_path_for_source(self, source: StosFileSource) -> str | None:
+        """Return the path to load for *source*."""
+        return resolve_load_path(self.auto_path, self.manual_path, source)
 
     @property
     def sort_key(self) -> tuple:

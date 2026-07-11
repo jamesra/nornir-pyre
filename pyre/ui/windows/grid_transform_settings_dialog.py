@@ -1,5 +1,18 @@
+from typing import NamedTuple, Optional
+
 from PyQt6.QtWidgets import QDialog, QWidget, QHBoxLayout, QGridLayout, QLabel, QSpinBox, QPushButton
-from PyQt6.QtCore import Qt
+
+
+class GridTransformSettingsResult(NamedTuple):
+    """User-selected dimensions for a new grid transform."""
+    rows: int
+    columns: int
+
+    @property
+    def grid_dims(self) -> tuple[int, int]:
+        """Return (rows, columns) for ITKGridDivision."""
+        return self.rows, self.columns
+
 
 class GridTransformSettingsDialog(QDialog):
     """
@@ -76,3 +89,12 @@ class GridTransformSettingsDialog(QDialog):
         
         # Set window title
         self.setWindowTitle("Grid Transform Settings")
+        self.setModal(True)
+
+    @staticmethod
+    def GetGridTransformSettings(parent: Optional[QWidget] = None) -> Optional[GridTransformSettingsResult]:
+        """Show the dialog and return grid dimensions when the user accepts."""
+        dlg = GridTransformSettingsDialog(parent)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return GridTransformSettingsResult(rows=dlg.rows, columns=dlg.columns)

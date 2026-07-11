@@ -76,7 +76,7 @@ class PyreWindowBase(QMainWindow):
         else:
             self.show()
     
-    def _set_layout_position(self, position, desired_displays: int = 1):
+    def _set_layout_position(self, position, desired_displays: int = 1, layout_mode: str | None = None):
         """Call setPosition on each layout window that exists in the manager (avoids KeyError if not yet registered)."""
         # Collect windows: support both ViewType keys (Source/Target/Composite) and legacy (Fixed/Warped/Composite)
         to_position = []
@@ -89,7 +89,7 @@ class PyreWindowBase(QMainWindow):
                 if key in self._window_manager:
                     to_position.append(self._window_manager[key])
         for win in to_position:
-            win.setPosition(position=position, desiredDisplays=desired_displays)
+            win.setPosition(position=position, desiredDisplays=desired_displays, layout_mode=layout_mode)
 
     def onLeft1WindowView(self):
         """Position windows on the left display"""
@@ -141,8 +141,10 @@ class PyreWindowBase(QMainWindow):
         return orderedSizeList
     
     def setPosition(self, desiredDisplays: int | None = None, count: int | None = None,
-                    position: int | tuple[int, int] | tuple[int, int, int] | None = None):
-        """Set the position of the window based on the available displays"""
+                    position: int | tuple[int, int] | tuple[int, int, int] | None = None,
+                    layout_mode: str | None = None):
+        """Set the position of the window based on the available displays."""
+        del layout_mode  # subclasses (StosWindow) handle special layout modes before tiling
         from PyQt6.QtGui import QGuiApplication
         
         if count is None:
@@ -206,7 +208,7 @@ class PyreWindowBase(QMainWindow):
             p3 = cast(tuple[int, int, int], position)
             if is_source:
                 self.move(sizes[p3[0]].x(), sizes[p3[0]].y())
-                self.resize(sizes[0].width(), sizes[0].height())
+                self.resize(sizes[p3[0]].width(), sizes[p3[0]].height())
             elif is_target:
                 self.move(sizes[p3[2]].x(), sizes[p3[2]].y())
                 self.resize(sizes[p3[2]].width(), sizes[p3[2]].height())

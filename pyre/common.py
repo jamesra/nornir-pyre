@@ -6,7 +6,7 @@ Created on Oct 16, 2012
 import logging
 import tempfile
 import copy
-from typing import Iterable
+from typing import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ from numpy.typing import NDArray
 from PyQt6.QtWidgets import QWidget
 
 import nornir_imageregistration
-from nornir_imageregistration import ITransform, PointLike, AreaLike, ImageStats
+from nornir_imageregistration import ITransform, PointLike, AreaLike, ImageStats, StosFile
 from nornir_imageregistration.settings import StosBruteSettings, GridRefinement, SliceToSliceMethod
 from nornir_imageregistration.transforms import IControlPoints
 from nornir_imageregistration.transforms import utils as transform_utils
@@ -44,6 +44,60 @@ def SaveRegisteredWarpedImage(fileFullPath: str, transform: ITransform, warpedIm
                                                         config.WarpedImageViewModel.Image)  # type: ignore[attr-defined]
 
     nornir_imageregistration.SaveImage(fileFullPath, registeredImage)
+
+
+def stos_image_dim_from_shape(shape: Sequence[int]) -> list[float]:
+    """Build a STOS image dim tuple from ndarray shape (height, width)."""
+    height, width = int(shape[0]), int(shape[1])
+    return [1.0, 1.0, float(width), float(height)]
+
+
+def build_stos_object_for_save(
+        target_image_fullpath: str,
+        source_image_fullpath: str,
+        transform: ITransform,
+        target_mask_fullpath: str | None = None,
+        source_mask_fullpath: str | None = None,
+        *,
+        control_image_dim: list[float] | None = None,
+        mapped_image_dim: list[float] | None = None,
+) -> StosFile:
+    """Snapshot transform and image paths on the main thread before background Save."""
+    stos_obj = StosFile.Create(
+        target_image_fullpath,
+        source_image_fullpath,
+        transform,
+        target_mask_fullpath,
+        source_mask_fullpath,
+    )
+    if control_image_dim is not None:
+        stos_obj.ControlImageDim = list(control_image_dim)
+    if mapped_image_dim is not None:
+        stos_obj.MappedImageDim = list(mapped_image_dim)
+    return stos_obj
+
+
+def save_stos_object(stos_obj: StosFile, fullpath: str) -> str:
+    """Write a prepared StosFile to disk. Safe to call from a worker thread."""
+    stos_obj.Save(fullpath)
+    return fullpath
+
+
+def stos_image_dims_from_stos_config(
+        stos_config,
+) -> tuple[list[float] | None, list[float] | None]:
+    """Read control/mapped image dims from loaded STOS view models when available."""
+    control_dim: list[float] | None = None
+    mapped_dim: list[float] | None = None
+    if stos_config is None:
+        return control_dim, mapped_dim
+    fixed_vm = getattr(stos_config, "FixedImageViewModel", None)
+    warped_vm = getattr(stos_config, "WarpedImageViewModel", None)
+    if fixed_vm is not None and getattr(fixed_vm, "Image", None) is not None:
+        control_dim = stos_image_dim_from_shape(fixed_vm.Image.shape)
+    if warped_vm is not None and getattr(warped_vm, "Image", None) is not None:
+        mapped_dim = stos_image_dim_from_shape(warped_vm.Image.shape)
+    return control_dim, mapped_dim
 
 
 def AssembleHugeRegisteredWarpedImage(transform: ITransform, fixedImageShape: NDArray,

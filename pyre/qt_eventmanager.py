@@ -4,10 +4,40 @@ import inspect
 from typing import Any, Callable, TypeVar
 
 from dependency_injector.wiring import Provide
-from PyQt6.QtCore import QObject, QEvent, QCoreApplication, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject, QEvent, QCoreApplication, QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtWidgets import QApplication
 
 from pyre.interfaces import EventCallbackType, IEventManager
+
+
+class _MainThreadDispatcher(QObject):
+    """Queues callables onto the Qt GUI thread from worker threads."""
+
+    request = pyqtSignal(object)
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self.request.connect(self._dispatch, Qt.ConnectionType.QueuedConnection)
+
+    def _dispatch(self, fn: Callable[[], None]) -> None:
+        fn()
+
+
+_main_thread_dispatcher: _MainThreadDispatcher | None = None
+
+
+def _get_main_thread_dispatcher(app: QApplication) -> _MainThreadDispatcher:
+    global _main_thread_dispatcher
+    if _main_thread_dispatcher is None:
+        _main_thread_dispatcher = _MainThreadDispatcher(app)
+    return _main_thread_dispatcher
+
+
+def init_main_thread_dispatcher() -> None:
+    """Create the GUI-thread dispatcher; call once from the main thread after QApplication exists."""
+    app = QApplication.instance()
+    if app is not None:
+        _get_main_thread_dispatcher(app)
 
 
 def qt_post_to_main(callback: Callable, *args, activate_context: Callable[[], None] | None = None, **kwargs) -> None:
@@ -22,7 +52,13 @@ def qt_post_to_main(callback: Callable, *args, activate_context: Callable[[], No
         if activate_context is not None:
             activate_context()
         callback(*args, **kwargs)
-    QTimer.singleShot(0, wrapped)
+
+    app = QApplication.instance()
+    on_main = app is None or QThread.currentThread() == app.thread()
+    if app is not None and not on_main:
+        _get_main_thread_dispatcher(app).request.emit(wrapped)
+    else:
+        QTimer.singleShot(0, wrapped)
 
 
 class QtInvokeOnMainThreadEvent(QEvent):

@@ -15,6 +15,9 @@ class ImageManagerLike(Protocol):
     def __getitem__(self, key: str) -> nornir_imageregistration.ImagePermutationHelper:
         ...
 
+    def __contains__(self, key: str) -> bool:
+        ...
+
 
 def _basename_casefold(path: str | None) -> str | None:
     """Return a case-insensitive basename for path comparison, or None."""
@@ -70,6 +73,28 @@ def resolve_warped_and_fixed_image_data(
     return slot_for_source, slot_for_target
 
 
+def try_resolve_warped_and_fixed_image_data(
+        image_manager: ImageManagerLike,
+        source_image_key: str,
+        target_image_key: str,
+        stos_filename: str | None = None,
+        settings_source_image_path: str | None = None,
+        settings_target_image_path: str | None = None,
+) -> tuple[nornir_imageregistration.ImagePermutationHelper,
+           nornir_imageregistration.ImagePermutationHelper] | None:
+    """Like ``resolve_warped_and_fixed_image_data`` but returns None when either slot is unloaded."""
+    if source_image_key not in image_manager or target_image_key not in image_manager:
+        return None
+    return resolve_warped_and_fixed_image_data(
+        image_manager,
+        source_image_key,
+        target_image_key,
+        stos_filename=stos_filename,
+        settings_source_image_path=settings_source_image_path,
+        settings_target_image_path=settings_target_image_path,
+    )
+
+
 def sync_stos_registration_roles(
         stos_state: object,
         warped: nornir_imageregistration.ImagePermutationHelper,
@@ -80,6 +105,48 @@ def sync_stos_registration_roles(
         return
     stos_state._warped_image_permutations = warped  # type: ignore[attr-defined]
     stos_state._fixed_image_permutations = fixed  # type: ignore[attr-defined]
+
+
+def wire_stos_state_after_load(
+        stos_state: object,
+        image_viewmodel_manager: object,
+) -> None:
+    """Point StosState viewmodels at the slots populated by ``ImageLoader.load_stos``."""
+    from pyre.interfaces.viewtype import ViewType
+
+    if not hasattr(stos_state, "FixedImageViewModel"):
+        return
+
+    fixed_vm = None
+    warped_vm = None
+    try:
+        fixed_vm = image_viewmodel_manager[ViewType.Target.value]
+    except (KeyError, TypeError):
+        pass
+    try:
+        warped_vm = image_viewmodel_manager[ViewType.Source.value]
+    except (KeyError, TypeError):
+        pass
+
+    stos_state.FixedImageViewModel = fixed_vm  # type: ignore[attr-defined]
+    stos_state.WarpedImageViewModel = warped_vm  # type: ignore[attr-defined]
+
+    update_permutations = getattr(stos_state, "_update_image_permutations", None)
+    if callable(update_permutations):
+        fixed_mask = getattr(stos_state, "FixedImageMaskViewModel", None)
+        warped_mask = getattr(stos_state, "WarpedImageMaskViewModel", None)
+        stos_state._fixed_image_permutations = update_permutations(fixed_vm, fixed_mask)  # type: ignore[attr-defined]
+        stos_state._warped_image_permutations = update_permutations(warped_vm, warped_mask)  # type: ignore[attr-defined]
+
+
+def apply_stos_transform_to_controller(
+        transform_controller: object,
+        transform_string: str,
+) -> nornir_imageregistration.ITransform:
+    """Parse a STOS transform string and install it on the shared TransformController."""
+    transform = nornir_imageregistration.transforms.LoadTransform(transform_string)
+    transform_controller.TransformModel = transform  # type: ignore[attr-defined]
+    return transform_controller.TransformModel  # type: ignore[attr-defined,no-any-return]
 
 
 def normalize_rigid_transform_for_pyre_editing(

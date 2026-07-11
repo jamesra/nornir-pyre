@@ -14,13 +14,13 @@ The module provides two main entry points:
 - main_qt(): Modern entry point using the QT interface
 
 Usage:
-    To start Pyre with the QT interface (recommended):
-        python -m pyre.main_qt
+    To start Pyre with no arguments (empty workspace is valid)::
 
-    To start Pyre with the legacy interface:
+        pyre
         python -m pyre
 
-Command-line Arguments:
+    Optional command-line arguments:
+
     -Fixed: Path to the target (fixed) image
     -Warped: Path to the image to be warped (source)
     -stos: Path to a STOS file to load
@@ -62,6 +62,7 @@ from . import resource_paths
 from pyre.container import IContainer
 from pyre.stos_container import StosContainer
 import pyre.commands.stos
+from pyre.frozen_paths import configure_frozen_environment, is_frozen, user_settings_path
 from pyre.settings import AppSettings
 from pyre.ui.window_geometry import apply_saved_window_geometry, capture_window_geometry
 
@@ -77,12 +78,14 @@ class TeeOutput:
         self.original_stream = original_stream
 
     def write(self, text: str):
-        self.original_stream.write(text)
+        if self.original_stream is not None:
+            self.original_stream.write(text)
         self.file.write(text)
         self.file.flush()  # Ensure it's written immediately
 
     def flush(self):
-        self.original_stream.flush()
+        if self.original_stream is not None:
+            self.original_stream.flush()
         self.file.flush()
 
     def close(self):
@@ -104,12 +107,14 @@ class TeeStderr:
         self.original_stderr = original_stderr
 
     def write(self, text: str):
-        self.original_stderr.write(text)
+        if self.original_stderr is not None:
+            self.original_stderr.write(text)
         self.file.write(text)
         self.file.flush()  # Ensure it's written immediately
 
     def flush(self):
-        self.original_stderr.flush()
+        if self.original_stderr is not None:
+            self.original_stderr.flush()
         self.file.flush()
 
     def close(self):
@@ -198,7 +203,8 @@ def _setup_console_logging():
     atexit.register(cleanup)
 
     # Write initial message using original stdout to avoid recursion
-    _original_stdout.write(f"Console output being logged to: {log_file_path}\n")
+    if _original_stdout is not None:
+        _original_stdout.write(f"Console output being logged to: {log_file_path}\n")
     _console_log_file.file.write(f"Console output being logged to: {log_file_path}\n")
     _console_log_file.file.flush()
 
@@ -303,11 +309,19 @@ def build_container() -> IContainer:
     return container_interface
 
 
+def _settings_output_path() -> str:
+    if is_frozen():
+        settings_path = user_settings_path()
+        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+        return settings_path
+    return os.path.join(os.path.dirname(__file__), 'settings.json')
+
+
 @atexit.register
 def SaveSettings(settings_provider: Provider[AppSettings] = Provide[IContainer.settings].provider):
     settings = settings_provider()
     json = settings.model_dump_json(indent=4)
-    output_file = os.path.join(os.path.dirname(__file__), 'settings.json')
+    output_file = _settings_output_path()
     with open(output_file, 'w') as file:
         file.write(json)
 
@@ -331,6 +345,8 @@ def DefineDefaultSurface():
 @inject
 def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
         image_viewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]):
+    configure_frozen_environment()
+
     # Build the container first (before setting up logging to avoid pickling issues)
     container = build_container()
 
@@ -380,6 +396,9 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     else:
         print("Warning: QApplication instance already exists, reusing it")
 
+    from pyre.qt_eventmanager import init_main_thread_dispatcher
+    init_main_thread_dispatcher()
+
     # Create the windows
     # mosaic_window = MosaicWindow(None, 1, "Mosaic Viewer")
 
@@ -424,6 +443,13 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
                 f"The saved STOS file could not be parsed:\n\n{e}"
                 f"\n\nPyre will start with an empty workspace.",
             )
+        except KeyError as e:
+            QMessageBox.warning(
+                None,
+                "Startup",
+                f"Could not restore the previous session:\n\n{e}"
+                f"\n\nPyre will start with an empty workspace.",
+            )
         if ViewType.Composite in window_manager:
             from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
             StosWindow.open_folder_browser_if_cached_folder_exists(
@@ -431,9 +457,15 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
                 window_manager[ViewType.Composite],
                 geometry_restored=geometry_restored,
             )
-            if not geometry_restored and not StosFileBrowserWindow.has_cached_folder(settings):
-                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
-                    window_manager[view_type].setPosition()
+            if not geometry_restored:
+                from PyQt6.QtGui import QGuiApplication
+                display_count = len(QGuiApplication.screens())
+                if display_count == 1:
+                    if not StosFileBrowserWindow.has_cached_folder(settings):
+                        StosWindow.apply_single_monitor_composite_layout(window_manager)
+                else:
+                    for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                        window_manager[view_type].setPosition()
         # Force repaint so control-point draw-time sync runs with loaded transform
         for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
             if view_type in window_manager:

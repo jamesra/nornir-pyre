@@ -1,12 +1,13 @@
-from setuptools import setup, find_packages
+# Legacy setuptools entry point. Prefer pyproject.toml for packaging metadata.
+from setuptools import find_packages, setup
 
 setup(
     name="pyre",
-    version="1.5.2",
+    version="1.5.3",
     author="James Anderson",
     author_email="James.R.Anderson@utah.edu",
-    description="A helper library that wraps python threads, multiprocessing, a process pool for shell commands, and parallel python with the same interface",
-    long_description=open("README.rst").read(),
+    description="Interactive image registration and visualization for the Nornir ecosystem",
+    long_description=open("README.rst", encoding="utf-8").read(),
     long_description_content_type="text/x-rst",
     url="https://github.com/jamesra/nornir-pyre",
     packages=find_packages(where=".", include=["pyre", "pyre.*"]),
@@ -21,7 +22,8 @@ setup(
         "pillow>=2.3",
         "pydantic >= 2.9.2",
         "PyYAML>=6.0.2",
-        "wxPython>=4.0",
+        "PyQt6>=6.6.0",
+        "PyQt6-sip>=13.6.0",
         "nornir_shared @ git+https://github.com/jamesra/nornir-shared.git@dev-v1.5.2",
         "nornir_pools @ git+https://github.com/jamesra/nornir-pools.git@dev-v1.5.2",
         "nornir_imageregistration @ git+https://github.com/jamesra/nornir-imageregistration.git@cupy-v1.6.5",

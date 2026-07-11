@@ -5,7 +5,12 @@ Future (not implemented): sortable columns for filename and overall quality scor
 - Open Folder scans a STOS group directory and merges automatic ``*.stos`` files with
   overrides in ``Manual/`` (Nornir buildmanager layout).
 - Rows with a manual override show ``[Manual]`` and load the manual file on double-click.
-- Right-click offers Open automatic vs manual when both exist.
+- Manual-only rows (manual present, automatic missing) use a darker yellow list color.
+- **File Source** selector (Auto / Original / Manual) controls which variant loads on open and navigation.
+- When the selected source cannot resolve a path, load falls back to Auto (manual preferred).
+- Right-click offers Open automatic vs manual when both exist, and copy the resolved
+  file path to the clipboard.
+- Delete removes only the automatic ``*.stos`` file after Yes/Enter confirmation; never Manual/.
 - Opening a folder named ``Manual`` prompts to use the parent STOS group instead; flat
   browse mode avoids nested ``Manual/Manual`` behavior.
 - Page Up / Page Down navigate while this window has focus.
@@ -27,17 +32,19 @@ from PyQt6.QtWidgets import (
     QMessageBox, QMenu,
 )
 from PyQt6.QtCore import Qt, QObject, QEvent
-from PyQt6.QtGui import QKeyEvent, QColor, QKeySequence, QShortcut, QMouseEvent
+from PyQt6.QtGui import QFontMetrics, QKeyEvent, QColor, QKeySequence, QShortcut, QMouseEvent, QGuiApplication
 
 from pyre.container import IContainer
 from pyre.settings import AppSettings
 from pyre.stos_manual_paths import (
     BrowseMode,
     StosBrowserRow,
+    StosFileSource,
     is_manual_input_directory,
     parent_stos_group_folder,
     scan_stos_browser_rows,
 )
+from pyre.ui.widgets.stos_file_source_selector import StosFileSourceSelector
 
 
 class StosBrowserMouseNavigationFilter(QObject):
@@ -66,6 +73,31 @@ class StosBrowserMouseNavigationFilter(QObject):
         return False
 
 
+class StosBrowserListDeleteFilter(QObject):
+    """Intercept Delete on the list widget so the main window need not hold focus."""
+
+    _browser: StosFileBrowserWindow
+
+    def __init__(self, browser: StosFileBrowserWindow):
+        super().__init__(browser)
+        self._browser = browser
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        del watched
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        if not isinstance(event, QKeyEvent):
+            return False
+        if event.key() != Qt.Key.Key_Delete:
+            return False
+        self._browser._delete_automatic_at_index(self._browser._current_index)
+        return True
+
+
+_BROWSER_MIN_LAYOUT_WIDTH = 180
+_BROWSER_LAYOUT_PADDING = 44  # list margins + scrollbar reserve
+
+
 class StosFileBrowserWindow(QMainWindow):
     """Floating Stos Directory window listing transforms in a STOS group folder."""
 
@@ -76,7 +108,10 @@ class StosFileBrowserWindow(QMainWindow):
     _settings: AppSettings
     _nav_shortcuts: list[QShortcut]
     _mouse_nav_filter: StosBrowserMouseNavigationFilter | None
+    _list_delete_filter: StosBrowserListDeleteFilter | None
+    _file_source_selector: StosFileSourceSelector
     _manual_override_color = QColor("#c9a227")
+    _manual_only_color = QColor("#8b6914")
 
     @staticmethod
     def has_cached_folder(settings: AppSettings) -> bool:
@@ -103,6 +138,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._folder = None
         self._nav_shortcuts = []
         self._mouse_nav_filter = None
+        self._list_delete_filter = None
 
         self._setup_ui()
         self._install_mouse_navigation_filter()
@@ -135,10 +171,20 @@ class StosFileBrowserWindow(QMainWindow):
         self._folder_label.setWordWrap(True)
         layout.addWidget(self._folder_label)
 
+        self._file_source_selector = StosFileSourceSelector(self)
+        self._file_source_selector.set_source(
+            StosFileSource.from_settings_value(self._settings.stos.stos_file_source),
+        )
+        self._file_source_selector.source_changed.connect(self._on_file_source_changed)
+        layout.addWidget(self._file_source_selector)
+
         self._list_widget = QListWidget()
         self._list_widget.itemActivated.connect(self._on_item_activated)
+        self._list_widget.currentRowChanged.connect(self._on_list_selection_changed)
         self._list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list_widget.customContextMenuRequested.connect(self._on_context_menu)
+        self._list_delete_filter = StosBrowserListDeleteFilter(self)
+        self._list_widget.installEventFilter(self._list_delete_filter)
         layout.addWidget(self._list_widget)
 
         self._setup_navigation_shortcuts()
@@ -295,13 +341,26 @@ class StosFileBrowserWindow(QMainWindow):
         if persist:
             self._settings.ui.stos_browser_folder = folder
         self._folder_label.setText(folder)
+        self._file_source_selector.set_flat_manual_mode(mode == BrowseMode.flat_manual)
         self._rows = scan_stos_browser_rows(folder, self._browse_mode)
         self._current_index = -1
         self._populate_list()
+        self._update_source_selector_for_current_row()
 
     # ------------------------------------------------------------------
     # List population and loading
     # ------------------------------------------------------------------
+
+    def minimum_layout_width(self) -> int:
+        """Return the narrowest width that still shows row labels in automatic layouts."""
+        metrics = QFontMetrics(self._list_widget.font())
+        max_text = metrics.horizontalAdvance("Open Folder\u2026")
+        for row in self._rows:
+            label = row.basename
+            if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
+                label = f"{row.basename} [Manual]"
+            max_text = max(max_text, metrics.horizontalAdvance(label))
+        return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING)
 
     def _populate_list(self) -> None:
         self._list_widget.clear()
@@ -311,17 +370,95 @@ class StosFileBrowserWindow(QMainWindow):
                 label = f"{row.basename} [Manual]"
             item = QListWidgetItem(label)
             item.setToolTip(self._row_tooltip(row))
-            if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
-                item.setForeground(self._manual_override_color)
+            color = self._row_list_color(row)
+            if color is not None:
+                item.setForeground(color)
             self._list_widget.addItem(item)
         if 0 <= self._current_index < len(self._rows):
             self._list_widget.setCurrentRow(self._current_index)
+        self._update_source_selector_for_current_row()
+
+    def _row_list_color(self, row: StosBrowserRow) -> QColor | None:
+        """Return list foreground color for manual override / manual-only rows."""
+        if self._browse_mode != BrowseMode.stos_group or not row.has_manual_override:
+            return None
+        if row.is_manual_only:
+            return self._manual_only_color
+        return self._manual_override_color
+
+    def _current_row(self) -> StosBrowserRow | None:
+        if self._current_index < 0 or self._current_index >= len(self._rows):
+            return None
+        return self._rows[self._current_index]
+
+    def _row_has_auto(self, row: StosBrowserRow) -> bool:
+        return row.auto_path is not None and os.path.isfile(row.auto_path)
+
+    def _row_has_manual(self, row: StosBrowserRow) -> bool:
+        return row.manual_path is not None and os.path.isfile(row.manual_path)
+
+    def _row_can_delete_automatic(self, row: StosBrowserRow) -> bool:
+        """True when Delete may remove the automatic STOS file for *row*."""
+        if self._browse_mode == BrowseMode.flat_manual:
+            return False
+        return self._row_has_auto(row)
+
+    def _update_source_selector_for_current_row(self) -> None:
+        row = self._current_row()
+        if row is None:
+            self._file_source_selector.set_row_availability(has_auto=False, has_manual=False)
+            return
+        has_auto = self._row_has_auto(row)
+        has_manual = self._row_has_manual(row)
+        self._file_source_selector.set_row_availability(has_auto=has_auto, has_manual=has_manual)
+        current = self._file_source_selector.source()
+        if row.load_path_for_source(current) is None:
+            fallback = StosFileSource.auto
+            self._file_source_selector.set_source(fallback)
+            self._settings.stos.stos_file_source = fallback.value
+
+    def _on_list_selection_changed(self, index: int) -> None:
+        if index < 0:
+            self._current_index = -1
+        else:
+            self._current_index = index
+        self._update_source_selector_for_current_row()
+
+    def _on_file_source_changed(self, source: StosFileSource) -> None:
+        self._settings.stos.stos_file_source = source.value
+        if self._current_index >= 0:
+            self._load_stos_at_index(self._current_index)
+
+    def _source_for_load(self) -> StosFileSource:
+        return StosFileSource.from_settings_value(self._settings.stos.stos_file_source)
+
+    def _missing_source_message(self, source: StosFileSource, row: StosBrowserRow) -> str:
+        label = {
+            StosFileSource.original: "Original (automatic)",
+            StosFileSource.manual: "Manual",
+        }.get(source, source.value)
+        return f"No {label} STOS file exists for {row.basename}."
+
+    def _resolve_load_path_for_row(
+            self, row: StosBrowserRow, source: StosFileSource) -> tuple[str | None, StosFileSource]:
+        """Resolve a load path for *row*, falling back to Auto when *source* is missing."""
+        load_path = row.load_path_for_source(source)
+        if load_path is not None:
+            return load_path, source
+        if source != StosFileSource.auto:
+            auto_path = row.load_path_for_source(StosFileSource.auto)
+            if auto_path is not None:
+                return auto_path, StosFileSource.auto
+        return None, source
 
     @staticmethod
     def _row_tooltip(row: StosBrowserRow) -> str:
         auto = row.auto_path or "(none)"
         manual = row.manual_path or "(none)"
-        return f"Automatic: {auto}\nManual: {manual}"
+        tip = f"Automatic: {auto}\nManual: {manual}"
+        if row.is_manual_only:
+            tip += "\n(automatic missing)"
+        return tip
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
         self._load_stos_at_index(self._list_widget.row(item))
@@ -342,25 +479,54 @@ class StosFileBrowserWindow(QMainWindow):
             auto_action = menu.addAction("Open Automatic Transform")
             auto_action.setEnabled(row.auto_path is not None)
             auto_action.triggered.connect(
-                lambda: self._load_stos_path(row.auto_path, index))
+                lambda: self._load_stos_path(row.auto_path, index, browser_basename=row.basename))
 
             manual_action = menu.addAction("Open Manual Override")
             manual_action.setEnabled(row.manual_path is not None)
             manual_action.triggered.connect(
-                lambda: self._load_stos_path(row.manual_path, index))
+                lambda: self._load_stos_path(row.manual_path, index, browser_basename=row.basename))
+
+        menu.addSeparator()
+        load_path, _ = self._resolve_load_path_for_row(row, self._source_for_load())
+        copy_action = menu.addAction("Copy Full Path to Clipboard")
+        copy_action.setEnabled(load_path is not None)
+        copy_action.triggered.connect(lambda: self._copy_full_path_to_clipboard(row))
 
         menu.exec(self._list_widget.mapToGlobal(position))
+
+    def _copy_full_path_to_clipboard(self, row: StosBrowserRow) -> None:
+        """Copy the resolved STOS path for the current file-source preference."""
+        source = self._source_for_load()
+        load_path, used_source = self._resolve_load_path_for_row(row, source)
+        if load_path is None:
+            QMessageBox.information(self, "STOS not found", self._missing_source_message(source, row))
+            return
+        if used_source != source:
+            self._file_source_selector.set_source(used_source)
+            self._settings.stos.stos_file_source = used_source.value
+        QGuiApplication.clipboard().setText(os.path.normpath(load_path))
 
     def _load_stos_at_index(self, index: int) -> None:
         if index < 0 or index >= len(self._rows):
             return
         row = self._rows[index]
-        load_path = row.default_load_path
+        source = self._source_for_load()
+        load_path, used_source = self._resolve_load_path_for_row(row, source)
         if load_path is None:
+            QMessageBox.information(self, "STOS not found", self._missing_source_message(source, row))
             return
-        self._load_stos_path(load_path, index)
+        if used_source != source:
+            self._file_source_selector.set_source(used_source)
+            self._settings.stos.stos_file_source = used_source.value
+        self._load_stos_path(load_path, index, browser_basename=row.basename)
 
-    def _load_stos_path(self, filepath: str | None, index: int) -> None:
+    def _load_stos_path(
+            self,
+            filepath: str | None,
+            index: int,
+            *,
+            browser_basename: str | None = None,
+    ) -> None:
         if not filepath:
             return
         from pyre.ui.windows.stoswindow import StosWindow
@@ -368,10 +534,71 @@ class StosFileBrowserWindow(QMainWindow):
             filepath,
             browser_folder=self._folder,
             browser_flat_manual=(self._browse_mode == BrowseMode.flat_manual),
+            browser_basename=browser_basename,
         )
         self._current_index = index
         self._list_widget.setCurrentRow(index)
         self.setWindowTitle(f"Stos Directory \u2014 {os.path.basename(filepath)}")
+
+    # ------------------------------------------------------------------
+    # Delete automatic STOS
+    # ------------------------------------------------------------------
+
+    def _confirm_delete_automatic(self, row: StosBrowserRow) -> bool:
+        """Ask the user to confirm deleting the automatic STOS file for *row*."""
+        auto_path = row.auto_path or ""
+        message = (
+            f"Delete the automatic STOS file for {row.basename}?\n\n"
+            f"{os.path.normpath(auto_path)}"
+        )
+        if self._row_has_manual(row):
+            message += "\n\nThe manual override will not be deleted."
+        reply = QMessageBox.question(
+            self,
+            "Delete automatic STOS",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _delete_automatic_at_index(self, index: int) -> None:
+        """Delete the automatic STOS file for the row at *index* after confirmation."""
+        if index < 0 or index >= len(self._rows):
+            return
+        row = self._rows[index]
+        if not self._row_can_delete_automatic(row):
+            QMessageBox.information(
+                self,
+                "Nothing to delete",
+                f"No automatic STOS file to delete for {row.basename}.",
+            )
+            return
+        if not self._confirm_delete_automatic(row):
+            return
+        auto_path = row.auto_path
+        assert auto_path is not None
+        basename = row.basename
+        try:
+            os.remove(auto_path)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Delete failed",
+                f"Could not delete automatic STOS file:\n\n{exc}",
+            )
+            return
+        self.rescan()
+        for new_index, new_row in enumerate(self._rows):
+            if new_row.basename == basename:
+                self._current_index = new_index
+                self._list_widget.setCurrentRow(new_index)
+                return
+        if self._rows:
+            self._current_index = min(index, len(self._rows) - 1)
+            self._list_widget.setCurrentRow(self._current_index)
+        else:
+            self._current_index = -1
 
     # ------------------------------------------------------------------
     # Keyboard handling
@@ -382,6 +609,8 @@ class StosFileBrowserWindow(QMainWindow):
             self.navigate_next()
         elif event.key() == Qt.Key.Key_PageUp:
             self.navigate_previous()
+        elif event.key() == Qt.Key.Key_Delete:
+            self._delete_automatic_at_index(self._current_index)
         else:
             super().keyPressEvent(event)
 

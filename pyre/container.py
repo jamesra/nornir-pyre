@@ -37,6 +37,17 @@ def find_file_in_syspath(filename) -> Generator[str, None, None]:
 
 
 def load_json_settings() -> AppSettings:
+    from pyre.frozen_paths import is_frozen, user_settings_path
+
+    if is_frozen():
+        frozen_settings = user_settings_path()
+        if os.path.isfile(frozen_settings):
+            try:
+                with open(frozen_settings, encoding='utf-8') as frozen_file:
+                    return AppSettings.model_validate_json(frozen_file.read())
+            except Exception:
+                logger.warning("Failed to load frozen settings file: %s", frozen_settings)
+
     try:
         cwd_config = resources.files('pyre').joinpath('settings.json')
         json_str = cwd_config.read_text(encoding='utf-8')

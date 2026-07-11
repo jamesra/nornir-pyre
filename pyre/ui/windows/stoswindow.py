@@ -1,18 +1,26 @@
 import os
 import logging
+from concurrent.futures import Future, ThreadPoolExecutor
+
 import numpy as np
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
+from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt
 
 from nornir_shared import prettyoutput
 import nornir_imageregistration
-from nornir_imageregistration import StosFile
 from nornir_imageregistration.settings import GridRefinement, SliceToSliceMethod
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
+from pyre.common import (
+    build_stos_object_for_save,
+    save_stos_object,
+    stos_image_dims_from_stos_config,
+)
+from pyre.qt_eventmanager import qt_post_to_main
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
@@ -32,6 +40,8 @@ from pyre.observable import ObservableSet
 
 logger = logging.getLogger(__name__)
 
+_stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-stos-save")
+
 
 class StosWindow(PyreWindowBase):
     stosfilename = ''
@@ -42,6 +52,9 @@ class StosWindow(PyreWindowBase):
     dirname: str = ''
     _view_type: ViewType
     _folder_browser: 'StosFileBrowserWindow | None' = None  # shared across all StosWindow instances
+    _stos_save_in_progress: bool = False
+    _stos_save_initiator: 'StosWindow | None' = None
+    _save_stos_menu_actions: list[QAction] = []
     _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
     _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
@@ -290,6 +303,8 @@ class StosWindow(PyreWindowBase):
         # Save stos action
         menuSaveStos = filemenu.addAction("&Save Stos File")
         menuSaveStos.triggered.connect(self.onSaveStos)  # type: ignore[union-attr]
+        if menuSaveStos not in StosWindow._save_stos_menu_actions:
+            StosWindow._save_stos_menu_actions.append(menuSaveStos)
 
         # Save warped image action
         menuSaveWarpedImage = filemenu.addAction("&Save Warped Image")
@@ -658,12 +673,14 @@ class StosWindow(PyreWindowBase):
                      StosContainer.transform_controller],
                  settings: AppSettings = Provide[IContainer.settings],
                  browser_folder: str | None = None,
-                 browser_flat_manual: bool = False) -> LoadStosResult | None:
+                 browser_flat_manual: bool = False,
+                 browser_basename: str | None = None) -> LoadStosResult | None:
         try:
             load_result = image_loader.load_stos(filename)
             settings.stos.stos_filename = filename
             settings.stos.stos_opened_from_browser_folder = browser_folder
             settings.stos.stos_browser_flat_manual = browser_flat_manual
+            settings.stos.stos_browser_basename = browser_basename
             transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
             stos_transform_controller.TransformModel = transform
 
@@ -717,47 +734,132 @@ class StosWindow(PyreWindowBase):
                                   config.WarpedImageViewModel.Image)
 
     def onSaveStos(self):
-        """Handle Save Stos File action"""
-        if not (self._transform_controller is None):
-            if self._settings.stos.stos_filename is not None:
-                dirname = os.path.dirname(self._settings.stos.stos_filename)
-                filename = os.path.basename(self._settings.stos.stos_filename)
+        """Handle Save Stos File action."""
+        if self._transform_controller is None or StosWindow._stos_save_in_progress:
+            return
+        fullpath = self._prompt_save_stos_path()
+        if fullpath is None:
+            return
+        self._submit_async_stos_save(fullpath)
+
+    def _prompt_save_stos_path(
+            self,
+            *,
+            dialog_title: str = "Choose a Directory",
+            initial_path: str | None = None,
+    ) -> str | None:
+        """Show the save dialog and return the chosen path, or None if cancelled."""
+        if self._settings.stos.stos_filename is not None:
+            dirname = os.path.dirname(self._settings.stos.stos_filename)
+            filename = os.path.basename(self._settings.stos.stos_filename)
+        else:
+            dirname = os.getcwd()
+            filename = None
+
+        browser_folder = self._settings.stos.stos_opened_from_browser_folder
+        if browser_folder:
+            from pyre.stos_manual_paths import ensure_manual_directory
+            if self._settings.stos.stos_browser_flat_manual:
+                dirname = browser_folder
             else:
-                dirname = os.getcwd()
-                filename = None
+                dirname = ensure_manual_directory(browser_folder)
 
-            browser_folder = self._settings.stos.stos_opened_from_browser_folder
-            if browser_folder:
-                from pyre.stos_manual_paths import ensure_manual_directory
-                if self._settings.stos.stos_browser_flat_manual:
-                    dirname = browser_folder
-                else:
-                    dirname = ensure_manual_directory(browser_folder)
+        if initial_path is not None:
+            dirname = os.path.dirname(initial_path) or dirname
+            filename = os.path.basename(initial_path)
 
-            dialog = QFileDialog(self)
-            dialog.setWindowTitle("Choose a Directory")
-            dialog.setDirectory(dirname)
-            dialog.setNameFilter("Stos files (*.stos)")
-            dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-            if filename:
-                dialog.selectFile(filename)
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle(dialog_title)
+        dialog.setDirectory(dirname)
+        dialog.setNameFilter("Stos files (*.stos)")
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        if filename:
+            dialog.selectFile(filename)
 
-            if dialog.exec() == QFileDialog.DialogCode.Accepted:
-                try:
-                    selected_files = dialog.selectedFiles()
-                    if selected_files:
-                        fullpath = selected_files[0]
-                        self._settings.stos.stos_filename = fullpath
+        if dialog.exec() != QFileDialog.DialogCode.Accepted:
+            return None
+        selected_files = dialog.selectedFiles()
+        if not selected_files:
+            return None
+        return selected_files[0]
 
-                        stosObj = StosFile.Create(
-                            self._settings.stos.target_image.image_fullpath,  # type: ignore[union-attr]
-                            self._settings.stos.source_image.image_fullpath,  # type: ignore[union-attr]
-                            self._transform_controller.TransformModel,
-                            self._settings.stos.target_image.mask_fullpath,  # type: ignore[union-attr]
-                            self._settings.stos.source_image.mask_fullpath, )  # type: ignore[union-attr]
-                        stosObj.Save(fullpath)
-                        if StosWindow._folder_browser is not None:
-                            StosWindow._folder_browser.rescan()
-                            StosWindow._folder_browser.set_current_file(fullpath)
-                except ValueError:
-                    prettyoutput.LogErr(f"Error saving stos file {fullpath}")
+    def _build_stos_object_for_current_transform(self):
+        """Build a StosFile snapshot from the current transform and settings."""
+        stos_config = pyre.state.get_current_stos_config()
+        control_dim, mapped_dim = stos_image_dims_from_stos_config(stos_config)
+        return build_stos_object_for_save(
+            self._settings.stos.target_image.image_fullpath,  # type: ignore[union-attr]
+            self._settings.stos.source_image.image_fullpath,  # type: ignore[union-attr]
+            self._transform_controller.TransformModel,
+            self._settings.stos.target_image.mask_fullpath,  # type: ignore[union-attr]
+            self._settings.stos.source_image.mask_fullpath,  # type: ignore[union-attr]
+            control_image_dim=control_dim,
+            mapped_image_dim=mapped_dim,
+        )
+
+    def _submit_async_stos_save(self, fullpath: str) -> None:
+        """Queue a background STOS write and update UI while in flight."""
+        try:
+            stos_obj = self._build_stos_object_for_current_transform()
+        except ValueError as exc:
+            prettyoutput.LogErr(f"Error preparing stos file: {exc}")
+            return
+
+        StosWindow._stos_save_in_progress = True
+        StosWindow._stos_save_initiator = self
+        basename = os.path.basename(fullpath)
+        for action in StosWindow._save_stos_menu_actions:
+            action.setEnabled(False)
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type in self._window_manager:
+                self._window_manager[view_type].statusBar().showMessage(f"Saving {basename}…")
+
+        future = _stos_save_executor.submit(save_stos_object, stos_obj, fullpath)
+        future.add_done_callback(
+            lambda completed: qt_post_to_main(StosWindow._on_stos_save_finished, completed, fullpath),
+        )
+
+    @classmethod
+    def _clear_stos_save_status(cls) -> None:
+        """Re-enable Save actions and clear status text on all STOS windows."""
+        cls._stos_save_in_progress = False
+        cls._stos_save_initiator = None
+        for action in cls._save_stos_menu_actions:
+            action.setEnabled(True)
+
+    @classmethod
+    def _on_stos_save_finished(cls, future: Future[str], fullpath: str) -> None:
+        """Handle background STOS save completion on the Qt main thread."""
+        initiator = cls._stos_save_initiator
+        retrying = False
+        try:
+            try:
+                saved_path = future.result()
+            except Exception as exc:
+                if initiator is not None:
+                    QMessageBox.warning(
+                        initiator,
+                        "STOS save failed",
+                        f"The file was not saved:\n{exc}",
+                    )
+                    retry_path = initiator._prompt_save_stos_path(
+                        dialog_title="STOS save failed — choose where to retry",
+                        initial_path=fullpath,
+                    )
+                    if retry_path is not None:
+                        retrying = True
+                        initiator._submit_async_stos_save(retry_path)
+                return
+
+            if initiator is not None:
+                initiator._settings.stos.stos_filename = saved_path
+            if cls._folder_browser is not None:
+                cls._folder_browser.rescan()
+                cls._folder_browser.set_current_file(saved_path)
+        finally:
+            if initiator is not None:
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                    if view_type in initiator._window_manager:
+                        initiator._window_manager[view_type].statusBar().clearMessage()
+            if not retrying:
+                cls._clear_stos_save_status()
