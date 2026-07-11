@@ -62,6 +62,8 @@ class StosWindow(PyreWindowBase):
     _config = Provide[IContainer.config]
     _settings: AppSettings = Provide[IContainer.settings]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
+    _menu_workarounds: QMenu
+    _action_reverse_angle: QAction
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -125,6 +127,8 @@ class StosWindow(PyreWindowBase):
 
         # Create menu
         self.createMenu()
+        self._transform_controller.AddOnModelReplacedEventListener(self._update_workarounds_menu_state)
+        self._update_workarounds_menu_state()
 
         # Add drag and drop support
         self.file_drop = FileDrop(self)
@@ -267,6 +271,14 @@ class StosWindow(PyreWindowBase):
 
         menuClear = menu.addAction("&Reset Transform")
         menuClear.triggered.connect(self.onResetTransform)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
+        # Obscure migration aids; keep at the bottom of Operations.
+        self._menu_workarounds = menu.addMenu("&Workarounds")
+        assert self._menu_workarounds is not None
+        self._action_reverse_angle = self._menu_workarounds.addAction("&Reverse Angle")
+        self._action_reverse_angle.triggered.connect(self.onReverseAngle)  # type: ignore[union-attr]
 
         return menu
 
@@ -423,6 +435,22 @@ class StosWindow(PyreWindowBase):
     def onFlipImage(self):
         """Handle Flip Image action"""
         self.transform_controller.FlipWarped()
+
+    def onReverseAngle(self) -> None:
+        """Negate rigid angle (workaround for flipped CS2D ITK angle on reload)."""
+        self.transform_controller.negate_rigid_angle()
+        self.imagepanel._glpanel.update()
+
+    def _update_workarounds_menu_state(self, *args: object) -> None:
+        """Enable Workarounds items only when applicable; disable the submenu if empty."""
+        is_rigid = isinstance(
+            self._transform_controller.TransformModel,
+            nornir_imageregistration.IRigidTransform)
+        self._action_reverse_angle.setEnabled(is_rigid)
+        any_enabled = any(action.isEnabled() for action in self._menu_workarounds.actions())
+        menu_action = self._menu_workarounds.menuAction()
+        if menu_action is not None:
+            menu_action.setEnabled(any_enabled)
 
     def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):
         """Convert the current transform model to the requested transform type."""

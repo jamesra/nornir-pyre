@@ -12,38 +12,38 @@
         "stos_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
         "window_geometry": {
             "Source": {
-                "x": 3840,
-                "y": -90,
-                "width": 1280,
-                "height": 816,
+                "x": 800,
+                "y": 465,
+                "width": 800,
+                "height": 431,
                 "visible": true
             },
             "Target": {
-                "x": 5120,
-                "y": -90,
-                "width": 1280,
-                "height": 816,
+                "x": 800,
+                "y": 465,
+                "width": 800,
+                "height": 431,
                 "visible": true
             },
             "Composite": {
-                "x": 4540,
-                "y": 666,
-                "width": 1860,
-                "height": 816,
+                "x": 317,
+                "y": 0,
+                "width": 1281,
+                "height": 1017,
                 "visible": true
             },
             "StosBrowser": {
-                "x": 4190,
-                "y": 666,
-                "width": 350,
-                "height": 816,
+                "x": 0,
+                "y": 0,
+                "width": 315,
+                "height": 1019,
                 "visible": false
             }
         }
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "Y:/Volumes/RPC3/TEM/StosBrute64\\16-17_ctrl-TEM_Blob_map-TEM_Blob.stos",
+        "stos_filename": "Y:/Volumes/RPC3/TEM/StosBrute64/Manual/89-90_ctrl-TEM_Blob_map-TEM_Blob.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -56,7 +56,9 @@
             "min_overlap": 0.35,
             "source_image_scale_factors": null,
             "larget_dimension": 818,
-            "try_flipped": true
+            "try_flipped": true,
+            "estimated_scale_hint": null,
+            "initial_scale_hint": null
         },
         "point_registration": {
             "alignment_area": 256,
@@ -66,14 +68,16 @@
             }
         },
         "source_image": {
-            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0016\\TEM\\Blob\\Images\\064\\0016_TEM_Blob.png",
-            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0016\\TEM\\Mask\\Images\\064\\0016_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0089\\TEM\\Blob\\Images\\064\\0089_TEM_Blob.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0089\\TEM\\Mask\\Images\\064\\0089_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0017\\TEM\\Blob\\Images\\064\\0017_TEM_Blob.png",
-            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0017\\TEM\\Mask\\Images\\064\\0017_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0090\\TEM\\Blob\\Images\\064\\0090_TEM_Blob.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0090\\TEM\\Mask\\Images\\064\\0090_TEM_Mask.png"
         },
         "stos_opened_from_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
-        "stos_browser_flat_manual": false
+        "stos_browser_flat_manual": false,
+        "stos_file_source": "auto",
+        "stos_browser_basename": "89-90_ctrl-TEM_Blob_map-TEM_Blob.stos"
     }
 }

@@ -156,6 +156,37 @@ class TestStosSaveHelpers(unittest.TestCase):
             reloaded = nornir_imageregistration.transforms.LoadTransform(loaded.Transform)
             np.testing.assert_allclose(reloaded.Transform(sample_points), expected, atol=1e-5)
 
+    def test_scaled_rigid_transform_round_trips_through_save(self) -> None:
+        """Scaled CS2D transforms must preserve geometry through StosFile save/load."""
+        import numpy as np
+
+        rigid = nornir_imageregistration.transforms.CenteredSimilarity2DTransform(
+            target_offset=(-92.46865844726562, 91.00515747070312),
+            source_rotation_center=(234.70594787597656, 361.69439697265625),
+            angle=7.613996145581269,
+            scalar=1.0466634271776583,
+        )
+        sample_points = np.array([[0.0, 0.0], [40.0, 55.0], [120.0, 90.0]], dtype=float)
+        expected = rigid.Transform(sample_points)
+        with tempfile.TemporaryDirectory() as tmp:
+            target_path = os.path.join(tmp, "fixed.png")
+            source_path = os.path.join(tmp, "warped.png")
+            open(target_path, "wb").close()
+            open(source_path, "wb").close()
+            stos_obj = build_stos_object_for_save(
+                target_path,
+                source_path,
+                rigid,
+                control_image_dim=[1.0, 1.0, 640, 480],
+                mapped_image_dim=[1.0, 1.0, 640, 480],
+            )
+            out_path = os.path.join(tmp, "scaled-rigid-roundtrip.stos")
+            save_stos_object(stos_obj, out_path)
+            loaded = StosFile.Load(out_path)
+            reloaded = nornir_imageregistration.transforms.LoadTransform(loaded.Transform)
+            np.testing.assert_allclose(reloaded.angle, rigid.angle, atol=1e-9)
+            np.testing.assert_allclose(reloaded.Transform(sample_points), expected, atol=1e-5)
+
 
 if __name__ == "__main__":
     unittest.main()

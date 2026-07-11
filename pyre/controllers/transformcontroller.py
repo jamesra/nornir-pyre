@@ -188,6 +188,19 @@ class TransformController:
         self._display_strategy.end_gesture()
         self.FireOnChangeEvent()
 
+    def negate_rigid_angle(self) -> None:
+        """Negate the rigid registration angle in place (CS2D/ITK sign workaround)."""
+        model = self._TransformModel
+        if not isinstance(model, nornir_imageregistration.IRigidTransform):
+            return
+        model._angle = -float(model.angle)  # type: ignore[attr-defined]
+        update_matrix = getattr(model, '_update_transform_matrix', None)
+        if update_matrix is not None:
+            update_matrix()
+        model.OnTransformChanged()  # type: ignore[attr-defined]
+        self._display_strategy.end_gesture()
+        self.FireOnChangeEvent()
+
     def begin_interactive_edit(
             self,
             space: Space | None = None,
