@@ -24,6 +24,8 @@ class ControlPointAction(enum.Flag):
     APPEND_SELECTION = 1 << 11  # Add the control points to the selection
     TOGGLE_SELECTION = 1 << 12  # Toggle the selection of the control points
     CALL_TO_MOUSE = 1 << 13  # Call the selected control point to the mouse cursor
+    REFINE_RIGID_ANGLE = 1 << 14  # Local rigid angle refine around current transform
+    REFINE_RIGID_ANGLE_SCALE = 1 << 15  # Local rigid angle + scale refine around current transform
 
 
 class ControlPointActionResult(NamedTuple):

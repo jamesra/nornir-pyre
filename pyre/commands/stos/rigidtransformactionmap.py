@@ -6,7 +6,7 @@ from pyre.settings import AppSettings, UISettings
 from pyre.interfaces.managers.command_manager import IActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
-from pyre.commands.stos.actionmaphelpers import resolve_space_register_action
+from PyQt6.QtCore import Qt
 
 
 class RigidTransformActionMap(IActionMap):
@@ -60,9 +60,13 @@ class RigidTransformActionMap(IActionMap):
         :return: The action that can be taken for the input.  Only one flag should be set.
         """
         interactions = set()
-        register_action = resolve_space_register_action(event, interactions)
-        if register_action is not None:
-            return register_action
+        if event.IsKeyboardInput and event.input == InputEvent.Press and event.keycode == Qt.Key.Key_Space:
+            action = (
+                ControlPointAction.REFINE_RIGID_ANGLE_SCALE
+                if event.IsShiftPressed
+                else ControlPointAction.REFINE_RIGID_ANGLE
+            )
+            return ControlPointActionResult(action, interactions)
 
         action = ControlPointAction.NONE
         if event.IsMouseInput or event.IsKeyboardInput:

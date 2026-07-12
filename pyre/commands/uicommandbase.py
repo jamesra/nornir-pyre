@@ -85,6 +85,8 @@ class CommandBase(IInstantCommand):
         return
 
     def cancel(self):
+        if self._status == pyre.CommandStatus.Completed:
+            return
         self._result = pyre.CommandResult.Canceled
         self.status = pyre.CommandStatus.Completed
         return

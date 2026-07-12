@@ -96,8 +96,8 @@ Image Registration
 
 3. Align the images:
 
-   * Use Space to auto-align the selected point
-   * Use Shift+Space to auto-align all points
+   * Rigid transforms: Space runs a local BruteForce refine (±5° at 1° steps) keeping scale; Shift+Space also refines scale
+   * Mesh / grid / RBF: Space auto-aligns the selected control point; Shift+Space auto-aligns all points
    * Manually adjust points by dragging them
 
 4. Save the transformation:
@@ -157,8 +157,8 @@ View Controls:
     * Tab: Toggle how the warped image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
 
 Alignment:
-    * Space: Auto-align the selected point
-    * Shift+Space: Auto-align all points
+    * Rigid: Space refines angle (±5° at 1° steps); Shift+Space also refines scale
+    * Mesh / grid / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
 
 Undo/Redo:
     * Ctrl+Z: Undo a step

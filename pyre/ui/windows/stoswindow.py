@@ -33,7 +33,7 @@ import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
 from pyre.ui.windows.help_dialog import ControlsHelpDialog
-from pyre.ui.window_geometry import apply_saved_browser_geometry
+from pyre.ui.window_geometry import apply_frame_geometry_to_widget, apply_saved_browser_geometry
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
 from pyre.observable import ObservableSet
@@ -41,6 +41,7 @@ from pyre.observable import ObservableSet
 logger = logging.getLogger(__name__)
 
 _stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-stos-save")
+_DEFAULT_BROWSER_LAYOUT_WIDTH = 350
 
 
 class StosWindow(PyreWindowBase):
@@ -64,6 +65,11 @@ class StosWindow(PyreWindowBase):
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _menu_workarounds: QMenu
     _action_reverse_angle: QAction
+    _menu_refinement: QMenu
+    _action_refine_rigid_angle: QAction
+    _action_refine_rigid_angle_scale: QAction
+    _action_refine_rigid_separator: QAction
+    _action_refine_grid: QAction
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -128,7 +134,9 @@ class StosWindow(PyreWindowBase):
         # Create menu
         self.createMenu()
         self._transform_controller.AddOnModelReplacedEventListener(self._update_workarounds_menu_state)
+        self._transform_controller.AddOnModelReplacedEventListener(self._update_refinement_menu_state)
         self._update_workarounds_menu_state()
+        self._update_refinement_menu_state()
 
         # Add drag and drop support
         self.file_drop = FileDrop(self)
@@ -166,9 +174,20 @@ class StosWindow(PyreWindowBase):
         opsmenu = self.__createOpsMenu()
         menuBar.addMenu(opsmenu)
 
+        # Create Settings menu
+        settingsmenu = self.__createSettingsMenu()
+        menuBar.addMenu(settingsmenu)
+
         # Create Windows menu
         self.windmenu = self.__createWindowsMenu()
         menuBar.addMenu(self.windmenu)
+
+    def __createSettingsMenu(self) -> QMenu:
+        """Create the top-level Settings menu."""
+        menu = QMenu("&Settings", self)
+        menuTransforms = menu.addAction("&Transforms\u2026")
+        menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
+        return menu
 
     def __createWindowsMenu(self):
         """Create the Windows menu"""
@@ -224,8 +243,14 @@ class StosWindow(PyreWindowBase):
 
         menu.addSeparator()
 
-        menuRestoreOrientation = menu.addAction("&Restore Orientation")
-        menuRestoreOrientation.triggered.connect(self.onRestoreOrientation)  # type: ignore[union-attr]
+        restoreSubmenu = menu.addMenu("&Restore Orientation")
+        assert restoreSubmenu is not None
+        menuRestoreCompositeOnly = restoreSubmenu.addAction("&Composite Only")
+        menuRestoreCompositeOnly.triggered.connect(  # type: ignore[union-attr]
+            self.onRestoreOrientationCompositeOnly)
+        menuRestoreAllWindows = restoreSubmenu.addAction("&All Windows")
+        menuRestoreAllWindows.triggered.connect(  # type: ignore[union-attr]
+            self.onRestoreOrientationAllWindows)
 
         return menu
 
@@ -258,8 +283,22 @@ class StosWindow(PyreWindowBase):
         menuBruteForce.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.BruteForce))
 
-        menuGridRefine = menu.addAction("&Convert to refined grid")
-        menuGridRefine.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
+        self._menu_refinement = menu.addMenu("&Refinement")
+        assert self._menu_refinement is not None
+        self._action_refine_rigid_angle = self._menu_refinement.addAction("Refine &angle (±5°)")
+        assert self._action_refine_rigid_angle is not None
+        self._action_refine_rigid_angle.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigidAngle)
+        self._action_refine_rigid_angle_scale = self._menu_refinement.addAction(
+            "Refine angle &and scale")
+        assert self._action_refine_rigid_angle_scale is not None
+        self._action_refine_rigid_angle_scale.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigidAngleScale)
+        self._action_refine_rigid_separator = self._menu_refinement.addSeparator()
+        assert self._action_refine_rigid_separator is not None
+        self._action_refine_grid = self._menu_refinement.addAction("Refine w/ &Grid")
+        assert self._action_refine_grid is not None
+        self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
 
         menu.addSeparator()
 
@@ -350,35 +389,129 @@ class StosWindow(PyreWindowBase):
         tuck it to the left of the composite window at its current width."""
         super()._set_layout_position(position, desired_displays)
         if StosWindow._folder_browser is not None and StosWindow._folder_browser.isVisible():
-            self._position_folder_browser_beside_composite()
+            self._layout_browser_left_of_composite()
 
-    def _position_folder_browser_beside_composite(self):
-        """Move the folder browser to the left of the composite window and shrink
-        the composite by the browser's width so they sit flush without overlap."""
-        browser = StosWindow._folder_browser
+    def _position_folder_browser_beside_composite(self) -> None:
+        """Compatibility alias for docking the browser beside the composite window."""
+        self._layout_browser_left_of_composite()
+
+    @classmethod
+    def _primary_work_area(cls):
+        """Return the leftmost screen work area (x, y, width, height)."""
+        from PyQt6.QtGui import QGuiApplication
+
+        screens = QGuiApplication.screens()
+        if not screens:
+            return 0, 0, 1920, 1080
+        ordered = sorted(screens, key=lambda s: s.availableGeometry().x())
+        geom = ordered[0].availableGeometry()
+        return geom.x(), geom.y(), geom.width(), geom.height()
+
+    @classmethod
+    def _browser_layout_width(cls) -> int:
+        """Width reserved for the STOS file browser in automatic layouts."""
+        browser = cls._folder_browser
+        if browser is None:
+            return _DEFAULT_BROWSER_LAYOUT_WIDTH
+        min_width = browser.minimum_layout_width()
+        return max(int(browser.width()), int(min_width))
+
+    def _layout_browser_left_of_composite(self) -> None:
+        """Dock the shared folder browser in the left strip of the primary work area."""
+        StosWindow._layout_browser_in_work_area(self._window_manager)
+
+    @classmethod
+    def _layout_browser_in_work_area(
+            cls,
+            window_manager: IWindowManager | None = None) -> int:
+        """Place the visible folder browser in the left strip; return reserved width (0 if none)."""
+        browser = cls._folder_browser
         if browser is None or not browser.isVisible():
-            return
-        if ViewType.Composite not in self._window_manager:
-            return
-        composite_win = self._window_manager[ViewType.Composite]
-        geom = composite_win.geometry()
-        browser_w = browser.width()
-        if geom.width() <= browser_w:
-            return  # composite too narrow to split — leave as-is
-        browser.move(geom.x(), geom.y())
-        browser.resize(browser_w, geom.height())
-        composite_win.move(geom.x() + browser_w, geom.y())
-        composite_win.resize(geom.width() - browser_w, geom.height())
+            return 0
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = min(cls._browser_layout_width(), max(work_w // 2, 1))
+        apply_frame_geometry_to_widget(browser, work_x, work_y, browser_w, work_h)
+        return browser_w
 
-    def onRestoreOrientation(self):
-        """Handle Restore Orientation action"""
-        self._window_manager[ViewType.Composite.value].setPosition()  # type: ignore[attr-defined]
-        self._window_manager[ViewType.Target.value].setPosition()  # type: ignore[attr-defined]
-        self._window_manager[ViewType.Source.value].setPosition()  # type: ignore[attr-defined]
+    @classmethod
+    def apply_single_monitor_composite_layout(cls, window_manager: IWindowManager) -> None:
+        """Hide Source/Target; fill remaining work area with Composite (browser strip if open)."""
+        if ViewType.Composite not in window_manager:
+            return
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = 0
+        if cls._folder_browser is not None and cls._folder_browser.isVisible():
+            browser_w = cls._layout_browser_in_work_area(window_manager)
+
+        if ViewType.Source in window_manager:
+            window_manager[ViewType.Source].hide()
+        if ViewType.Target in window_manager:
+            window_manager[ViewType.Target].hide()
+        composite = window_manager[ViewType.Composite]
+        composite.show()
+        apply_frame_geometry_to_widget(
+            composite,
+            work_x + browser_w,
+            work_y,
+            max(work_w - browser_w, 1),
+            work_h,
+        )
+        cls.sync_window_visibility_menus(window_manager)
+
+    @classmethod
+    def apply_single_monitor_all_windows_layout(cls, window_manager: IWindowManager) -> None:
+        """Tile Source/Target on top and Composite below, leaving a left browser strip when open."""
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type not in window_manager:
+                return
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = 0
+        if cls._folder_browser is not None and cls._folder_browser.isVisible():
+            browser_w = cls._layout_browser_in_work_area(window_manager)
+
+        rest_x = work_x + browser_w
+        rest_w = max(work_w - browser_w, 1)
+        half_x = rest_w // 2
+        half_y = work_h // 2
+
+        source = window_manager[ViewType.Source]
+        target = window_manager[ViewType.Target]
+        composite = window_manager[ViewType.Composite]
+        source.show()
+        target.show()
+        composite.show()
+
+        apply_frame_geometry_to_widget(source, rest_x, work_y, half_x, half_y)
+        apply_frame_geometry_to_widget(target, rest_x + half_x, work_y, rest_w - half_x, half_y)
+        apply_frame_geometry_to_widget(composite, rest_x, work_y + half_y, rest_w, work_h - half_y)
+        cls.sync_window_visibility_menus(window_manager)
+
+    def onRestoreOrientationCompositeOnly(self) -> None:
+        """Restore a composite-only layout with room for the STOS file browser."""
+        browser = StosWindow._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        StosWindow.apply_single_monitor_composite_layout(self._window_manager)
+
+    def onRestoreOrientationAllWindows(self) -> None:
+        """Restore Source/Target/Composite tiling with room for the STOS file browser."""
+        browser = StosWindow._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        StosWindow.apply_single_monitor_all_windows_layout(self._window_manager)
+
+    def onRestoreOrientation(self) -> None:
+        """Legacy entry point; defaults to All Windows restore."""
+        self.onRestoreOrientationAllWindows()
 
     def onInstructions(self):
         """Open scrollable help scrolled to mouse and keyboard controls."""
         ControlsHelpDialog(self, self._config["readme"]).exec()
+
+    def onTransformsSettings(self) -> None:
+        """Open Settings → Transforms dialog for registration defaults."""
+        from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
+        TransformsSettingsDialog.edit_settings(self._settings, parent=self)
 
     def onResetTransform(self):
         """Reset the transform. Rigid transforms return to zero offset and angle."""
@@ -451,6 +584,47 @@ class StosWindow(PyreWindowBase):
         menu_action = self._menu_workarounds.menuAction()
         if menu_action is not None:
             menu_action.setEnabled(any_enabled)
+
+    def _update_refinement_menu_state(self, *args: object) -> None:
+        """Show rigid-only Refinement items only when the current transform is rigid."""
+        is_rigid = isinstance(
+            self._transform_controller.TransformModel,
+            nornir_imageregistration.IRigidTransform)
+        self._action_refine_rigid_angle.setVisible(is_rigid)
+        self._action_refine_rigid_angle_scale.setVisible(is_rigid)
+        self._action_refine_rigid_separator.setVisible(is_rigid)
+
+    def onRefineRigidAngle(self) -> None:
+        """Local BruteForce refine of angle (±5°) keeping current scale."""
+        self._run_local_rigid_refine(refine_scale=False)
+
+    def onRefineRigidAngleScale(self) -> None:
+        """Local BruteForce refine of angle (±5°) and scale."""
+        self._run_local_rigid_refine(refine_scale=True)
+
+    def _run_local_rigid_refine(self, refine_scale: bool) -> None:
+        """Run local rigid refine and replace the transform model on success."""
+        current_transform = self._transform_controller.TransformModel
+        if not isinstance(current_transform, nornir_imageregistration.IRigidTransform):
+            QMessageBox.warning(
+                self,
+                "Refine rigid transform",
+                "Local angle/scale refinement requires a rigid transform.",
+            )
+            return
+        try:
+            resulting_transform = pyre.common.RefineRigidTransformLocal(
+                current_transform=current_transform,
+                refine_scale=refine_scale,
+                source_image_key=Space.Source,  # type: ignore[arg-type]
+                target_image_key=Space.Target,  # type: ignore[arg-type]
+            )
+        except Exception as e:
+            logger.exception("Local rigid refine failed refine_scale=%s", refine_scale)
+            QMessageBox.warning(self, "Refine rigid transform", str(e))
+            return
+        if resulting_transform is not None:
+            self._transform_controller.TransformModel = resulting_transform
 
     def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):
         """Convert the current transform model to the requested transform type."""
@@ -531,7 +705,8 @@ class StosWindow(PyreWindowBase):
             print("Need both images loaded with a transform to run refine grid")
             return None
 
-        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(self)
+        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(
+            self, app_settings=self._settings)
         if user_settings is not None:
             with nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
                     source_img_data=self._image_manager[ViewType.Source],
@@ -651,7 +826,7 @@ class StosWindow(PyreWindowBase):
         if settings is not None and apply_saved_browser_geometry(settings, browser, force_visible=True):
             return
         if anchor_window is not None:
-            anchor_window._position_folder_browser_beside_composite()
+            anchor_window._layout_browser_left_of_composite()
 
     @classmethod
     def open_folder_browser_if_cached_folder_exists(
@@ -662,7 +837,7 @@ class StosWindow(PyreWindowBase):
             geometry_restored: bool = False,
     ) -> None:
         """Show the browser at startup when a saved folder path still exists."""
-        del geometry_restored  # kept for call-site compatibility
+        from PyQt6.QtGui import QGuiApplication
         from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
         if not StosFileBrowserWindow.has_cached_folder(settings):
             return
@@ -675,7 +850,11 @@ class StosWindow(PyreWindowBase):
         restored_saved = apply_saved_browser_geometry(settings, browser, force_visible=True)
         if restored_saved:
             return
-        anchor_window._position_folder_browser_beside_composite()
+        display_count = len(QGuiApplication.screens())
+        if not geometry_restored and display_count == 1:
+            cls.apply_single_monitor_composite_layout(anchor_window._window_manager)
+            return
+        anchor_window._layout_browser_left_of_composite()
 
     def onOpenStosFolderBrowser(self):
         """Show (or create) the Stos Folder Browser window."""

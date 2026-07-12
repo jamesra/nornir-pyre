@@ -8,7 +8,7 @@ from pyre.interfaces.managers import IControlPointActionMap
 from pyre.commands import DefaultTransformCommand
 from pyre.commands.stos import ManipulateRigidTransformCommand, RegisterControlPointCommand, \
     TranslateControlPointCommand, DeleteControlPointCommand, \
-    CreateControlPointCommand, CreateRegisterControlPointCommand
+    CreateControlPointCommand, CreateRegisterControlPointCommand, RefineRigidTransformCommand
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
 from pyre.observable import SetOperation
@@ -78,9 +78,10 @@ action_command_dp_map = providers.Dict({
     TransformType.RIGID: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
         ControlPointAction.TRANSLATE: providers.Factory(ManipulateRigidTransformCommand).provider,
-        ControlPointAction.REGISTER: providers.Factory(RegisterControlPointCommand,
-                                                       source_image=Space.Source,
-                                                       target_image=Space.Target).provider
+        ControlPointAction.REFINE_RIGID_ANGLE: providers.Factory(
+            RefineRigidTransformCommand, refine_scale=False).provider,
+        ControlPointAction.REFINE_RIGID_ANGLE_SCALE: providers.Factory(
+            RefineRigidTransformCommand, refine_scale=True).provider,
         # ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand), RIGID Does not support DELETE
     })
 })

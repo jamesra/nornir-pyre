@@ -283,13 +283,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Called when the model in the transform controller changes.  This is not called when the
         transform is modified, only when the model is replaced"""
         self._update_fixed_layer_hint()
-        # Cancel the active command
+        # Cancel in-progress commands when the model is replaced externally.
         if self._command is None:
             return
 
-        if old != new:
-            self._command.cancel()
-        elif old is not None and old.type != new.type:
+        if self._command.status == pyre.CommandStatus.Completed:
+            return
+
+        if old != new or (old is not None and old.type != new.type):
             self._command.cancel()
 
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):

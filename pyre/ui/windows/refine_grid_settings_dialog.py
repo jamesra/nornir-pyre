@@ -1,11 +1,13 @@
 from typing import NamedTuple, Optional
 
-from PyQt6.QtWidgets import QDialog, QWidget, QHBoxLayout, QGridLayout, QLabel, QSpinBox, QPushButton, QComboBox, QDoubleSpinBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QDialog, QWidget, QHBoxLayout, QGridLayout, QLabel, QSpinBox, QPushButton, QComboBox,
+    QDoubleSpinBox,
+)
 
 import nornir_imageregistration.settings
-import pyre.state
 import pyre.settings
+from pyre.settings.app import AppSettings, GridRefineDefaults
 
 
 class GridSettingsDialogResult(NamedTuple):
@@ -27,6 +29,9 @@ class RefineGridSettingsDialog(QDialog):
     This is the Qt equivalent of the wx RefineGridSettingsDialog.
     """
 
+    _CELL_SIZES: list[int] = [256, 512, 1024]
+    _CELL_SPACINGS: list[int] = [128, 192, 256, 384, 512, 768]
+
     @property
     def cell_size(self) -> int:
         return int(self.cell_size_ctrl.currentText())
@@ -47,8 +52,11 @@ class RefineGridSettingsDialog(QDialog):
     def angle_step_size(self) -> float:
         return self.angle_step_size_ctrl.value()
 
-    def __init__(self, parent=None, **kwargs):
+    def __init__(self, parent=None, defaults: GridRefineDefaults | None = None, **kwargs):
         super(RefineGridSettingsDialog, self).__init__(parent, **kwargs)
+
+        if defaults is None:
+            defaults = GridRefineDefaults()
 
         # Create the main layout
         main_layout = QHBoxLayout(self)
@@ -72,34 +80,30 @@ class RefineGridSettingsDialog(QDialog):
         max_angle_label = QLabel("Max Angle, +/- degrees from 0", panel)
         angle_step_size_label = QLabel("Angle step size in degrees, 0 is always included", panel)
 
-        # Create the controls
-        cell_sizes = [256, 512, 1024]
-        cell_spacing = [128, 192, 256, 384, 512, 768]
-
         self.cell_size_ctrl = QComboBox(panel)
-        for size in cell_sizes:
+        for size in self._CELL_SIZES:
             self.cell_size_ctrl.addItem(str(size))
-        self.cell_size_ctrl.setCurrentIndex(0)
+        self._set_combo_value(self.cell_size_ctrl, defaults.cell_size)
 
         self.cell_spacing_ctrl = QComboBox(panel)
-        for spacing in cell_spacing:
+        for spacing in self._CELL_SPACINGS:
             self.cell_spacing_ctrl.addItem(str(spacing))
-        self.cell_spacing_ctrl.setCurrentIndex(1)
+        self._set_combo_value(self.cell_spacing_ctrl, defaults.grid_spacing)
 
         self.iterations_ctrl = QSpinBox(panel)
         self.iterations_ctrl.setMinimum(2)
-        self.iterations_ctrl.setValue(5)
+        self.iterations_ctrl.setValue(defaults.num_iterations)
 
         self.max_angle_ctrl = QDoubleSpinBox(panel)
         self.max_angle_ctrl.setMinimum(0)
         self.max_angle_ctrl.setMaximum(180)
-        self.max_angle_ctrl.setValue(5)
+        self.max_angle_ctrl.setValue(defaults.max_angle)
         self.max_angle_ctrl.setSingleStep(2)
 
         self.angle_step_size_ctrl = QDoubleSpinBox(panel)
         self.angle_step_size_ctrl.setMinimum(0.5)
         self.angle_step_size_ctrl.setMaximum(180)
-        self.angle_step_size_ctrl.setValue(3)
+        self.angle_step_size_ctrl.setValue(defaults.angle_step_size)
         self.angle_step_size_ctrl.setSingleStep(0.5)
 
         # Create the buttons
@@ -136,20 +140,47 @@ class RefineGridSettingsDialog(QDialog):
         self.setWindowTitle("Refine Grid Settings")
 
     @staticmethod
-    def GetGridRefineSettings(parent: Optional[QWidget] = None) -> Optional[GridSettingsDialogResult]:
+    def _set_combo_value(combo: QComboBox, value: int) -> None:
+        """Select *value* in *combo*, inserting it when missing."""
+        text = str(value)
+        index = combo.findText(text)
+        if index < 0:
+            combo.addItem(text)
+            index = combo.findText(text)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def to_defaults(self) -> GridRefineDefaults:
+        """Capture the current dialog controls as GridRefineDefaults."""
+        return GridRefineDefaults(
+            cell_size=self.cell_size,
+            grid_spacing=self.grid_spacing,
+            num_iterations=self.iterations,
+            max_angle=self.max_angle,
+            angle_step_size=self.angle_step_size,
+        )
+
+    @staticmethod
+    def GetGridRefineSettings(
+            parent: Optional[QWidget] = None,
+            app_settings: AppSettings | None = None,
+    ) -> Optional[GridSettingsDialogResult]:
         """
         Static method to create and show the dialog, returning the result if OK was clicked.
 
         Args:
             parent: The parent widget for the dialog
+            app_settings: Optional AppSettings to seed from and write back on accept
 
         Returns:
             GridSettingsDialogResult if OK was clicked, None otherwise
         """
-        dlg = RefineGridSettingsDialog(parent)
+        defaults = app_settings.stos.grid_refine if app_settings is not None else None
+        dlg = RefineGridSettingsDialog(parent, defaults=defaults)
         result = dlg.exec()
 
         if result == QDialog.DialogCode.Accepted:
+            if app_settings is not None:
+                app_settings.stos.grid_refine = dlg.to_defaults()
             return GridSettingsDialogResult(
                 num_iterations=dlg.iterations,
                 cell_size=dlg.cell_size,

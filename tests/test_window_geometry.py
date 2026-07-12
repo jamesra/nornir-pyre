@@ -235,25 +235,30 @@ class TestSingleMonitorCompositeLayout(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
 
-    @patch("PyQt6.QtGui.QGuiApplication")
-    def test_hides_source_target_and_fills_work_area(self, mock_qgui: MagicMock) -> None:
+    def _window_manager(self):
         from pyre.interfaces.viewtype import ViewType
-        from pyre.ui.windows.stoswindow import StosWindow
-
-        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
 
         source = MagicMock(spec=QMainWindow)
         target = MagicMock(spec=QMainWindow)
         composite = MagicMock(spec=QMainWindow)
-
-        window_manager = MagicMock()
-        window_manager.__contains__ = lambda _self, key: key in (
-            ViewType.Source, ViewType.Target, ViewType.Composite)
-        window_manager.__getitem__ = lambda _self, key: {
+        windows = {
             ViewType.Source: source,
             ViewType.Target: target,
             ViewType.Composite: composite,
-        }[key]
+        }
+        window_manager = MagicMock()
+        window_manager.__contains__ = lambda _self, key: key in windows
+        window_manager.__getitem__ = lambda _self, key: windows[key]
+        return window_manager, source, target, composite
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.sync_window_visibility_menus")
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_hides_source_target_and_fills_work_area(
+            self, mock_qgui: MagicMock, _sync: MagicMock) -> None:
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
+        window_manager, source, target, composite = self._window_manager()
 
         old_browser = StosWindow._folder_browser
         StosWindow._folder_browser = None
@@ -273,6 +278,89 @@ class TestSingleMonitorCompositeLayout(unittest.TestCase):
         self.assertEqual(args[2], 0)
         self.assertEqual(args[3], 1920)
         self.assertEqual(args[4], 1080)
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.sync_window_visibility_menus")
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_reserves_browser_strip_when_browser_visible(
+            self, mock_qgui: MagicMock, _sync: MagicMock) -> None:
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
+        window_manager, source, target, composite = self._window_manager()
+
+        browser = MagicMock()
+        browser.isVisible.return_value = True
+        browser.width.return_value = 350
+        browser.minimum_layout_width.return_value = 200
+
+        old_browser = StosWindow._folder_browser
+        StosWindow._folder_browser = browser
+        try:
+            with patch("pyre.ui.windows.stoswindow.apply_frame_geometry_to_widget") as mock_apply:
+                StosWindow.apply_single_monitor_composite_layout(window_manager)
+        finally:
+            StosWindow._folder_browser = old_browser
+
+        source.hide.assert_called_once()
+        target.hide.assert_called_once()
+        composite.show.assert_called_once()
+        self.assertEqual(mock_apply.call_count, 2)
+        browser_args = mock_apply.call_args_list[0][0]
+        composite_args = mock_apply.call_args_list[1][0]
+        self.assertIs(browser_args[0], browser)
+        self.assertEqual(browser_args[1:], (0, 0, 350, 1080))
+        self.assertIs(composite_args[0], composite)
+        self.assertEqual(composite_args[1:], (350, 0, 1570, 1080))
+
+
+class TestSingleMonitorAllWindowsLayout(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QApplication.instance() or QApplication(sys.argv)
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.sync_window_visibility_menus")
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_tiles_source_target_composite_beside_browser(
+            self, mock_qgui: MagicMock, _sync: MagicMock) -> None:
+        from pyre.interfaces.viewtype import ViewType
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
+
+        source = MagicMock(spec=QMainWindow)
+        target = MagicMock(spec=QMainWindow)
+        composite = MagicMock(spec=QMainWindow)
+        windows = {
+            ViewType.Source: source,
+            ViewType.Target: target,
+            ViewType.Composite: composite,
+        }
+        window_manager = MagicMock()
+        window_manager.__contains__ = lambda _self, key: key in windows
+        window_manager.__getitem__ = lambda _self, key: windows[key]
+
+        browser = MagicMock()
+        browser.isVisible.return_value = True
+        browser.width.return_value = 320
+        browser.minimum_layout_width.return_value = 200
+
+        old_browser = StosWindow._folder_browser
+        StosWindow._folder_browser = browser
+        try:
+            with patch("pyre.ui.windows.stoswindow.apply_frame_geometry_to_widget") as mock_apply:
+                StosWindow.apply_single_monitor_all_windows_layout(window_manager)
+        finally:
+            StosWindow._folder_browser = old_browser
+
+        source.show.assert_called_once()
+        target.show.assert_called_once()
+        composite.show.assert_called_once()
+        self.assertEqual(mock_apply.call_count, 4)
+        by_widget = {call.args[0]: call.args[1:] for call in mock_apply.call_args_list}
+        self.assertEqual(by_widget[browser], (0, 0, 320, 1080))
+        self.assertEqual(by_widget[source], (320, 0, 800, 540))
+        self.assertEqual(by_widget[target], (1120, 0, 800, 540))
+        self.assertEqual(by_widget[composite], (320, 540, 1600, 540))
 
 
 if __name__ == "__main__":

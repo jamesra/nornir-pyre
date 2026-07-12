@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="pyre",
-    version="1.5.3",
+    version="1.7.3",
     author="James Anderson",
     author_email="James.R.Anderson@utah.edu",
     description="Interactive image registration and visualization for the Nornir ecosystem",

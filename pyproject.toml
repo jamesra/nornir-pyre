@@ -8,7 +8,7 @@ include = ["pyre", "pyre.*"]
 
 [project]
 name = "pyre"
-version = "1.5.3"
+version = "1.7.3"
 authors = [
     { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
 ]

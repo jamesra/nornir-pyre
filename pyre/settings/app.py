@@ -57,6 +57,20 @@ class ImageAndMaskPath(BaseModel):
     mask_fullpath: str | None  # Full path to the mask or None if it doesn't exist
 
 
+class GridRefineDefaults(BaseModel):
+    """Persisted defaults for Convert to refined grid."""
+
+    cell_size: int = 256
+    grid_spacing: int = 192
+    num_iterations: int = 5
+    max_angle: float = 5.0
+    angle_step_size: float = 3.0
+
+    def to_angle_search_range(self) -> AngleSearchRange:
+        """Build an AngleSearchRange from the stored angle fields."""
+        return AngleSearchRange(max_angle=self.max_angle, angle_step_size=self.angle_step_size)
+
+
 class StosSettings(BaseModel):
     stos_dirname: str | None = None  # The last directory loaded or saved by the user
     stos_filename: str | None = None  # The last filename loaded or saved by the user
@@ -66,6 +80,7 @@ class StosSettings(BaseModel):
     brute_registration: StosBruteSettings = StosBruteSettings(
         method=nornir_imageregistration.settings.SliceToSliceMethod.LogPolar)  # field(default_factory=StosBruteSettings)
     point_registration: PointRegistrationSettings = PointRegistrationSettings()  # Used when the user selects a single point to register
+    grid_refine: GridRefineDefaults = GridRefineDefaults()
     source_image: ImageAndMaskPath | None = None  # The last source image loaded by the user
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
     stos_opened_from_browser_folder: str | None = None
