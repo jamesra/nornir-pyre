@@ -229,6 +229,19 @@ class Camera(IReadOnlyCamera):
         """View projection matrix"""
         return self._view_proj
 
+    def image_coords_for_lookat(
+            self,
+            lookat: nornir_imageregistration.PointLike,
+            y: float,
+            x: float) -> NDArray[np.floating]:
+        """Convert mouse position to world (y,x) for an alternate lookat."""
+        saved_lookat = self._lookat
+        self._lookat = np.asarray(lookat, dtype=float)
+        try:
+            return self.ImageCoordsForMouse(y, x)
+        finally:
+            self._lookat = saved_lookat
+
     def view_proj_for_lookat(
             self,
             lookat: nornir_imageregistration.PointLike,

@@ -29,6 +29,8 @@ from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
 from pyre.transform_edit_policy import blocks_layer_translate_action, fixed_image_manipulation_locked
+from pyre.views.composite_display import lookat_delta_from_display_delta
+from pyre.views.gltiles import is_rigid_transform
 
 DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
     ControlPointAction.NONE: Qt.CursorShape.ArrowCursor,
@@ -422,8 +424,21 @@ class DefaultTransformCommand(NavigationCommandBase):
                 # Draw a rectangle to select point
                 pass
             elif event.buttons() & Qt.MouseButton.RightButton:
-                dy, dx = self._mouse_position_history[self.space] - point
-                self.camera.translate((dy, dx))
+                view = self._view_type()
+                model = self._transform_controller.TransformModel
+                if (
+                        view == ViewType.Composite
+                        and model is not None
+                        and is_rigid_transform(model)
+                ):
+                    delta_display = (
+                        self._mouse_position_history[Space.Target] - point_pair.target
+                    )
+                    delta_lookat = lookat_delta_from_display_delta(model, delta_display)
+                    self.camera.translate(delta_lookat)
+                else:
+                    dy, dx = self._mouse_position_history[self.space] - point
+                    self.camera.translate((dy, dx))
 
                 # Update the point pair to account for camera motion
                 point_pair = self.get_world_positions(event)

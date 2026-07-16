@@ -3,7 +3,21 @@ Created on Sep 12, 2013
 
 @author: u0490822
 """
+import os
 import sys
+
+
+def _ensure_stdio_streams() -> None:
+    """Attach devnull streams when PyInstaller windowed boot leaves stdio as None."""
+    if sys.stdin is None:
+        sys.stdin = open(os.devnull, "r", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
+
+_ensure_stdio_streams()
 
 from pyre.frozen_paths import configure_frozen_environment
 

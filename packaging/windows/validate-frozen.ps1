@@ -30,10 +30,20 @@ if (-not (Test-Path $PyreExe)) {
 Write-Host "Found bundle: $PyreExe"
 
 Write-Host "Running import smoke test..."
-$SmokeOutput = & $PyreExe --smoke-test 2>&1 | Out-String
+# Native executables write tracebacks to stderr; with $ErrorActionPreference = "Stop"
+# PowerShell treats the first stderr line as a terminating error and hides the rest.
+$prevErrorAction = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $SmokeOutput = & $PyreExe --smoke-test 2>&1 | Out-String
+    $SmokeExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $prevErrorAction
+}
+
 Write-Host $SmokeOutput
-if ($SmokeOutput -notmatch 'SMOKE_OK') {
-    throw "Smoke test failed: SMOKE_OK not found in output"
+if ($SmokeExitCode -ne 0 -or $SmokeOutput -notmatch 'SMOKE_OK') {
+    throw "Smoke test failed (exit $SmokeExitCode): SMOKE_OK not found in output"
 }
 
 Write-Host "Smoke test passed."

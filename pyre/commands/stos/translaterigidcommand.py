@@ -18,6 +18,8 @@ from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.container import IContainer
 from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre.interfaces.viewtype import ViewType
+from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
 
 
@@ -67,8 +69,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                          camera=camera, bounds=bounds,
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
-        mouse_position = self._mouse_position_history[space]
-        self._translate_origin = mouse_position
+        if self._view_type() == ViewType.Composite:
+            self._translate_origin = self._mouse_position_history[Space.Target]
+        else:
+            self._translate_origin = self._mouse_position_history[space]
         self._selected_point_set = selected_points
 
         if not isinstance(self._transform_controller.TransformModel, IRigidTransform):
@@ -89,6 +93,12 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         if not (event.buttons() & Qt.MouseButton.LeftButton):
             self.execute()
 
+    def _world_point_for_translate(self, point_pair: PointPair) -> NDArray[np.floating]:
+        """Return world coords whose delta tracks on-screen motion for this panel."""
+        if self._view_type() == ViewType.Composite:
+            return point_pair.target
+        return point_pair.source if self.space == Space.Source else point_pair.target
+
     def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse is dragged"""
 
@@ -101,7 +111,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
             return
 
         point_pair = self.get_world_positions(event)
-        world_point = point_pair.source if self.space == Space.Source else point_pair.target
+        world_point = self._world_point_for_translate(point_pair)
 
         delta = world_point - self._translate_origin
         camera_delta = delta
@@ -122,8 +132,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
         # Update the last position with the new mouse position
         point_pair = self.get_world_positions(event)
-        world_point = point_pair.source if self.space == Space.Source else point_pair.target
-        self._translate_origin = world_point
+        self._translate_origin = self._world_point_for_translate(point_pair)
 
         self.parent.update()
         if self.space == Space.Target:

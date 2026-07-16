@@ -31,6 +31,11 @@ from pyre.transform_edit_policy import (
 from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
 from pyre.commands.extensions import wheel_scroll_steps
+from pyre.views.composite_display import (
+    lookat_delta_from_display_delta,
+    world_point_pair_for_composite_mouse,
+)
+from pyre.views.gltiles import is_rigid_transform
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
 
@@ -137,6 +142,22 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
         return self.camera.ImageCoordsForMouse(cy, cx)  # type: ignore[return-value]
 
+    def _adjust_camera_lookat_for_cursor(self, before: PointPair, after: PointPair) -> None:
+        """Keep the world point under the cursor when zooming or panning."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if (
+                view == ViewType.Composite
+                and model is not None
+                and is_rigid_transform(model)
+        ):
+            delta_display = after.target - before.target
+            delta_lookat = lookat_delta_from_display_delta(model, delta_display)
+            self.camera.lookat = self.camera.lookat - delta_lookat
+        else:
+            delta = after[self.space] - before[self.space]
+            self.camera.lookat = self.camera.lookat - delta
+
     def get_world_positions(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> PointPair:
         """
         Returns a tuple of the mouse position in both source and target space.
@@ -145,7 +166,16 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         :param e:
         :return:
         """
-        position = np.array(self.get_space_position(e))
+        y, x = NavigationCommandBase.ParamToMousePosition(e)
+        cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
+
+        if self._view_type() == ViewType.Composite:
+            composite_pair = world_point_pair_for_composite_mouse(
+                self.camera, self._transform_controller, cy, cx)
+            if composite_pair is not None:
+                return composite_pair
+
+        position = np.array(self.camera.ImageCoordsForMouse(cy, cx))
 
         if self._transform_controller.TransformModel is None:
             return PointPair(target=position, source=position)
@@ -232,11 +262,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     point_pair = self.get_world_positions(e)
                     view = self._view_type()
                     if view == ViewType.Composite:
-                        draw_world_yx = np.asarray(point_pair.source, dtype=np.float32)
-                        source_pivot = np.squeeze(
-                            self._transform_controller.InverseTransform(
-                                draw_world_yx.reshape(1, 2))
-                        ).astype(np.float32)
+                        source_pivot = np.asarray(point_pair.source, dtype=np.float32)
                     elif self.space == Space.Source:
                         source_pivot = np.asarray(point_pair.source, dtype=np.float32)
                     else:
@@ -250,6 +276,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     try:
                         self._transform_controller.ScaleWarped(
                             scale_delta, source_pivot, space=self.space)
+                        if view == ViewType.Composite:
+                            pair_after = self.get_world_positions(e)
+                            self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
                     finally:
                         self._transform_controller.end_interactive_edit()
                     self.parent.update()
@@ -273,13 +302,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         point_pair = self.get_world_positions(e)
                         view = self._view_type()
                         if view == ViewType.Composite:
-                            # Composite shares fixed-space camera lookat but draws purple at
-                            # Transform(source); cursor world coords match that draw position.
-                            draw_world_yx = np.asarray(point_pair.source, dtype=np.float32)
-                            world_center = np.squeeze(
-                                self._transform_controller.InverseTransform(
-                                    draw_world_yx.reshape(1, 2))
-                            ).astype(np.float32)
+                            world_center = np.asarray(point_pair.source, dtype=np.float32)
                         elif self.space == Space.Source:
                             world_center = np.asarray(point_pair.source, dtype=np.float32)
                         else:
@@ -292,6 +315,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                                 self.space, self._view_type(), self._transform_controller.type))
                         try:
                             self._transform_controller.Rotate(rangle, world_center, space=self.space)
+                            if view == ViewType.Composite:
+                                pair_after = self.get_world_positions(e)
+                                self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
                         finally:
                             self._transform_controller.end_interactive_edit()
                         self.parent.update()
@@ -327,9 +353,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self.camera.scale = new_scale
 
                 mouse_position_after_scale = self.get_world_positions(e)
-                delta = mouse_position_after_scale[self.space] - mouse_position[self.space]
-
-                self.camera.lookat = self.camera.lookat - delta
+                self._adjust_camera_lookat_for_cursor(mouse_position, mouse_position_after_scale)
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
                 self.parent.update()
