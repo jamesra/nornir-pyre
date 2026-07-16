@@ -2,7 +2,7 @@
 ; Compile from nornir-pyre/packaging/windows after build-freeze.ps1.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.7.3"
+  #define MyAppVersion "1.7.4"
 #endif
 
 #define MyAppName "Pyre"
