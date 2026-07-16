@@ -16,6 +16,7 @@ import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
 from pyre.common import (
+    SaveRegisteredWarpedImage,
     build_stos_object_for_save,
     save_stos_object,
     stos_image_dims_from_stos_config,
@@ -41,6 +42,7 @@ from pyre.observable import ObservableSet
 logger = logging.getLogger(__name__)
 
 _stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-stos-save")
+_warped_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-warped-save")
 _DEFAULT_BROWSER_LAYOUT_WIDTH = 350
 
 
@@ -56,6 +58,9 @@ class StosWindow(PyreWindowBase):
     _stos_save_in_progress: bool = False
     _stos_save_initiator: 'StosWindow | None' = None
     _save_stos_menu_actions: list[QAction] = []
+    _warped_save_in_progress: bool = False
+    _warped_save_initiator: 'StosWindow | None' = None
+    _save_warped_menu_actions: list[QAction] = []
     _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
     _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
@@ -360,6 +365,8 @@ class StosWindow(PyreWindowBase):
         # Save warped image action
         menuSaveWarpedImage = filemenu.addAction("&Save Warped Image")
         menuSaveWarpedImage.triggered.connect(self.onSaveWarpedImage)  # type: ignore[union-attr]
+        if menuSaveWarpedImage not in StosWindow._save_warped_menu_actions:
+            StosWindow._save_warped_menu_actions.append(menuSaveWarpedImage)
 
         filemenu.addSeparator()
 
@@ -915,30 +922,111 @@ class StosWindow(PyreWindowBase):
             pass
 
     def onSaveWarpedImage(self):
-        """Handle Save Warped Image action"""
+        """Handle Save Warped Image action."""
+        if StosWindow._warped_save_in_progress:
+            return
         config = pyre.state.get_current_stos_config()
         if config is None:
+            QMessageBox.warning(self, "Save warped image", "No STOS session is open.")
             return
-        if not (config.FixedImageViewModel is None or config.WarpedImageViewModel is None):
-            dialog = QFileDialog(self)
-            dialog.setWindowTitle("Choose a Directory")
+        if config.FixedImageViewModel is None or config.WarpedImageViewModel is None:
+            QMessageBox.warning(
+                self,
+                "Save warped image",
+                "Load both the fixed and warped images before saving the registered image.",
+            )
+            return
+        if config.Transform is None:
+            QMessageBox.warning(self, "Save warped image", "No transform is loaded.")
+            return
+
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Save registered warped image")
+        if StosWindow.imagedirname:
             dialog.setDirectory(StosWindow.imagedirname)
-            dialog.setNameFilter("PNG files (*.png)")
-            dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setNameFilter("PNG files (*.png)")
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
 
-            if dialog.exec() == QFileDialog.DialogCode.Accepted:
-                selected_files = dialog.selectedFiles()
-                if selected_files:
-                    StosWindow.imagedirname = os.path.dirname(selected_files[0])
-                    self.filename = os.path.basename(selected_files[0])
-                    config.OutputImageFullPath = selected_files[0]  # type: ignore[attr-defined]
+        if dialog.exec() != QFileDialog.DialogCode.Accepted:
+            return
 
-                    pool = pools.GetGlobalThreadPool()
-                    pool.add_task("Save " + config.OutputImageFullPath,  # type: ignore[attr-defined]
-                                  pyre.common.SaveRegisteredWarpedImage,
-                                  config.OutputImageFullPath,  # type: ignore[attr-defined]
-                                  config.Transform,
-                                  config.WarpedImageViewModel.Image)
+        selected_files = dialog.selectedFiles()
+        if not selected_files:
+            return
+
+        fullpath = selected_files[0]
+        StosWindow.imagedirname = os.path.dirname(fullpath)
+        self.filename = os.path.basename(fullpath)
+        config.OutputImageFullPath = fullpath  # type: ignore[attr-defined]
+
+        fixed_shape = tuple(int(v) for v in config.FixedImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
+        warped_image = config.WarpedImageViewModel.Image  # type: ignore[attr-defined]
+        transform = config.Transform
+        self._submit_async_warped_save(fullpath, transform, fixed_shape, warped_image)
+
+    def _submit_async_warped_save(
+            self,
+            fullpath: str,
+            transform: nornir_imageregistration.ITransform,
+            fixed_shape: tuple[int, ...],
+            warped_image: np.ndarray) -> None:
+        """Queue a background registered-image write and update UI while in flight."""
+        StosWindow._warped_save_in_progress = True
+        StosWindow._warped_save_initiator = self
+        basename = os.path.basename(fullpath)
+        for action in StosWindow._save_warped_menu_actions:
+            action.setEnabled(False)
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type in self._window_manager:
+                self._window_manager[view_type].statusBar().showMessage(f"Saving {basename}…")
+
+        future = _warped_save_executor.submit(
+            SaveRegisteredWarpedImage,
+            fullpath,
+            transform,
+            fixed_shape,
+            warped_image,
+        )
+        future.add_done_callback(
+            lambda completed: qt_post_to_main(StosWindow._on_warped_save_finished, completed, fullpath),
+        )
+
+    @classmethod
+    def _clear_warped_save_status(cls) -> None:
+        """Re-enable Save Warped actions and clear in-flight state."""
+        cls._warped_save_in_progress = False
+        cls._warped_save_initiator = None
+        for action in cls._save_warped_menu_actions:
+            action.setEnabled(True)
+
+    @classmethod
+    def _on_warped_save_finished(cls, future: Future[None], fullpath: str) -> None:
+        """Handle background warped-image save completion on the Qt main thread."""
+        initiator = cls._warped_save_initiator
+        saved_ok = False
+        try:
+            try:
+                future.result()
+                saved_ok = True
+            except Exception as exc:
+                if initiator is not None:
+                    QMessageBox.warning(
+                        initiator,
+                        "Save warped image failed",
+                        f"The image was not saved:\n{exc}",
+                    )
+                return
+        finally:
+            if initiator is not None:
+                basename = os.path.basename(fullpath)
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                    if view_type in initiator._window_manager:
+                        status_bar = initiator._window_manager[view_type].statusBar()
+                        if saved_ok:
+                            status_bar.showMessage(f"Saved {basename}", 5000)
+                        else:
+                            status_bar.clearMessage()
+            cls._clear_warped_save_status()
 
     def onSaveStos(self):
         """Handle Save Stos File action."""

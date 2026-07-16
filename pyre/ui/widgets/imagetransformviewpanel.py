@@ -43,6 +43,7 @@ from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
 from pyre.transform_edit_policy import fixed_image_manipulation_locked, rigid_rotation_locked
+from pyre.views.composite_display import resolve_composite_display_draw_params
 
 
 @dataclass
@@ -460,19 +461,28 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._glpanel.activate_context()
 
         if self._image_transform_view is not None:
+            gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
             bounding_box = self.camera.VisibleImageBoundingBox
+            view_proj = self.camera.view_proj
+            draw_space = self.space
+            if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                view_proj, bounding_box = resolve_composite_display_draw_params(
+                    self.camera,
+                    self.transform_controller,
+                    (gl_h, gl_w),
+                )
+                draw_space = Space.Target
 
             SetDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
             # Use GL panel size so viewport/FBO match the actual drawing surface.
             # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
             # Pass physical viewport size so composite overlay fills the widget after resize/hi-DPI (resizeGL uses physical pixels).
-            gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
             default_fbo = self._glpanel.defaultFramebufferObject()
             ratio = self._glpanel.devicePixelRatio()
             overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
             draw_kwargs: dict[str, object] = {
-                "space": self.space,
+                "space": draw_space,
                 "client_size": (gl_h, gl_w),
                 "bounding_box": bounding_box,
                 "default_fbo": default_fbo,
@@ -480,7 +490,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 "show_mesh_lines": self.show_lines,
                 "view_type": self.view_type,
             }
-            self._image_transform_view.draw(self.camera.view_proj, **draw_kwargs)
+            self._image_transform_view.draw(view_proj, **draw_kwargs)
 
             ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 

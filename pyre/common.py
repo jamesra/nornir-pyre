@@ -33,17 +33,35 @@ from pyre.settings import AppSettings
 from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_warped_and_fixed_image_data
 
 
-def SaveRegisteredWarpedImage(fileFullPath: str, transform: ITransform, warpedImage: NDArray):
-    """Save the warped image registered into fixed space to a file. Uses current STOS config for fixed shape."""
-    config = pyre.state.get_current_stos_config()
-    if config is None:
-        raise RuntimeError("No current STOS config")
-    assert config.FixedImageViewModel is not None and config.WarpedImageViewModel is not None  # type: ignore[attr-defined]
-    registeredImage = AssembleHugeRegisteredWarpedImage(transform,
-                                                        config.FixedImageViewModel.Image.shape,  # type: ignore[arg-type, attr-defined]
-                                                        config.WarpedImageViewModel.Image)  # type: ignore[attr-defined]
-
+def SaveRegisteredWarpedImage(
+        fileFullPath: str,
+        transform: ITransform,
+        fixed_image_shape: Sequence[int],
+        warpedImage: NDArray) -> None:
+    """Save the warped image registered into fixed space to a file."""
+    registeredImage = AssembleHugeRegisteredWarpedImage(
+        transform,
+        fixed_image_shape,
+        warpedImage,
+    )
     nornir_imageregistration.SaveImage(fileFullPath, registeredImage)
+
+
+def AssembleHugeRegisteredWarpedImage(
+        transform: ITransform,
+        fixedImageShape: NDArray | Sequence[int],
+        warpedImage: NDArray) -> NDArray:
+    """Apply transform to warped image and assemble into fixed space. Cuts image into tiles for large data."""
+    shape = numpy.asarray(fixedImageShape, dtype=numpy.int64)
+    return assemble.TransformImage(
+        transform,
+        shape,
+        warpedImage,
+        CropUndefined=False,
+        interpolation_order=1,
+        extrapolate=False,
+        enforce_background_cval=0,
+    )
 
 
 def stos_image_dim_from_shape(shape: Sequence[int]) -> list[float]:
@@ -98,12 +116,6 @@ def stos_image_dims_from_stos_config(
     if warped_vm is not None and getattr(warped_vm, "Image", None) is not None:
         mapped_dim = stos_image_dim_from_shape(warped_vm.Image.shape)
     return control_dim, mapped_dim
-
-
-def AssembleHugeRegisteredWarpedImage(transform: ITransform, fixedImageShape: NDArray,
-                                      warpedImage: NDArray):
-    """Apply transform to warped image and assemble into fixed space. Cuts image into tiles for large data."""
-    return assemble.TransformImage(transform, fixedImageShape, warpedImage, CropUndefined=False)
 
 
 def _apply_lookat_to_window(window, lookat, scale: float):

@@ -439,10 +439,20 @@ class ImageTransformView(IImageTransformView):
             rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
             rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
 
+        cull_rect = bounding_box
+        if (
+                rigid_composite_fixed_align
+                and self._image_space == Space.Source
+                and bounding_box is not None
+                and use_rigid_path
+        ):
+            from pyre.views.composite_display import transform_visible_rectangle
+            cull_rect = transform_visible_rectangle(bounding_box, rigid_inverse)
+
         visible = gltiles.tile_coords_for_visible_bounds(
             image_viewmodel.height, image_viewmodel.width,
             image_viewmodel.TextureSize,
-            bounding_box)
+            cull_rect)
 
         for ix in range(0, image_viewmodel.NumCols):
             column = image_array[ix]

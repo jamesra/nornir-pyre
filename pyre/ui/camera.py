@@ -229,6 +229,20 @@ class Camera(IReadOnlyCamera):
         """View projection matrix"""
         return self._view_proj
 
+    def view_proj_for_lookat(
+            self,
+            lookat: nornir_imageregistration.PointLike,
+            win_width: int,
+            win_height: int) -> NDArray[np.floating]:
+        """Build an orthographic view_proj for an alternate lookat without mutating camera state."""
+        saved_lookat = self._lookat
+        self._lookat = np.asarray(lookat, dtype=float)
+        try:
+            self.focus(win_width, win_height)
+            return np.copy(self._view_proj)
+        finally:
+            self._lookat = saved_lookat
+
     def focus(self, win_width: int, win_height: int):
         self.window_size = (win_height, win_width)
 
