@@ -28,7 +28,7 @@ from pyre.commands.navigationcommandbase import NavigationCommandBase
 from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
-from pyre.transform_edit_policy import blocks_layer_translate_action, fixed_image_manipulation_locked
+from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action, fixed_image_manipulation_locked
 from pyre.views.composite_display import lookat_delta_from_display_delta
 from pyre.views.gltiles import is_rigid_transform
 
@@ -361,6 +361,13 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         if blocks_layer_translate_action(
                 self._transform_controller.type, self.space, new_action.action, self._view_type()):
+            return False
+
+        if blocks_control_point_translate_action(
+                self._transform_controller.TransformModel,
+                self.space,
+                new_action.action,
+                self._view_type()):
             return False
 
         if new_action.action not in self._action_to_command:

@@ -22,29 +22,46 @@ class BinarySelectionMapper:
     """Maps an observable set of integers to a binary ndarray"""
     _selection: ObservableSet[int]
     _setter: Callable[[NDArray[np.bool_]], None]
+    _point_count: Callable[[], int]
+    _repaint: Callable[[], None] | None
 
     def __init__(self, selection: ObservableSet[int],
                  getter: Callable[[], NDArray[np.bool_]],
-                 setter: Callable[[NDArray[np.bool_]], None]):
+                 setter: Callable[[NDArray[np.bool_]], None],
+                 point_count: Callable[[], int],
+                 repaint: Callable[[], None] | None = None):
         self._selection = selection
         self._getter = getter
         self._setter = setter
+        self._point_count = point_count
+        self._repaint = repaint
         self._selection.add_observer(self._OnSelectionChanged)
 
     def _OnSelectionChanged(self, obj: ObservableSet[int], action: ObservedAction, indicies: AbstractSet[int] | None):
         """Converts the set of integers to a binary array with the integer values set to true"""
+        length = self._point_count()
+        if length == 0:
+            return
 
-        # Determine the length of the array we are writing to.
-        length = len(self._getter())
         selected = np.zeros(length, dtype=bool)
-        index = TransformController._ensure_numpy_friendly_index(obj)
+        if len(obj) == 0:
+            self._setter(selected)
+            if self._repaint is not None:
+                self._repaint()
+            return
 
-        if np.any(index >= length):
-            raise ValueError("index is out of bounds")
+        index = TransformController._ensure_numpy_friendly_index(set(obj))
 
-        # Set the values at the indices to true
+        if isinstance(index, int):
+            if index >= length:
+                return
+        elif np.any(index >= length):
+            return
+
         selected[index] = True
         self._setter(selected)
+        if self._repaint is not None:
+            self._repaint()
 
 
 class TransformControllerView:
@@ -58,6 +75,7 @@ class TransformControllerView:
     _initialized: bool = False
 
     _gl_funcs: QOpenGLFunctions | None = None
+    _selection_mask: NDArray[np.bool_] | None = None
 
     @property
     def gl_funcs(self) -> QOpenGLFunctions:
@@ -135,6 +153,8 @@ class TransformControllerView:
                                             gl_funcs=self.gl_funcs)
         # Sync current controller points into the shared buffer (handles transform loaded after context creation)
         self._controlpoint_view.points = self._transform_controller.points
+        if self._selection_mask is not None:
+            self._apply_selection_texture(0)
         # Deferred sync so we pick up points if transform is set in same tick after context creation
         QTimer.singleShot(0, self._sync_control_points_from_controller)
 
@@ -143,6 +163,8 @@ class TransformControllerView:
         """Sync controller points into the control point view buffer (safe to call deferred)."""
         if self._controlpoint_view is not None and self._transform_controller is not None:
             self._controlpoint_view.points = self._transform_controller.points
+            if self._selection_mask is not None:
+                self._apply_selection_texture(0)
 
     def _OnTransformControllerChange(self, new_transform_controller: pyre.controllers.TransformController | None):
         if self._transform_controller is not None:
@@ -160,6 +182,8 @@ class TransformControllerView:
         if self._controlpoint_view is None:
             return
         self._controlpoint_view.points = controller.points
+        if self._selection_mask is not None:
+            self._apply_selection_texture(0)
 
     def _OnTransformChange(self, controller: TransformController | None = None, *args, **kwargs):
         if self._controlpoint_view is None:
@@ -190,8 +214,24 @@ class TransformControllerView:
         self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
         self.selected = None
 
+    def _apply_selection_texture(self, blink_phase: int) -> None:
+        """Write selection texture indices, alternating selected points for blink."""
+        if self._controlpoint_view is None:
+            return
+
+        n = int(self._controlpoint_view.points.shape[0])
+        if n == 0:
+            return
+
+        tex = np.zeros((n, 1), dtype=np.float32)
+        if self._selection_mask is not None and self._selection_mask.shape[0] == n:
+            tex[self._selection_mask, 0] = float(blink_phase % 2)
+        self._controlpoint_view.texture_index = tex
+
     @property
     def selected(self) -> NDArray[np.bool_]:
+        if self._selection_mask is not None:
+            return self._selection_mask
         return self._controlpoint_view.texture_index.astype(bool)  # type: ignore[union-attr]
 
     @selected.setter
@@ -202,20 +242,24 @@ class TransformControllerView:
         :return:
         """
         if value is None:
-            self._controlpoint_view.texture_index = np.zeros(self._controlpoint_view.points.shape[0], dtype=np.uint16)  # type: ignore[union-attr, assignment]
+            self._selection_mask = None
+            self._apply_selection_texture(0)
             return
 
-        if value.shape[0] != self._controlpoint_view.points.shape[0]:  # type: ignore[union-attr]
+        if self._controlpoint_view is not None and value.shape[0] != self._controlpoint_view.points.shape[0]:  # type: ignore[union-attr]
             raise ValueError("Selected array must have the same number of elements as the control points")
 
         if value.dtype == np.integer:
-            if max(value) >= self._controlpoint_view.num_textures:  # type: ignore[union-attr]
+            if self._controlpoint_view is not None and max(value) >= self._controlpoint_view.num_textures:  # type: ignore[union-attr]
                 raise ValueError(
                     "Selected array of integer values contains indices larger than the number of textures in texture array")
             if min(value) < 0:
                 raise ValueError("Selected array of integer values contains indices that are negative")
+            self._selection_mask = value.astype(bool)
+        else:
+            self._selection_mask = np.asarray(value, dtype=bool).copy()
 
-        self._controlpoint_view.texture_index = value.astype(np.uint16)  # type: ignore[union-attr, assignment]
+        self._apply_selection_texture(0)
 
     def set_selected_by_index(self, index: Iterable[int] | NDArray[np.integer]):
         """Converts passed sequences of integers into a boolean array where values at the index are true"""
@@ -228,7 +272,8 @@ class TransformControllerView:
         selected[np_index] = True  # type: ignore[index]
         self.selected = selected
 
-    def draw(self, model_view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float):
+    def draw(self, model_view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float,
+             blink_phase: int = 0):
         if self._controlpoint_view is None:
             return
 
@@ -238,5 +283,6 @@ class TransformControllerView:
         if n_buffer != n_controller:
             self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
 
+        self._apply_selection_texture(blink_phase)
         self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)
 

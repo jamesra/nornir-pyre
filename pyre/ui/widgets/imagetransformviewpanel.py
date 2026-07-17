@@ -42,7 +42,7 @@ from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
-from pyre.transform_edit_policy import fixed_image_manipulation_locked, rigid_rotation_locked
+from pyre.transform_edit_policy import fixed_panel_hint_message, rigid_rotation_locked
 from pyre.views.composite_display import resolve_composite_display_draw_params
 
 
@@ -208,8 +208,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if self._view_type == ViewType.Source and self._space == Space.Source:
             self._fixed_layer_hint = QLabel(self)
-            self._fixed_layer_hint.setText(
-                "Fixed image — translate warped layer in Warped or Composite; rotate in Composite view")
             self._fixed_layer_hint.setStyleSheet(
                 "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
             self._fixed_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -228,8 +226,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def _update_layer_policy_hints(self) -> None:
         """Show corner hints when transform-edit policy blocks actions in this panel."""
         if getattr(self, '_fixed_layer_hint', None) is not None:
-            if fixed_image_manipulation_locked(
-                    self._transform_controller.type, self._space, self._view_type):
+            msg = fixed_panel_hint_message(
+                self._transform_controller.TransformModel,
+                self._transform_controller.type,
+                self._space,
+                self._view_type)
+            if msg is not None:
+                self._fixed_layer_hint.setText(msg)
                 self._fixed_layer_hint.adjustSize()
                 self._fixed_layer_hint.move(8, 8)
                 self._fixed_layer_hint.show()
@@ -383,7 +386,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
             BinarySelectionMapper(self._selected_points,
                                   lambda: getattr(self._transform_controller_view, 'selected'),
-                                  lambda value: setattr(self._transform_controller_view, 'selected', value))
+                                  lambda value: setattr(self._transform_controller_view, 'selected', value),
+                                  point_count=lambda: len(self.transform_controller.points),
+                                  repaint=lambda: self._glpanel.update())
             # Activate command directly - no need to defer as context is already active
             self.activate_command()
             if self.view_type == ViewType.Composite:
@@ -497,4 +502,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if self._transform_controller_view is not None:
             tween = 0 if self.space == pyre.Space.Source else 1
             point_scale = (1 / self.camera.scale) * self.control_point_scale
-            self._transform_controller_view.draw(self.camera.view_proj, tween=tween, scale_factor=point_scale)
+            self._transform_controller_view.draw(
+                self.camera.view_proj,
+                tween=tween,
+                scale_factor=point_scale,
+                blink_phase=self.DebugTickCounter % 2)

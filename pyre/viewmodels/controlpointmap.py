@@ -29,9 +29,13 @@ class ControlPointMap:
         self._tween = tween
         self._transformcontroller = transformcontroller
         self._transformcontroller.AddOnChangeEventListener(self._OnTransformChange)
+        self._transformcontroller.AddOnPointMovedEventListener(self._OnPointMoved)
         self.create_kdtree()
 
     def _OnTransformChange(self, transform_controller: TransformController):
+        self.create_kdtree()
+
+    def _OnPointMoved(self, transform_controller: TransformController, indices: NDArray[np.integer]):
         self.create_kdtree()
 
     @property
