@@ -42,6 +42,7 @@ from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
+from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.transform_edit_policy import fixed_panel_hint_message, rigid_rotation_locked
 from pyre.views.composite_display import resolve_composite_display_draw_params
 
@@ -500,10 +501,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
         if self._transform_controller_view is not None:
-            tween = 0 if self.space == pyre.Space.Source else 1
             point_scale = (1 / self.camera.scale) * self.control_point_scale
             self._transform_controller_view.draw(
                 self.camera.view_proj,
-                tween=tween,
+                tween=ControlPointMap.draw_tween_for_pyre_space(self.space),
                 scale_factor=point_scale,
                 blink_phase=self.DebugTickCounter % 2)

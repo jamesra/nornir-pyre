@@ -62,6 +62,11 @@ class ControlPointMap:
         return self._kdtree.data
 
     @staticmethod
+    def draw_tween_for_pyre_space(space: Space) -> float:
+        """Shader tween for panel space (1=fixed/TargetPoints, 0=warped/SourcePoints)."""
+        return 1.0 if space == Space.Source else 0.0
+
+    @staticmethod
     def tweened_points(transform_controller: TransformController, tween: float | Space) -> NDArray[np.floating]:
         """Control points for hit-testing in Pyre panel space (Source=fixed, Target=warped)."""
         if tween == Space.Source:

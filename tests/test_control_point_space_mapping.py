@@ -65,6 +65,10 @@ class TestControlPointSpaceMapping(unittest.TestCase):
         cmap = ControlPointMap(self.controller, Space.Target)
         np.testing.assert_allclose(cmap.points, self.controller.SourcePoints)
 
+    def test_draw_tween_matches_hit_test_space(self) -> None:
+        self.assertEqual(ControlPointMap.draw_tween_for_pyre_space(Space.Source), 1.0)
+        self.assertEqual(ControlPointMap.draw_tween_for_pyre_space(Space.Target), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
