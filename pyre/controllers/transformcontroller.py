@@ -725,8 +725,14 @@ class TransformController:
         if Distance > maxDistance:
             return None
 
-        index = self.MovePoint(index, ImageDY, ImageDX)  # type: ignore[arg-type]
+        index = self.MovePoint(index, ImageDY, ImageDX, space=space)  # type: ignore[arg-type]
         return index
+
+    def _points_array_for_pyre_space(self, space: Space) -> NDArray[np.floating]:
+        """Return control-point rows for Pyre panel space (Source=fixed, Target=warped)."""
+        if space == Space.Source:
+            return self.TransformModel.TargetPoints  # type: ignore[attr-defined]
+        return self.TransformModel.SourcePoints  # type: ignore[attr-defined]
 
     @staticmethod
     def _ensure_numpy_friendly_index(index: int | set[int] | NDArray[np.integer] | list[int] | Sequence[int]) -> NDArray[np.intp] | int:
@@ -762,10 +768,7 @@ class TransformController:
             if np_index > len(self.TransformModel.SourcePoints):  # type: ignore[attr-defined]
                 return None
 
-        if space == Space.Source:
-            return self.TransformModel.SourcePoints[np_index]  # type: ignore[attr-defined]
-        else:
-            return self.TransformModel.TargetPoints[np_index]  # type: ignore[attr-defined]
+        return self._points_array_for_pyre_space(space)[np_index]
 
     def SetPoint(self, index: int, X: float, Y: float, space: Space = Space.Source) -> int | NDArray[np.integer]:
         """Sets the specified point to the new location.  If the transform does not support editing the specied space,
@@ -776,22 +779,22 @@ class TransformController:
 
         np_index: int | NDArray[np.integer] = self._ensure_numpy_friendly_index(index)
 
-        if space == Space.Target:
+        if space == Space.Source:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
                 np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)  # type: ignore[attr-defined]
             elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                new_source_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, new_source_point)  # type: ignore[attr-defined]
-            else:
-                raise ValueError("Transform does not support editing target points in either source or target space")
-        elif space == Space.Source:
-            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
-            elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
                 new_target_point = self.TransformModel.Transform([point])[0]  # type: ignore[arg-type]
                 np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, new_target_point)  # type: ignore[attr-defined]
             else:
-                raise ValueError("Transform does not support editing target points in either source or target space")
+                raise ValueError("Transform does not support editing fixed points in either source or target space")
+        elif space == Space.Target:
+            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
+            elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
+                new_source_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, new_source_point)  # type: ignore[attr-defined]
+            else:
+                raise ValueError("Transform does not support editing warped points in either source or target space")
         else:
             raise ValueError(f"Unexpected value for space: {space}")
 
@@ -813,14 +816,9 @@ class TransformController:
         point = original_point + numpy.array((ImageDY, ImageDX))
 
         if space == Space.Source:
-            # This code is to manipulate transforms where source space points are fixed.  Instead we move the
-            # target points in this case.
-            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
+            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)  # type: ignore[attr-defined]
             else:
-                # if not self.ShowWarped:
-                #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
-                # else:
                 if isinstance(index, Iterable):
                     if len(index) > 1:
                         raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
@@ -834,12 +832,9 @@ class TransformController:
                 np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, FinalPoint)  # type: ignore[attr-defined]
 
         else:
-            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, point)  # type: ignore[attr-defined]
+            if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
+                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
             else:
-                # if not self.ShowWarped:
-                #     np_index = self.TransformModel.UpdateSourcePointsByPosition(original_point, point)
-                # else:
                 if isinstance(index, Iterable):
                     if len(index) > 1:
                         raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
@@ -851,8 +846,6 @@ class TransformController:
                 Delta = OldSourcePoint - NewSourcePoint
                 FinalPoint = self.TransformModel.SourcePoints[np_index] + Delta  # type: ignore[attr-defined]
                 np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, FinalPoint)  # type: ignore[attr-defined]
-
-                # print(f'Dragged point {str(np_index)} {str(point)}')
 
         if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
             result = np.array([np_index], dtype=int)

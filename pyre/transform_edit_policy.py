@@ -64,4 +64,6 @@ def blocks_layer_translate_action(
     """True when a whole-layer translate action must be ignored on the fixed panel."""
     if not layer_translate_locked(transform_type, space, view_type):
         return False
-    return action in (ControlPointAction.TRANSLATE, ControlPointAction.TRANSLATE_ALL)
+    if action == ControlPointAction.TRANSLATE_ALL:
+        return True
+    return action == ControlPointAction.TRANSLATE and transform_type == TransformType.RIGID
