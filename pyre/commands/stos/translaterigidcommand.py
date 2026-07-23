@@ -37,10 +37,6 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _window_manager: IWindowManager = Provide[IContainer.window_manager]
 
-    @property
-    def translated_points(self) -> NDArray[np.floating]:
-        return self._transform_controller.points[list(self._selected_point_set)]  # type: ignore[index]
-
     @inject
     def __init__(self,
                  parent: QWidget,
@@ -114,19 +110,8 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         world_point = self._world_point_for_translate(point_pair)
 
         delta = world_point - self._translate_origin
-        camera_delta = delta
-        if self.space == Space.Source:
-            delta = delta
-            camera_delta = -delta
-        else:
-            camera_delta = delta
+        if self.space != Space.Source:
             delta = -delta
-
-        # if self.view
-        # self.camera.translate(camera_delta)  # Balance out translation with camera movement so the correct layer appears to move
-
-        # print(
-        #    f'space: {self.space} x:{world_point[1]} y:{world_point[0]} hx:{self._translate_origin[1]} hy:{self._translate_origin[0]} dx:{delta[1]} dy:{delta[0]}')
 
         self._transform_controller.Translate(delta, space=self.space)
 
@@ -153,13 +138,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
             # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
             multiplier = 1
-            print(str(multiplier))
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 multiplier *= 5
-                print(str(multiplier))
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 multiplier *= 25
-                print(str(multiplier))
 
             delta = [0, 0]
             if keycode == Qt.Key.Key_Left:

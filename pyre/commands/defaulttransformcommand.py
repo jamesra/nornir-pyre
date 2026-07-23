@@ -29,7 +29,7 @@ from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
 from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action, fixed_image_manipulation_locked
-from pyre.views.composite_display import lookat_delta_from_display_delta
+from pyre.views.composite_display import apply_composite_display_pan_delta
 from pyre.views.gltiles import is_rigid_transform
 
 DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
@@ -146,7 +146,8 @@ class DefaultTransformCommand(NavigationCommandBase):
             transform_controller.type]
 
         if isinstance(transform_controller.TransformModel, IControlPoints):
-            controlpointmapkey = ControlPointManagerKey(transform_controller, space)
+            controlpointmapkey = ControlPointManagerKey(
+                transform_controller, space, self._view_type())
             self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
             self._actionmap = transform_action_map_factory(self._controlpointmap)
         else:
@@ -165,15 +166,6 @@ class DefaultTransformCommand(NavigationCommandBase):
     def executed(self) -> bool:
         return self._executed
 
-    @property
-    def SelectionMaxDistance(self) -> float:
-        """How close we need to be to a control point to select it"""
-        selection_max_distance = (float(self.camera.visible_world_height) / float(self.height)) * self.search_radius
-        if selection_max_distance < self.search_radius:
-            selection_max_distance = self.search_radius
-
-        return selection_max_distance
-
     # A command that lets the user manipulate the camera and
     def subscribe_to_parent(self):
         self._bind_mouse_events()
@@ -189,6 +181,13 @@ class DefaultTransformCommand(NavigationCommandBase):
         return True
 
     def _get_space_point(self, point_pair: PointPair):
+        model = self._transform_controller.TransformModel
+        if (
+                self._view_type() == ViewType.Composite
+                and model is not None
+                and not is_rigid_transform(model)
+        ):
+            return point_pair.target
         return point_pair.source if self.space == Space.Source else point_pair.target
 
     def _build_selection_event(
@@ -330,7 +329,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._action_to_command = self._action_command_map_by_type[tc.type]
         map_factory = self._get_transform_action_map_dict()[tc.type]
         if isinstance(tc.TransformModel, IControlPoints):
-            controlpointmapkey = ControlPointManagerKey(tc, self._space)
+            controlpointmapkey = ControlPointManagerKey(tc, self._space, self._view_type())
             self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
             self._actionmap = map_factory(self._controlpointmap)
         else:
@@ -433,16 +432,12 @@ class DefaultTransformCommand(NavigationCommandBase):
             elif event.buttons() & Qt.MouseButton.RightButton:
                 view = self._view_type()
                 model = self._transform_controller.TransformModel
-                if (
-                        view == ViewType.Composite
-                        and model is not None
-                        and is_rigid_transform(model)
-                ):
+                if view == ViewType.Composite and model is not None:
                     delta_display = (
                         self._mouse_position_history[Space.Target] - point_pair.target
                     )
-                    delta_lookat = lookat_delta_from_display_delta(model, delta_display)
-                    self.camera.translate(delta_lookat)
+                    apply_composite_display_pan_delta(
+                        self.camera, self._transform_controller, delta_display)
                 else:
                     dy, dx = self._mouse_position_history[self.space] - point
                     self.camera.translate((dy, dx))

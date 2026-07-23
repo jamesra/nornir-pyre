@@ -15,6 +15,7 @@ from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.interfaces.viewtype import ViewType
 from pyre.container import IContainer
 
 
@@ -28,10 +29,6 @@ class TranslateControlPointCommand(NavigationCommandBase):
     _original_points: NDArray[np.floating]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
-
-    @property
-    def translated_points(self) -> NDArray[np.floating]:
-        return self._transform_controller.points[list(self._selected_point_set)]  # type: ignore[index]
 
     @inject
     def __init__(self,

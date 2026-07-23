@@ -17,8 +17,10 @@ from pyre.interfaces.readonlycamera import IReadOnlyCamera
 from pyre.settings import AppSettings, UISettings
 
 
-def screen_to_volume(camera, point):
-    camera.ImageCoordsForMouse(point)
+def screen_to_volume(camera: Camera, point: nornir_imageregistration.PointLike) -> NDArray[np.floating]:
+    """Convert a screen (y, x) position to world coordinates."""
+    y, x = nornir_imageregistration.EnsurePointsAre1DNumpyArray(point)
+    return camera.ImageCoordsForMouse(float(y), float(x))
 
 
 class Camera(IReadOnlyCamera):
@@ -85,10 +87,21 @@ class Camera(IReadOnlyCamera):
     def WindowHeight(self) -> int:
         return int(self._window_size[nornir_imageregistration.iPoint.Y])
 
-    def _calc_view_size(self, scale: float, aspect: float) -> NDArray[np.floating]:
-        """Calculate the size of the visible world based on the scale"""
-        size = self._window_size[0] / scale
-        return np.array((size, aspect * size))
+    def _calc_view_size(self, scale: float, aspect: float | None = None) -> NDArray[np.floating]:
+        """Calculate the size of the visible world based on the scale."""
+        del aspect  # Kept for call-site compatibility; size is fully determined by window_size / scale.
+        return self._window_size / scale
+
+    def pan_by_screen_delta(
+            self,
+            dx: float,
+            dy: float,
+            width: int,
+            height: int) -> None:
+        """Pan the camera so content follows a screen-space drag of (dx, dy) pixels."""
+        image_dx = (float(dx) / width) * self.visible_world_width
+        image_dy = (float(dy) / height) * self.visible_world_height
+        self.lookat = (self.y - image_dy, self.x - image_dx)
 
     @property
     def visible_world_size(self) -> NDArray[np.floating]:
@@ -130,8 +143,8 @@ class Camera(IReadOnlyCamera):
         self._view_size = self._calc_view_size(self.scale, self.aspect)
         self._FireChangeEvent()
 
-    def top_left_visible_world_coords(self):
-        """Coordinates of the top left corner of the visible world"""
+    def min_visible_world_coords(self):
+        """Minimum (y, x) corner of the visible world in bottom-left image coordinates."""
         return self.lookat - (self.visible_world_size / 2.0)
 
     def ImageCoordsForMouse(self, y: float, x: float) -> NDArray[np.floating]:
@@ -139,7 +152,7 @@ class Camera(IReadOnlyCamera):
 
         offset = np.array((y, x), dtype=float)
         offset = (offset / self._window_size) * self.visible_world_size
-        world_coords = self.top_left_visible_world_coords() + offset
+        world_coords = self.min_visible_world_coords() + offset
         return world_coords
 
         # image_x = ((float(x) / self.WindowWidth) * self.visible_world_width) + (
@@ -302,15 +315,15 @@ class Camera(IReadOnlyCamera):
         sy = 2.0 / height
         sz = 2.0 / -depth
 
-        tx = (right + left) / width
-        ty = (top + bottom) / height
-        tz = (z_far + z_near) / depth
+        tx = -(right + left) / width
+        ty = -(top + bottom) / height
+        tz = -(z_far + z_near) / depth
 
-        return np.array(((sx, 0, 0, tx),
-                         (0, sy, 0, ty),
-                         (0, 0, sz, tz),
-                         (0, 0, 0, 1.0)),
-                        dtype=np.float32)
+        return np.array(((sx, 0, 0, 0.0),
+                         (0, sy, 0, 0.0),
+                         (0, 0, sz, 0.0),
+                         (tx, ty, tz, 1.0)),
+                        dtype=np.float64)
 
     @staticmethod
     def normalize(vec: NDArray[np.floating], axis=-1, order=2):

@@ -608,8 +608,6 @@ class TransformController:
                 raise NotImplementedError("Current transform does not support warped rotation")
         elif isinstance(model, nornir_imageregistration.ITransformTargetRotation):
             model.RotateTargetPoints(-rangle, center)  # type: ignore[attr-defined]
-        elif isinstance(model, nornir_imageregistration.ITransformSourceRotation):
-            model.RotateSourcePoints(rangle, center)  # type: ignore[attr-defined]
         else:
             raise NotImplementedError("Current transform does not support rotation")
 
@@ -791,8 +789,8 @@ class TransformController:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
             elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
-                new_source_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, new_source_point)  # type: ignore[attr-defined]
+                new_target_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, new_target_point)  # type: ignore[attr-defined]
             else:
                 raise ValueError("Transform does not support editing warped points in either source or target space")
         else:
@@ -834,18 +832,11 @@ class TransformController:
         else:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):
                 np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, point)  # type: ignore[attr-defined]
+            elif isinstance(self.TransformModel, nornir_imageregistration.transforms.ITargetSpaceControlPointEdit):
+                new_target_point = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
+                np_index = self.TransformModel.UpdateTargetPointsByIndex(np_index, new_target_point)  # type: ignore[attr-defined]
             else:
-                if isinstance(index, Iterable):
-                    if len(index) > 1:
-                        raise NotImplementedError("MovePoint does not support moving multiple points, but it should")
-
-                OldSourcePoint = \
-                    self.TransformModel.InverseTransform([[point[0] - ImageDY, point[1] - ImageDX]])[0]  # type: ignore[arg-type]
-                NewSourcePoint = self.TransformModel.InverseTransform([point])[0]  # type: ignore[arg-type]
-
-                Delta = OldSourcePoint - NewSourcePoint
-                FinalPoint = self.TransformModel.SourcePoints[np_index] + Delta  # type: ignore[attr-defined]
-                np_index = self.TransformModel.UpdateSourcePointsByIndex(np_index, FinalPoint)  # type: ignore[attr-defined]
+                raise ValueError("Transform does not support editing warped points in either source or target space")
 
         if isinstance(index, Iterable) and not isinstance(np_index, Iterable):
             result = np.array([np_index], dtype=int)

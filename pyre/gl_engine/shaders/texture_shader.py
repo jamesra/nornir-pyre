@@ -122,6 +122,7 @@ class TextureShader(BaseShader):
         self._fragment_shader = FragmentShader(_texture_fragment_shader_program)
         
         self._vertex_layout = VertexArrayLayout(
+            # Attribute names are swapped vs tween semantics; gltiles packs vertices to match.
             [VertexAttribute(lambda: self.target_pos_location, "vertex_target_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.source_pos_location, "vertex_source_position", 3, gl.GL_FLOAT),
              VertexAttribute(lambda: self.texture_coord_location, "vertex_texture_coordinate", 2, gl.GL_FLOAT)])

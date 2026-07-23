@@ -4,6 +4,8 @@ Created on Feb 6, 2015
 @author: u0490822
 '''
 
+import math
+
 import nornir_imageregistration
 import nornir_imageregistration.spatial
 import pyre.state as state
@@ -44,14 +46,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def ImageTransformViewList(self, value):
         self._imageTransformViewList = value
 
-    @property
-    def Command(self):
-        return self._command
-
-    @Command.setter
-    def Command(self, value):
-        self._command = value
-
     @inject
     def __init__(self,
                  parent,
@@ -76,8 +70,6 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._bind_mouse_events()
 
         self.addStatusBar()
-
-        self.Command = None
 
     def on_mouse_enter(self, event):
         """Keep focus on the mosaic panel so WASD / Page Up–Down reach keyPressEvent."""
@@ -162,28 +154,12 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
             itv.draw_points(SelectedIndex=None, BoundingBox=self.camera.VisibleImageBoundingBox, FixedSpace=True,  # type: ignore[union-attr]
                             ScaleFactor=pointScale)
 
-        if self.Command is not None:
-            self.Command.draw()
-
     def on_mouse_press(self, event: QMouseEvent):
-        (y, x) = self.getCorrectedMousePosition(event)
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
-
-        if ImageX is None or ImageY is None:
-            return
-
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.glcanvas, self.on_rectangle_command_completed,  # type: ignore[attr-defined]
-                                                                      self.camera, (ImageY, ImageX))
-
         if event.button() == Qt.MouseButton.MiddleButton:
             self.center_camera()
 
     def on_mouse_drag(self, event: QMouseEvent):
         (y, x) = self.getCorrectedMousePosition(event)
-
-        if event.buttons() & Qt.MouseButton.LeftButton and self.Command is not None:
-            self.Command.on_mouse_motion(event)
 
         if self.LastMousePosition is None:
             self.LastMousePosition = (y, x)
@@ -194,15 +170,8 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.LastMousePosition = (y, x)
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
-        if ImageX is None:
-            return
-
-        ImageDX = (float(dx) / self.width()) * self.camera.visible_world_width  # type: ignore[union-attr]
-        ImageDY = (float(dy) / self.height()) * self.camera.visible_world_height  # type: ignore[union-attr]
-
         if event.buttons() & Qt.MouseButton.RightButton:
-            self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)  # type: ignore[union-attr]
+            self.camera.pan_by_screen_delta(dx, dy, self.width(), self.height())  # type: ignore[union-attr]
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 
@@ -219,7 +188,7 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
             angle = float(abs(scroll_y) * 2) ** 2.0
             if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 angle = float(abs(scroll_y) / 2) ** 2.0
-            rangle = (angle / 180.0) * 3.14159
+            rangle = (angle / 180.0) * math.pi
             if scroll_y < 0:
                 rangle = -rangle
             try:
@@ -231,13 +200,9 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
             except NotImplementedError:
                 pass
         else:
-            zdelta = (1 + (-scroll_y / 20.0))
+            zdelta = (1 + (scroll_y / 40.0))
             self.camera.scale *= zdelta  # type: ignore[union-attr]
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 
         self.glcanvas.update()
-
-    def on_rectangle_command_completed(self, RectangleCommand):
-        self.Command = None
-        return

@@ -9,41 +9,41 @@
         "control_point_search_radius": 10.0,
         "image_search_paths": [],
         "replacement_paths": {},
-        "stos_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
+        "stos_browser_folder": "Y:/Volumes/RPC3/TEM/Grid32",
         "window_geometry": {
             "Source": {
-                "x": 800,
-                "y": 465,
-                "width": 793,
-                "height": 431,
+                "x": 880,
+                "y": 466,
+                "width": 1280,
+                "height": 726,
                 "visible": true
             },
             "Target": {
-                "x": 800,
-                "y": 465,
-                "width": 793,
-                "height": 431,
+                "x": 880,
+                "y": 466,
+                "width": 1280,
+                "height": 726,
                 "visible": true
             },
             "Composite": {
-                "x": 317,
-                "y": 0,
-                "width": 1275,
-                "height": 1017,
+                "x": 3857,
+                "y": 482,
+                "width": 2560,
+                "height": 726,
                 "visible": true
             },
             "StosBrowser": {
-                "x": 1,
+                "x": 0,
                 "y": 0,
-                "width": 309,
-                "height": 1017,
+                "width": 362,
+                "height": 1392,
                 "visible": false
             }
         }
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "Y:/Volumes/RPC3/TEM/StosBrute64\\Manual\\808-806_ctrl-TEM_Blob_map-TEM_Blob.stos",
+        "stos_filename": "Y:/Volumes/RPC3/TEM/Grid32\\Manual\\707-706_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -72,19 +72,19 @@
             "grid_spacing": 192,
             "num_iterations": 5,
             "max_angle": 5.0,
-            "angle_step_size": 3.0
+            "angle_step_size": 2.5
         },
         "source_image": {
-            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0808\\TEM\\Blob\\Images\\064\\0808_TEM_Blob.png",
-            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0808\\TEM\\Mask\\Images\\064\\0808_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0707\\TEM\\Leveled\\Images\\032\\0707_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0707\\TEM\\Mask\\Images\\032\\0707_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0806\\TEM\\Blob\\Images\\064\\0806_TEM_Blob.png",
-            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0806\\TEM\\Mask\\Images\\064\\0806_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0706\\TEM\\Leveled\\Images\\032\\0706_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RPC3\\TEM\\0706\\TEM\\Mask\\Images\\032\\0706_TEM_Mask.png"
         },
-        "stos_opened_from_browser_folder": "Y:/Volumes/RPC3/TEM/StosBrute64",
+        "stos_opened_from_browser_folder": "Y:/Volumes/RPC3/TEM/Grid32",
         "stos_browser_flat_manual": false,
         "stos_file_source": "auto",
-        "stos_browser_basename": "808-806_ctrl-TEM_Blob_map-TEM_Blob.stos"
+        "stos_browser_basename": "707-706_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
     }
 }

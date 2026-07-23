@@ -17,15 +17,7 @@ from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
 
 
-def _to_host_scalar(v):
-    if nornir_imageregistration.HasCupy():
-        try:
-            import cupy as cp
-            if isinstance(v, cp.ndarray):
-                return float(v.item())
-        except Exception:
-            pass
-    return float(v)
+from pyre.commands.stos.point_coords import control_point_row_from_pair
 
 
 class CreateControlPointCommand(NavigationCommandBase):
@@ -123,13 +115,7 @@ class CreateControlPointCommand(NavigationCommandBase):
     def queue_translate_command(self):
 
         point = self._new_point_position
-        # point = self._new_point_position.source if self.space == Space.Source else self._new_point_position.target
-        newpoint = np.array([
-            _to_host_scalar(point.target[0]),
-            _to_host_scalar(point.target[1]),
-            _to_host_scalar(point.source[0]),
-            _to_host_scalar(point.source[1]),
-        ], dtype=np.float32)
+        newpoint = control_point_row_from_pair(point)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)  # type: ignore[union-attr]
 
         # Ensure only the new point is selected

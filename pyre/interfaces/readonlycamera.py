@@ -30,19 +30,19 @@ class IReadOnlyCamera(abc.ABC):
     @property
     @abc.abstractmethod
     def visible_world_size(self):
-        return self._view_size  # type: ignore[attr-defined]
+        raise NotImplementedError()
 
     @property
     @abc.abstractmethod
     def visible_world_width(self) -> float:
         """Visible volume width"""
-        return float(self._view_size[nornir_imageregistration.iPoint.X])  # type: ignore[attr-defined]
+        raise NotImplementedError()
 
     @property
     @abc.abstractmethod
     def visible_world_height(self) -> float:
         """Visible volume height"""
-        return float(self._view_size[nornir_imageregistration.iPoint.Y])  # type: ignore[attr-defined]
+        raise NotImplementedError()
 
     @property
     @abc.abstractmethod

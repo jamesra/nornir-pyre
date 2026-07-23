@@ -47,18 +47,6 @@ def layer_translate_locked(
     return fixed_image_manipulation_locked(transform_type, space, view_type)
 
 
-def control_point_translate_allowed(
-        transform_type: TransformType,
-        space: Space,
-        view_type: ViewType | None = None) -> bool:
-    """True when control-point translate is the expected edit mode."""
-    if transform_type == TransformType.RIGID:
-        return False
-    if transform_type in (TransformType.GRID, TransformType.MESH, TransformType.RBF):
-        return True
-    return False
-
-
 def fixed_panel_control_points_locked(
         transform_model: Any,
         space: Space,

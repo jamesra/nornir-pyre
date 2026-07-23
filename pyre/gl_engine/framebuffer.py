@@ -8,7 +8,6 @@ class FrameBuffer:
     """Holds a frame buffer object for rendering to a texture.
        The texture will be replaced if the client size changes.
     """
-    _size: tuple[int, int]  # Size of the frame buffer
     _fbo_texture: int | None  # Frame buffer object's texture
     _fbo: int | None  # Frame buffer object
     _gl_funcs: QOpenGLFunctions  # OpenGL functions

@@ -58,12 +58,12 @@ class ImageViewModel:
 
     @property
     def width(self) -> int:
-        """Size of the full image"""
+        """Raw image width in pixels (unpadded)."""
         return self._Image.shape[1]
 
     @property
     def height(self) -> int:
-        """Size of the full image"""
+        """Raw image height in pixels (unpadded)."""
         return self._Image.shape[0]
 
     @property
@@ -78,12 +78,12 @@ class ImageViewModel:
 
     @property
     def size(self) -> tuple[int, int]:
-        """Size of the full image"""
+        """Padded texture-grid size (height, width) in pixels."""
         return self._height, self._width
 
     @property
     def shape(self) -> tuple[int, int]:
-        """Size of the full image"""
+        """Padded texture-grid shape (height, width); same as :attr:`size`."""
         return self._height, self._width
 
     @property
@@ -182,8 +182,8 @@ class ImageViewModel:
         height = Resize.shape[0]
         width = Resize.shape[1]
 
-        NumCols = math.ceil(width / float(tile_height))
-        NumRows = math.ceil(height / float(tile_width))
+        NumCols = math.ceil(width / float(tile_width))
+        NumRows = math.ceil(height / float(tile_height))
 
         newwidth = NumCols * tile_height
         newheight = NumRows * tile_width
@@ -206,11 +206,6 @@ class ImageViewModel:
 
         texture_grid = list()  # type: list[list[int]]
 
-        print_output = self.NumCols > 1 and self.NumRows > 1
-
-        if print_output:
-            print('\nConverting image to ' + str(self.NumCols) + "x" + str(self.NumRows) + ' grid of OpenGL textures')
-
         for iX in range(0, self.width, self.TextureSize[nornir_imageregistration.iPoint.X]):
             columnTextures = list()  # type: list[int]
             lastCol = iX + self.TextureSize[nornir_imageregistration.iPoint.X] > self.width
@@ -220,14 +215,7 @@ class ImageViewModel:
             if pad_image:
                 end_iX = self.Image.shape[1]
 
-            if print_output:
-                sys.stdout.write('\n')
-
-            # print "ix " + str(iX)
             for iY in range(0, self.height, self.TextureSize[nornir_imageregistration.iPoint.Y]):
-
-                if print_output:
-                    sys.stdout.write('.')
                 lastRow = iY + self.TextureSize[nornir_imageregistration.iPoint.Y] > self.height
 
                 end_iY = iY + self.TextureSize[nornir_imageregistration.iPoint.Y]

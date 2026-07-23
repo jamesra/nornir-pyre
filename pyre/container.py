@@ -16,7 +16,7 @@ from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, I
                                       IImageManager,
                                       IMousePositionHistoryManager,
                                       IRegionMap, ITransformControllerGLBufferManager, IImageViewModelManager,
-                                      IWindowManager, IControlPointMapManager, ControlPointManagerKey, IActionMap)
+                                      IWindowManager, IControlPointMapManager, IActionMap)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
 from pyre.interfaces import ICommand, IInstantCommand
@@ -91,8 +91,6 @@ class IContainer(containers.DeclarativeContainer):
     image_loader: providers.AbstractFactory[IImageLoader] = providers.AbstractFactory()
     transform_controller: providers.AbstractSingleton = providers.AbstractSingleton()
 
-    control_point_manager_key = providers.AbstractFactory(
-        ControlPointManagerKey)  # Returns the key for the configured transform controller and space
     control_point_map_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
 
     transform_control_point_action_maps: providers.Dict = providers.Dict()  # type: ignore[type-arg]

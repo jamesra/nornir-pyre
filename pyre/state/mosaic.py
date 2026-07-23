@@ -125,7 +125,7 @@ class MosaicState(StateEventsImpl):
             image_transform_view.z = task_z
             ImageTransformViewList.append(image_transform_view)
 
-            output = '%g' % (z * 100.0)
+            output = '%g' % (task_z * 100.0)
 
             sys.stdout.write('\b' * output_len)
             sys.stdout.write(output)

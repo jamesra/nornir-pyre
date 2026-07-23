@@ -273,7 +273,8 @@ class TransformControllerView:
         self.selected = selected
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float,
-             blink_phase: int = 0):
+             blink_phase: int = 0,
+             display_point_rows: NDArray[np.floating] | None = None):
         if self._controlpoint_view is None:
             return
 
@@ -282,6 +283,9 @@ class TransformControllerView:
         n_buffer = len(self._controlpoint_view.points)
         if n_buffer != n_controller:
             self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
+
+        if display_point_rows is not None:
+            self._controlpoint_view.points = display_point_rows
 
         self._apply_selection_texture(blink_phase)
         self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)

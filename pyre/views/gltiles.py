@@ -220,19 +220,6 @@ def _build_tile_point_pairs(transform: nornir_imageregistration.ITransform,
         return border_point_pairs
 
 
-def _z_values_for_points_by_distance(points_yx: NDArray[np.floating]) -> NDArray[np.floating]:
-    """
-    :param points_yx:
-    :return: A Z depth for each vertex, which is equal to the distance of the vertex from the center (average) of the points
-    """
-    center = np.mean(points_yx, 0)
-    z = scipy.spatial.distance.cdist(np.resize(center, (1, 2)), points_yx, 'euclidean')
-    z = np.transpose(z)
-    z /= np.max(z)
-    z = 1 - z
-    return z
-
-
 def _z_values_for_points_by_texture(texture_points: NDArray[np.floating]) -> NDArray[np.floating]:
     """
     :param texture_points:
@@ -359,9 +346,34 @@ def _triangle_orientations(texture_points: NDArray[np.floating],
     return np.asarray(areas, dtype=np.float64)
 
 
+def _simplices_compatible_with_points(
+        simplices: NDArray[np.integer] | None,
+        point_count: int,
+        cached_point_count: int) -> bool:
+    """True when cached Delaunay indices match the current per-tile point set."""
+    if simplices is None or simplices.size == 0 or point_count <= 0:
+        return False
+    if point_count != cached_point_count:
+        return False
+    max_idx = int(np.max(simplices))
+    min_idx = int(np.min(simplices))
+    return min_idx >= 0 and max_idx < point_count
+
+
+def _simplices_index_in_bounds(
+        simplices: NDArray[np.integer] | None,
+        point_count: int) -> bool:
+    """True when every simplex vertex index refers to a row in texture_points."""
+    if simplices is None or simplices.size == 0 or point_count <= 0:
+        return False
+    return int(np.min(simplices)) >= 0 and int(np.max(simplices)) < point_count
+
+
 def _topology_still_valid(texture_points: NDArray[np.floating],
                           simplices: NDArray[np.integer]) -> bool:
     if simplices is None or simplices.size == 0:
+        return False
+    if not _simplices_index_in_bounds(simplices, texture_points.shape[0]):
         return False
     areas = _triangle_orientations(texture_points, simplices)
     if areas.size == 0:
@@ -397,6 +409,8 @@ def _repair_delaunay_by_edge_flips(texture_points: NDArray[np.floating],
                                    simplices: NDArray[np.integer],
                                    max_flips: int = 128) -> NDArray[np.integer] | None:
     """Lawson edge-flip repair on a fixed point set; returns None if repair fails."""
+    if not _simplices_index_in_bounds(simplices, texture_points.shape[0]):
+        return None
     simp = np.asarray(simplices, dtype=np.intp).copy()
     flips = 0
     changed = True
@@ -470,10 +484,10 @@ def tile_coords_for_control_points(image_height: int,
     num_rows = int(np.ceil(image_height / float(tile_h)))
     coords: set[tuple[int, int]] = set()
     target_pts = nornir_imageregistration.EnsureNumpyArray(transform.TargetPoints)
-    for idx in np.atleast_1d(point_indices):
-        if idx < 0 or idx >= target_pts.shape[0]:
-            continue
-        y, x = target_pts[int(idx)]
+    source_pts = nornir_imageregistration.EnsureNumpyArray(transform.SourcePoints)
+    n_points = min(target_pts.shape[0], source_pts.shape[0])
+
+    def _add_tiles_for_yx(y: float, x: float) -> None:
         ix = int(x // tile_w)
         iy = int(y // tile_h)
         for dx in range(-halo, halo + 1):
@@ -481,6 +495,13 @@ def tile_coords_for_control_points(image_height: int,
                 cx, cy = ix + dx, iy + dy
                 if 0 <= cx < num_cols and 0 <= cy < num_rows:
                     coords.add((cx, cy))
+
+    for idx in np.atleast_1d(point_indices):
+        if idx < 0 or idx >= n_points:
+            continue
+        i = int(idx)
+        _add_tiles_for_yx(target_pts[i, 0], target_pts[i, 1])
+        _add_tiles_for_yx(source_pts[i, 0], source_pts[i, 1])
     return coords
 
 
@@ -509,6 +530,16 @@ def tile_coords_for_visible_bounds(image_height: int,
     return coords
 
 
+def _tile_bounding_rect(
+        grid_coords: tuple[int, int],
+        texture_size: tuple[int, int]) -> nornir_imageregistration.spatial.Rectangle:
+    """Return the axis-aligned tile rectangle in texture coordinates."""
+    ix, iy = grid_coords
+    x = texture_size[1] * ix
+    y = texture_size[0] * iy
+    return nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+
+
 def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                         grid_coords: tuple[int, int],
                         texture_size: tuple[int, int],
@@ -517,10 +548,7 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
     from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
 
     if is_rigid_transform(transform):
-        ix, iy = grid_coords
-        x = texture_size[1] * ix
-        y = texture_size[0] * iy
-        tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+        tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
         verts, indices = _rigid_tile_quad_render_data(tile_bounding_rect, image_space)
         return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
                                 point_count=4, is_rigid_quad=True)
@@ -530,13 +558,11 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
     point_count = 0
     if cached_entry is not None and cached_entry.cached_simplices is not None:
         try:
-            ix, iy = grid_coords
-            x = texture_size[1] * ix
-            y = texture_size[0] * iy
-            tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+            tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
             all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
             point_count = all_point_pairs.shape[0]
-            if point_count == cached_entry.point_count:
+            if _simplices_compatible_with_points(
+                    cached_entry.cached_simplices, point_count, cached_entry.point_count):
                 simplices = cached_entry.cached_simplices
                 vertarray = _render_data_with_cached_simplices(
                     all_point_pairs, tile_bounding_rect, image_space, simplices)
@@ -546,10 +572,7 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
         except ValueError:
             pass
 
-    ix, iy = grid_coords
-    x = texture_size[1] * ix
-    y = texture_size[0] * iy
-    tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
+    tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
     all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
     point_count = all_point_pairs.shape[0]
     point_pairs_np = _point_pairs_to_numpy_f64(all_point_pairs)
@@ -559,16 +582,18 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
         bounding_rect=tile_bounding_rect)
 
     if cached_entry is not None and cached_entry.cached_simplices is not None:
-        repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
-        if repaired is not None:
-            try:
-                vertarray = _render_data_with_cached_simplices(
-                    all_point_pairs, tile_bounding_rect, image_space, repaired)
-                indices = repaired.flatten().astype(np.uint16)
-                return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
-                                        point_count=point_count, is_rigid_quad=False)
-            except ValueError:
-                pass
+        if _simplices_compatible_with_points(
+                cached_entry.cached_simplices, point_count, cached_entry.point_count):
+            repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
+            if repaired is not None:
+                try:
+                    vertarray = _render_data_with_cached_simplices(
+                        all_point_pairs, tile_bounding_rect, image_space, repaired)
+                    indices = repaired.flatten().astype(np.uint16)
+                    return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
+                                            point_count=point_count, is_rigid_quad=False)
+                except ValueError:
+                    pass
 
     tri = scipy.spatial.Delaunay(texture_points)
     simplices = tri.simplices.copy()
@@ -621,12 +646,7 @@ def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,
     Given a grid coordinate, return the vertices and indices to render the tile.
     These are usually fed into a GLBuffer.
     """
-    ix, iy = grid_coords
-    x = texture_size[1] * ix
-    y = texture_size[0] * iy
-
-    tile_bounding_rect = nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x),
-                                                                                           texture_size)
+    tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
 
     all_point_pairs = collect_verticies_within_bounding_box(
         bounding_box=tile_bounding_rect,

@@ -4,6 +4,7 @@ import abc
 from typing import NamedTuple
 
 import pyre
+from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 
 
@@ -13,9 +14,10 @@ from pyre.space import Space
 class ControlPointManagerKey(NamedTuple):
     transform_controller: "pyre.controllers.transformcontroller.TransformController"  # type: ignore[attr-defined]
     space: float | Space
+    view_type: ViewType | None = None
 
     def __str__(self):
-        return f"{self.transform_controller} {self.space}"
+        return f"{self.transform_controller} {self.space} {self.view_type}"
 
 
 class IControlPointMapManager(abc.ABC):

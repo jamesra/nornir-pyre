@@ -15,6 +15,7 @@ from pyre.commands import InstantCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
+from pyre.commands.stos.point_coords import control_point_row_from_pair
 
 
 class CreateRegisterControlPointCommand(InstantCommandBase):
@@ -72,8 +73,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
     def queue_registration_command(self):
 
         point = self._new_point_position
-        # point = self._new_point_position.source if self.space == Space.Source else self._new_point_position.target
-        newpoint = np.array([point.target[0], point.target[1], point.source[0], point.source[1]], dtype=np.float32)
+        newpoint = control_point_row_from_pair(point)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)
 
         # Ensure only the new point is selected

@@ -14,6 +14,7 @@ from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 import nornir_imageregistration
 
 import abc
+import math
 import pyre
 from pyre.selection_event_data import PointPair
 import pyre.ui
@@ -34,6 +35,10 @@ from pyre.commands.extensions import wheel_scroll_steps
 from pyre.views.composite_display import (
     lookat_delta_from_display_delta,
     world_point_pair_for_composite_mouse,
+    display_lookat_for_composite,
+    lookat_from_display_position,
+    apply_composite_display_pan_delta,
+    resolve_composite_display_draw_params,
 )
 from pyre.views.gltiles import is_rigid_transform
 
@@ -146,17 +151,29 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         """Keep the world point under the cursor when zooming or panning."""
         view = self._view_type()
         model = self._transform_controller.TransformModel
-        if (
-                view == ViewType.Composite
-                and model is not None
-                and is_rigid_transform(model)
-        ):
+        if view == ViewType.Composite and model is not None:
+            if is_rigid_transform(model):
+                delta_display = after.target - before.target
+                delta_lookat = lookat_delta_from_display_delta(model, delta_display)
+                self.camera.lookat = self.camera.lookat - delta_lookat
+                return
             delta_display = after.target - before.target
-            delta_lookat = lookat_delta_from_display_delta(model, delta_display)
-            self.camera.lookat = self.camera.lookat - delta_lookat
-        else:
-            delta = after[self.space] - before[self.space]
-            self.camera.lookat = self.camera.lookat - delta
+            current_display = display_lookat_for_composite(self.camera, self._transform_controller)
+            self.camera.lookat = lookat_from_display_position(
+                self._transform_controller, current_display - delta_display)
+            return
+        delta = after[self.space] - before[self.space]
+        self.camera.lookat = self.camera.lookat - delta
+
+    def _translate_camera_by_display_delta(self, display_delta: tuple[float, float]) -> None:
+        """Pan the camera; on composite, delta is in target display space."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            apply_composite_display_pan_delta(
+                self.camera, self._transform_controller, np.asarray(display_delta, dtype=np.float64))
+            return
+        self._camera.translate(display_delta)
 
     def get_world_positions(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> PointPair:
         """
@@ -189,6 +206,22 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         else:
             raise ValueError("Unknown space")
 
+    def _keyboard_pan_delta(self, dy_frac: float, dx_frac: float) -> tuple[float, float]:
+        """Return a display- or source-space pan step for WASD keyboard navigation."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            _, bounds = resolve_composite_display_draw_params(
+                self.camera,
+                self._transform_controller,
+                (self.height, self.parent.size().width()),
+            )
+            vis_h, vis_w = bounds.Height, bounds.Width
+        else:
+            vis_h = self.camera.visible_world_height
+            vis_w = self.camera.visible_world_width
+        return dy_frac * vis_h, dx_frac * vis_w
+
     def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse moves"""
 
@@ -205,15 +238,8 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
             self._last_mouse_position = (y, x)
 
-            ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
-            if ImageX is None:
-                return
-
-            ImageDX = (float(dx) / width) * self.camera.visible_world_width
-            ImageDY = (float(dy) / height) * self.camera.visible_world_height
-
             if event.buttons() & Qt.MouseButton.RightButton:
-                self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
+                self.camera.pan_by_screen_delta(dx, dy, width, height)
 
             # Commenting this block until I have a command to translate control points
             # if event.buttons() & Qt.MouseButton.LeftButton:
@@ -293,7 +319,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                         angle = float(abs(scroll_y) / 2) ** 2.0
 
-                    rangle = (angle / 180.0) * 3.14159
+                    rangle = (angle / 180.0) * math.pi
                     if scroll_y < 0:
                         rangle = -rangle
 
@@ -322,7 +348,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                             self._transform_controller.end_interactive_edit()
                         self.parent.update()
                     except NotImplementedError:
-                        print("Current transform does not support rotation")
                         pass
 
                 # if isinstance(self._transform_controller.TransformModel, nornir_imageregistration.ITransformTargetRotation):
@@ -388,17 +413,17 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             return
 
         if symbol == 'a':  # "A" Character
-            ImageDX = -0.05 * self.camera.visible_world_width
-            self._camera.translate((0.0, ImageDX))
+            dy, dx = self._keyboard_pan_delta(0.0, -0.05)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 'd':  # "D" Character
-            ImageDX = 0.05 * self.camera.visible_world_width
-            self._camera.translate((0, ImageDX))
+            dy, dx = self._keyboard_pan_delta(0.0, 0.05)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 'w':  # "W" Character
-            ImageDY = 0.05 * self.camera.visible_world_height
-            self._camera.translate((ImageDY, 0))
+            dy, dx = self._keyboard_pan_delta(0.05, 0.0)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 's':  # "S" Character
-            ImageDY = -0.05 * self.camera.visible_world_height
-            self._camera.translate((ImageDY, 0))
+            dy, dx = self._keyboard_pan_delta(-0.05, 0.0)
+            self._translate_camera_by_display_delta((dy, dx))
 
         elif keycode == Qt.Key.Key_PageUp:
             self.camera.scale *= 0.9

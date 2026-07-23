@@ -144,8 +144,8 @@ class RegisterControlPointCommand(InstantCommandBase):
                                                           source_image=sourceimage.ImageWithMaskAsNoise,
                                                           target_mask=targetimage.BlendedMask,
                                                           source_mask=sourceimage.BlendedMask,
-                                                          target_image_stats=sourceimage.Stats,
-                                                          source_image_stats=targetimage.Stats,
+                                                          target_image_stats=targetimage.Stats,
+                                                          source_image_stats=sourceimage.Stats,
                                                           target_controlpoint=fixed,
                                                           alignmentArea=self.alignment_area,
                                                           anglesToSearch=self.angles_to_search)
@@ -182,7 +182,7 @@ class RegisterControlPointCommand(InstantCommandBase):
                 del indextotask[i_point]
 
         else:
-            i_point = i_points
+            i_point = i_points[0]
             fixed = self._transform_controller.GetFixedPoint(i_point)
             warped = self._transform_controller.GetWarpedPoint(i_point)
             task = pyre.common.StartAttemptAlignPoint(pool=None,  # type: ignore[arg-type]
@@ -192,8 +192,8 @@ class RegisterControlPointCommand(InstantCommandBase):
                                                       source_image=sourceimage.ImageWithMaskAsNoise,
                                                       target_mask=targetimage.BlendedMask,
                                                       source_mask=sourceimage.BlendedMask,
-                                                      target_image_stats=sourceimage.Stats,
-                                                      source_image_stats=targetimage.Stats,
+                                                      target_image_stats=targetimage.Stats,
+                                                      source_image_stats=sourceimage.Stats,
                                                       target_controlpoint=fixed,
                                                       alignmentArea=self.alignment_area,
                                                       anglesToSearch=self.angles_to_search)

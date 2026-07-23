@@ -6,7 +6,7 @@ import os
 from typing import Generator
 
 from pyre.commands.stos.rigidtransformactionmap import RigidTransformActionMap
-from pyre.interfaces.managers import (ControlPointManagerKey, BufferType)
+from pyre.interfaces.managers import BufferType
 from pyre.state.managers.gl_context_manager import GLContextManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
 from pyre.state.managers.mouse_position_history_manager import MousePositionHistoryManager
@@ -60,10 +60,6 @@ class StosContainer(containers.DeclarativeContainer):
     image_loader = providers.Factory(ImageLoader)
     transform_controller = providers.ThreadSafeSingleton(TransformController)
 
-    control_point_manager_key = providers.Factory(
-        ControlPointManagerKey,
-        transform_controller=transform_controller
-    )
     # Returns the key for the configured transform controller and space
     control_point_map_manager = providers.ThreadSafeSingleton(ControlPointMapManager)
 

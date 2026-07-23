@@ -207,7 +207,6 @@ class CompositeTransformView(IImageTransformView):
                                   image_view_model=image,
                                   transform_controller=self._transform_controller,
                                   gl_funcs=self._gl_funcs)
-        print(f'Added image view model {name} to existing CompositeTransformView')
 
         if space_mapping == Space.Source:
             self._source_image_view = view
@@ -223,84 +222,6 @@ class CompositeTransformView(IImageTransformView):
             self._source_image_view = None
         elif space_mapping == Space.Target:
             self._target_image_view = None
-
-    # def on_imageviewmodelmanager_change(self,
-    #                                     name: str,
-    #                                     action: Action,
-    #                                     image: ImageViewModel):
-    #     """Called when an imageviewmodel is added or removed from the manager"""
-    #     print(
-    #         f'* ImageTransformViewPanel.on_imageviewmodelmanager_change {name} {action.value} self: {self._config.imagenames}')
-    #     if name not in self._nameset:
-    #         print('\tDoes not match')
-    #         return  # Not of interest to our class
-    #
-    #     if action == Action.ADD:
-    #         self._handle_add_imageviewmodel_event(name, image)
-    #     elif action == Action.REMOVE:
-    #         self._handle_remove_imageviewmodel_event(name)
-    #     else:
-    #         raise NotImplementedError()
-    #
-    # def _handle_add_imageviewmodel_event(self, name: str, image: ImageViewModel):
-    #     """Process an add event from the imageviewmodel manager"""
-    #     # self._image_transform_view.image_view_model = image
-    #     view = ImageTransformView(space=self.space,
-    #                               activate_context=self.activate_context,
-    #                               image_view_model=image,
-    #                               transform_controller=self._config.transform_controller)
-    #     print(f'Added image view model {name} to ImageTransformViewPanel')
-    #     self._image_transform_view = view
-    #
-    #     self.center_camera()
-    #
-    # def _handle_remove_imageviewmodel_event(self, name: str):
-    #     """Process a remove event from the imageviewmodel manager"""
-    #     raise NotImplementedError()
-
-    # def OnTransformChanged(self, transform_controller: TransformController):
-    #
-    #     #super(CompositeTransformView, self).OnTransformChanged(transform_controller)
-    #
-    #     self._tranformed_verts_cache = None
-    #     #self._ClearVertexAngleDelta()
-    #
-    # def PopulateTransformedVertsCache(self):
-    #     # verts = self.transform.WarpedPoints
-    #     # self._tranformed_verts_cache = self.transform.transform(verts)
-    #     if isinstance(self.Transform, nornir_imageregistration.IControlPoints):
-    #         self._tranformed_verts_cache = self.Transform.TargetPoints
-    #     return
-    #
-    # def RemoveTrianglesOutsideConvexHull(self, T, convex_hull):
-    #     Triangles = np.array(T)
-    #     if Triangles.ndim == 1:
-    #         Triangles = Triangles.reshape(len(Triangles) / 3, 3)
-    #
-    #     convex_hull_flat = np.unique(convex_hull)
-    #
-    #     iTri = len(Triangles) - 1
-    #     while iTri >= 0:
-    #         tri = Triangles[iTri]
-    #         if tri[0] in convex_hull_flat and tri[1] in convex_hull_flat and tri[2] in convex_hull_flat:
-    #             # OK, find out if the midpoint of any lines are outside the convex hull
-    #             Triangles = np.delete(Triangles, iTri, 0)
-    #
-    #         iTri -= 1
-    #
-    #     return Triangles
-
-    def setup_composite_rendering(self):
-
-        # gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        # gl.glBlendColor(1.0,1.0,1.0,1.0) 
-        gl.glBlendFunc(gl.GL_ONE, gl.GL_ONE)
-        raise_on_error("after glBlendFunc in clear_composite_rendering")
-        return
-
-    def clear_composite_rendering(self):
-        # gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_DST_COLOR)
-        return
 
     def draw(self,
              view_proj: NDArray[np.floating],
@@ -327,14 +248,16 @@ class CompositeTransformView(IImageTransformView):
 
             with timed('composite_transform_draw'):
                 height, width = client_size
+                ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
+                fbo_size = (ov_h, ov_w)
 
-                source_fbo = self._source_frame_buffer.get_or_create_fbo(client_size)
+                source_fbo = self._source_frame_buffer.get_or_create_fbo(fbo_size)
                 # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
                 gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
                 raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
             
                 # Set viewport to match framebuffer size
-                gl.glViewport(0, 0, width, height)
+                gl.glViewport(0, 0, ov_w, ov_h)
                 raise_on_error("after glViewport(source) in compositetransformview.draw")
 
                 # Use glClearDepthf (not glClearDepth) - QOpenGLFunctions_4_1_Core uses the 'f' suffix
@@ -347,18 +270,18 @@ class CompositeTransformView(IImageTransformView):
 
                 # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
                 # target space and aligns with the target image in the composite overlay.
-                self._source_image_view.draw(view_proj, space, client_size, bounding_box,
+                self._source_image_view.draw(view_proj, space, fbo_size, bounding_box,
                                              show_mesh_lines=show_mesh_lines,
                                              rigid_composite_fixed_align=True,
                                              view_type=ViewType.Composite)
 
-                target_fbo = self._target_frame_buffer.get_or_create_fbo(client_size)
+                target_fbo = self._target_frame_buffer.get_or_create_fbo(fbo_size)
                 # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
                 gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(target_fbo))
                 raise_on_error("after glBindFramebuffer(target) in compositetransformview.draw")
             
                 # Set viewport to match framebuffer size
-                gl.glViewport(0, 0, width, height)
+                gl.glViewport(0, 0, ov_w, ov_h)
                 raise_on_error("after glViewport(target) in compositetransformview.draw")
 
                 # Use raw OpenGL for clear operations
@@ -369,7 +292,7 @@ class CompositeTransformView(IImageTransformView):
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
                 raise_on_error("after glClear(target) in compositetransformview.draw")
 
-                self._target_image_view.draw(view_proj, space, client_size, bounding_box,
+                self._target_image_view.draw(view_proj, space, fbo_size, bounding_box,
                                              show_mesh_lines=show_mesh_lines,
                                              view_type=ViewType.Composite)
 
@@ -432,53 +355,3 @@ class CompositeTransformView(IImageTransformView):
         elif self._target_image_view is not None:
             self._target_image_view.draw(view_proj, space, client_size, bounding_box,
                                          show_mesh_lines=show_mesh_lines)
-
-    def draw_textures(self, view_proj: NDArray[np.floating],
-                      space: Space,
-                      BoundingBox=None,
-                      glFunc=None):
-        self.setup_composite_rendering()
-
-        glFunc = gl.GL_FUNC_ADD
-
-        from pyre.gl_engine.helpers import check_for_error
-        gl.glEnable(gl.GL_BLEND)
-        raise_on_error("after glEnable(GL_BLEND) in draw_textures")
-        gl.glBlendFunc(gl.GL_SRC_COLOR, gl.GL_ONE_MINUS_SRC_COLOR)
-        raise_on_error("after glBlendFunc(SRC_COLOR) in draw_textures")
-        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
-        raise_on_error("after glBlendFunc(SRC_ALPHA) in draw_textures")
-
-        if self._source_image_array is not None:  # type: ignore[attr-defined]
-            FixedColor = None
-            if glFunc == gl.GL_FUNC_ADD:
-                FixedColor = (1.0, 0.0, 1.0, 1)
-
-            # self.DrawFixedImage(view_proj, self.FixedImageArray, color=FixedColor, BoundingBox=BoundingBox, z=0.25)
-            self.draw(view_proj=view_proj,  # type: ignore[call-arg]
-                      space=Space.Source,
-                      BoundingBox=BoundingBox,  # type: ignore[call-arg]
-                      glFunc=glFunc)  # type: ignore[call-arg]
-            self.DrawWarpedImage(view_proj, self._source_image_array, tex_color=FixedColor, BoundingBox=BoundingBox,  # type: ignore[attr-defined]
-                                 z=None,
-                                 glFunc=glFunc,
-                                 tween=1.0)
-
-        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
-        raise_on_error("after glClear(DEPTH) in clear_composite_rendering")
-
-        if self._target_image_array is not None:  # type: ignore[attr-defined]
-            WarpedColor = None
-            if glFunc == gl.GL_FUNC_ADD:
-                gl.glBlendEquation(glFunc)
-                raise_on_error("after glBlendEquation in clear_composite_rendering")
-                WarpedColor = (0, 1.0, 0, 1)
-
-            self.DrawWarpedImage(view_proj, self._target_image_array, tex_color=WarpedColor, BoundingBox=BoundingBox,  # type: ignore[attr-defined]
-                                 z=None,
-                                 glFunc=glFunc,
-                                 tween=1)
-
-        gl.glClear(gl.GL_DEPTH_BUFFER_BIT)
-        raise_on_error("after glClear(DEPTH) in clear_composite_rendering")
-        self.clear_composite_rendering()

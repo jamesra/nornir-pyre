@@ -243,14 +243,13 @@ class ImageTransformView(IImageTransformView):
 
         with timed(f'update_tiles_for_points n={len(tile_coords)}'):
             for grid_coords in tile_coords:
-                cpu_entry = self._get_or_build_cpu_entry(grid_coords)
                 gltiles._update_tile_buffers(
                     self.transform,
                     grid_coords,
                     self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
                     self._image_space,
                     get_or_create_tile_globjects=self.get_or_create_tile_globjects,
-                    shared_cpu_entry=cpu_entry)
+                    shared_cpu_entry=None)
 
     def update_all_tile_buffers(self, visible_rect: nornir_imageregistration.Rectangle | None = None):
         """Update the buffers for all tiles in the image viewmodel (or visible subset)."""

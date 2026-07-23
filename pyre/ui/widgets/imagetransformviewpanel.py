@@ -44,7 +44,7 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.transform_edit_policy import fixed_panel_hint_message, rigid_rotation_locked
-from pyre.views.composite_display import resolve_composite_display_draw_params
+from pyre.views.composite_display import resolve_composite_display_draw_params, composite_control_point_draw_rows
 
 
 @dataclass
@@ -502,8 +502,21 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         if self._transform_controller_view is not None:
             point_scale = (1 / self.camera.scale) * self.control_point_scale
+            cp_view_proj = self.camera.view_proj
+            if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+                cp_view_proj, _ = resolve_composite_display_draw_params(
+                    self.camera,
+                    self.transform_controller,
+                    (gl_h, gl_w),
+                )
             self._transform_controller_view.draw(
-                self.camera.view_proj,
+                cp_view_proj,
                 tween=ControlPointMap.draw_tween_for_pyre_space(self.space),
                 scale_factor=point_scale,
-                blink_phase=self.DebugTickCounter % 2)
+                blink_phase=self.DebugTickCounter % 2,
+                display_point_rows=composite_control_point_draw_rows(
+                    self.transform_controller, self.space)
+                if self.view_type == ViewType.Composite and self.transform_controller is not None
+                else None,
+            )

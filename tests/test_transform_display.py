@@ -23,7 +23,6 @@ from pyre.gl_engine.shaders.texture_shader import TextureShader
 from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.transform_edit_policy import (
-    control_point_translate_allowed,
     rigid_rotation_locked,
     wheel_rotate_locked,
 )
@@ -127,9 +126,6 @@ class TestTransformEditPolicy(unittest.TestCase):
     def test_wheel_rotate_locked_on_fixed_panel(self) -> None:
         self.assertTrue(wheel_rotate_locked(
             TransformType.RIGID, Space.Source, ViewType.Source))
-
-    def test_mesh_control_point_translate(self) -> None:
-        self.assertTrue(control_point_translate_allowed(TransformType.MESH, Space.Target))
 
 
 class TestMeshLikeStrategy(unittest.TestCase):

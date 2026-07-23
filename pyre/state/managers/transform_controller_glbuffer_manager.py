@@ -48,13 +48,13 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
         """
         buffer_collection = self._initialize_buffer_collection() if self._have_context else None
         if buffer_collection is not None:
-            pts = self.__swap_columns(transform_controller.points)
-            buffer_collection[BufferType.ControlPoint].data = pts
+            num_points = len(transform_controller.points)
+            buffer_collection[BufferType.ControlPoint].data = TransformController.swap_columns_to_XY(
+                transform_controller.points)
+            buffer_collection[BufferType.Selection].data = np.zeros((num_points, 1), dtype=np.uint16)  # type: ignore[assignment]
 
         if transform_controller in self._transform_controllers:
             raise KeyError(f"Transform controller {transform_controller} already exists in the manager")
-
-        print(f'Adding transform controller {transform_controller} with buffer collection {buffer_collection}')
 
         self._transform_controllers[transform_controller] = buffer_collection
         self._fire_on_transform_controller_add_remove_event(Action.ADD, transform_controller)
@@ -63,7 +63,6 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
 
     def remove(self, transform_controller: TransformController):
         """Adds buffers for a transform controller"""
-        print(f'Removing transform controller {transform_controller}')
         del self._transform_controllers[transform_controller]
         self._fire_on_transform_controller_add_remove_event(Action.REMOVE, transform_controller)
 
@@ -101,15 +100,6 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
 
         return buffer_collection
 
-    @staticmethod
-    def __swap_columns(input: NDArray[np.floating]) -> NDArray[np.floating]:
-        """
-        OpenGL uses X,Y coordinates.  Everything else in Nornir uses Y,X coordinates in numpy arrays.
-        This function swaps the columns in pairs to correctly position points on the screen
-        """
-        output = input[:, [1, 0, 3, 2]]
-        return output
-
     def _on_transform_changed(self, transform_controller: TransformController):
         """Called when the transform controller changes"""
         buffer_collection = self._transform_controllers[transform_controller]
@@ -120,7 +110,7 @@ class TransformControllerGLBufferManager(ITransformControllerGLBufferManager):
                 selection_point_buffer = buffer_collection[BufferType.Selection]
                 selection_point_buffer.data = np.zeros((len(transform_controller.points), 1), dtype=np.uint16)  # type: ignore[assignment]
 
-            points = self.__swap_columns(transform_controller.points)
+            points = TransformController.swap_columns_to_XY(transform_controller.points)
             buffer_collection[BufferType.ControlPoint].data = points
 
     def add_on_transform_controller_add_remove_event_listener(self, func: TransformControllerAddRemoveCallback):

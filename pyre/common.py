@@ -293,7 +293,7 @@ def RefineRigidTransformLocal(
         SingleThread=True,
         Cluster=False,
     )
-    print("Local rigid refine alignment: " + str(align_record))
+    logger.info("Local rigid refine alignment: %s", align_record)
     transform = align_record.ToImageTransform(
         source_image_shape=warped_image.shape,
         target_image_shape=fixed_image.shape,
@@ -322,12 +322,10 @@ def RotateTranslateWarpedImage(source_image_key: str,
         largestdimension = 818
 
     if source_image_key not in image_manager:
-        print("Source image not loaded")
         logger.warning("RotateTranslateWarpedImage missing source image key=%s", source_image_key)
         return
 
     if target_image_key not in image_manager:
-        print("Target image not loaded")
         logger.warning("RotateTranslateWarpedImage missing target image key=%s", target_image_key)
         return
 
@@ -358,7 +356,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                                                            Cluster=False,
                                                                            )
     # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
-    print("Alignment found: " + str(alignRecord))
+    logger.info("Alignment found: %s", alignRecord)
     spatial_transform = alignRecord.ToSpatialTransform(source_shape=warped_image.shape,
                                                        target_shape=fixed_image.shape)
     transform = alignRecord.ToImageTransform(source_image_shape=warped_image.shape,
@@ -417,7 +415,7 @@ def LinearBlendTransform(blend_factor: float,
         blend_factor, ignore_rotation=False)
 
     config.TransformController.TransformModel = updated_transform
-    print(f"Linear blend completed for blend value {blend_factor}")
+    logger.info("Linear blend completed for blend value %s", blend_factor)
 
 
 def either_roi_is_masked(transform: ITransform,
@@ -499,58 +497,38 @@ def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
     return numpy.maximum(too_large, too_small)
 
 
+def _indices_to_remove_for_mask(
+        points: NDArray,
+        mask_image: NDArray) -> NDArray[np.integer]:
+    """Return point indices that fall outside the mask image or on masked (zero) pixels."""
+    num_points = points.shape[0]
+    point_indices = np.asarray(np.floor(points), dtype=np.int32)
+
+    out_of_bounds = FindIndiciesOutsideImage(point_indices, mask_image)
+    index_range = np.asarray(range(0, len(out_of_bounds)), dtype=np.int32)
+    out_of_bounds_indices = index_range[out_of_bounds]
+
+    points_and_index = np.hstack(
+        (points, np.asarray(range(0, num_points), dtype=np.int32).reshape(num_points, 1))).astype(
+        np.int32, copy=False)
+    in_bounds_points_and_index = points_and_index[out_of_bounds == 0, :]
+
+    points_in_mask = mask_image[in_bounds_points_and_index[:, 0], in_bounds_points_and_index[:, 1]]
+    masked_point_indices = in_bounds_points_and_index[points_in_mask == 0, 2]
+
+    all_masked_indices = np.concatenate((out_of_bounds_indices, masked_point_indices))
+    all_masked_indices.sort()
+    return all_masked_indices
+
+
 def ClearPointsOnMask(transform: ITransform, FixedMaskImage: NDArray,
                       WarpedMaskImage: NDArray):
     '''Remove all transform points that are positioned in the mask image'''
 
     if FixedMaskImage is not None:
-        SourcePoints = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
-        NumPoints = SourcePoints.shape[0]
-        SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
-
-        OutOfBounds = FindIndiciesOutsideImage(SourcePointIndicies, FixedMaskImage)
-
-        Indicies = numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
-
-        OutOfBoundsIndicies = Indicies[OutOfBounds]
-
-        SourcePointsAndIndex = numpy.hstack(
-            (SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints, 1))).astype(
-            numpy.int32, copy=False)
-
-        # transform.RemovePoints(OutOfBounds)
-        InBoundsPointsAndIndex = SourcePointsAndIndex[OutOfBounds == 0, :]
-
-        SourcePointsInMask = FixedMaskImage[InBoundsPointsAndIndex[:, 0], InBoundsPointsAndIndex[:, 1]]
-        SourcePointsToRemove = SourcePointsInMask == 0
-        MaskedPointIndicies = InBoundsPointsAndIndex[SourcePointsToRemove, 2]
-
-        AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies))
-        AllMaskedIndicies.sort()
-        transform.RemovePoints(AllMaskedIndicies)  # type: ignore[attr-defined]
+        fixed_points = transform.TransformModel.TargetPoints  # type: ignore[attr-defined]
+        transform.RemovePoints(_indices_to_remove_for_mask(fixed_points, FixedMaskImage))  # type: ignore[attr-defined]
 
     if WarpedMaskImage is not None:
-        SourcePoints = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
-        NumPoints = SourcePoints.shape[0]
-        SourcePointIndicies = numpy.asarray(numpy.floor(SourcePoints), dtype=numpy.int32)
-
-        OutOfBounds = FindIndiciesOutsideImage(SourcePointIndicies, WarpedMaskImage)
-
-        Indicies = numpy.asarray(range(0, len(OutOfBounds)), dtype=numpy.int32)
-
-        OutOfBoundsIndicies = Indicies[OutOfBounds]
-
-        SourcePointsAndIndex = numpy.hstack(
-            (SourcePoints, numpy.asarray(range(0, NumPoints), dtype=numpy.int32).reshape(NumPoints, 1))).astype(
-            numpy.int32, copy=False)
-
-        # transform.RemovePoints(OutOfBounds)
-        InBoundsPointsAndIndex = SourcePointsAndIndex[OutOfBounds == 0, :]
-
-        SourcePointsInMask = WarpedMaskImage[InBoundsPointsAndIndex[:, 0], InBoundsPointsAndIndex[:, 1]]
-        SourcePointsToRemove = SourcePointsInMask == 0
-        MaskedPointIndicies = InBoundsPointsAndIndex[SourcePointsToRemove, 2]
-
-        AllMaskedIndicies = numpy.concatenate((OutOfBoundsIndicies, MaskedPointIndicies))
-        AllMaskedIndicies.sort()
-        transform.RemovePoints(AllMaskedIndicies)  # type: ignore[attr-defined]
+        warped_points = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
+        transform.RemovePoints(_indices_to_remove_for_mask(warped_points, WarpedMaskImage))  # type: ignore[attr-defined]
