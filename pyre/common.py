@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 from dependency_injector.wiring import Provide, inject
 import numpy
+import numpy as np
 from numpy.typing import NDArray
 from PyQt6.QtWidgets import QWidget
 
@@ -499,7 +500,7 @@ def FindIndiciesOutsideImage(points: NDArray, image: NDArray):
 
 def _indices_to_remove_for_mask(
         points: NDArray,
-        mask_image: NDArray) -> NDArray[np.integer]:
+        mask_image: NDArray) -> NDArray:
     """Return point indices that fall outside the mask image or on masked (zero) pixels."""
     num_points = points.shape[0]
     point_indices = np.asarray(np.floor(points), dtype=np.int32)

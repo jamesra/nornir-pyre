@@ -37,6 +37,13 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 
 
+def _to_numpy(arr: NDArray) -> NDArray:
+    """Return a NumPy array, calling .get() when *arr* is a CuPy ndarray."""
+    if hasattr(arr, 'get'):
+        return arr.get()  # type: ignore[union-attr]
+    return numpy.asarray(arr)
+
+
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
                            FixedShape: NDArray | None = None,
                            WarpedShape: NDArray | None = None):
@@ -284,21 +291,21 @@ class TransformController:
     @property
     def points(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return np.asarray(self.TransformModel.points)
+            return _to_numpy(self.TransformModel.points)
 
         return np.empty((0, 4))
 
     @property
     def SourcePoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return np.asarray(self.TransformModel.SourcePoints)
+            return _to_numpy(self.TransformModel.SourcePoints)
 
         return np.empty((0, 2))
 
     @property
     def TargetPoints(self) -> NDArray[np.floating]:
         if isinstance(self.TransformModel, nornir_imageregistration.IControlPoints):
-            return np.asarray(self.TransformModel.TargetPoints)
+            return _to_numpy(self.TransformModel.TargetPoints)
 
         return np.empty((0, 2))
 
