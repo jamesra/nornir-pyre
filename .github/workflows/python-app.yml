@@ -33,8 +33,8 @@ jobs:
       with:
         python-version: "3.13"
 
-    - name: Install system GL library
-      run: sudo apt-get install -y --no-install-recommends libgl1
+    - name: Install system GL/EGL libraries
+      run: sudo apt-get install -y --no-install-recommends libgl1 libegl1 libxkbcommon-x11-0
 
     - name: Install dependencies
       shell: bash
