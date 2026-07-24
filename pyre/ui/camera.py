@@ -4,6 +4,8 @@ Created on Oct 17, 2012
 @author: u0490822
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Callable
 
