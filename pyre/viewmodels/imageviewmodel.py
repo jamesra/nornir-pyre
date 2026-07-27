@@ -248,10 +248,7 @@ class ImageViewModel:
                     raise
 
             texture_grid.append(columnTextures)
-
-        if print_output:
-            print('\nTexture creation complete\n')
-
+  
         Logger.info("Completed CreateImageArray")
         raise_on_error("after CreateImageArray")
         return texture_grid
