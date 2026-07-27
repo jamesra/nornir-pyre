@@ -6,8 +6,8 @@ from PyQt6.QtCore import QTimer
 
 # Import shader modules
 from pyre.gl_engine.shaders import (
-    TextureShaderQt, 
-    ColorShaderQt, 
+    TextureShader, 
+    ColorShader, 
     TransformShaderQt, 
     PointSetShaderQt, 
     ControlPointSetShaderQt, 
@@ -40,15 +40,15 @@ class TestShadersWidget(QOpenGLWidget):
             print("All Qt-based shaders initialized successfully")
             
             # Test individual shader classes
-            print("\nTesting TextureShaderQt...")
-            texture_shader = TextureShaderQt()
+            print("\nTesting TextureShader...")
+            texture_shader = TextureShader()
             texture_shader.initialize_gl_objects()
-            print(f"TextureShaderQt initialized, program ID: {texture_shader.program.programId()}")
+            print(f"TextureShader initialized, program ID: {texture_shader.program.programId()}")
             
-            print("\nTesting ColorShaderQt...")
-            color_shader = ColorShaderQt()
+            print("\nTesting ColorShader...")
+            color_shader = ColorShader()
             color_shader.initialize_gl_objects()
-            print(f"ColorShaderQt initialized, program ID: {color_shader.program.programId()}")
+            print(f"ColorShader initialized, program ID: {color_shader.program.programId()}")
             
             print("\nTesting TransformShaderQt...")
             transform_shader = TransformShaderQt()
@@ -73,15 +73,15 @@ class TestShadersWidget(QOpenGLWidget):
             # Test shader attribute and uniform locations
             print("\nTesting shader attribute and uniform locations...")
             
-            # Test TextureShaderQt locations
-            print("Testing TextureShaderQt locations...")
+            # Test TextureShader locations
+            print("Testing TextureShader locations...")
             source_pos = texture_shader.source_pos_location
             target_pos = texture_shader.target_pos_location
             texture_coord = texture_shader.texture_coord_location
             texture_loc = texture_shader.texture_location
             tween_loc = texture_shader.tween_location
             mvp_loc = texture_shader.model_view_projection_matrix_location
-            print(f"TextureShaderQt locations: source_pos={source_pos}, target_pos={target_pos}, "
+            print(f"TextureShader locations: source_pos={source_pos}, target_pos={target_pos}, "
                   f"texture_coord={texture_coord}, texture={texture_loc}, tween={tween_loc}, mvp={mvp_loc}")
             
             # Test PointSetShaderQt locations

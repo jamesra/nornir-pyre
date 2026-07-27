@@ -10,7 +10,7 @@ from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 from pyre.gl_engine import textures_qt
 from pyre.gl_engine.shaders import (
-    TextureShaderQt,
+    TextureShader,
     PointSetShaderQt,
     InitializeShadersQt
 )
@@ -41,8 +41,8 @@ class TestVAOShadersWidget(QOpenGLWidget):
             print("Initializing Qt-based shaders...")
             InitializeShadersQt()
 
-            # Test TextureShaderQt with VAO
-            print("\nTesting TextureShaderQt with VAO...")
+            # Test TextureShader with VAO
+            print("\nTesting TextureShader with VAO...")
             self.test_texture_shader_with_vao()
 
             # Test PointSetShaderQt with VAO
@@ -85,9 +85,9 @@ class TestVAOShadersWidget(QOpenGLWidget):
             print(f"Created texture with ID: {texture_id}")
 
             # Create shader
-            texture_shader = TextureShaderQt()
+            texture_shader = TextureShader()
             texture_shader.initialize_gl_objects()
-            print(f"TextureShaderQt initialized, program ID: {texture_shader.program.programId()}")
+            print(f"TextureShader initialized, program ID: {texture_shader.program.programId()}")
 
             # Create vertex layout based on shader's requirements
             vertex_layout = VertexArrayLayout([
@@ -142,7 +142,7 @@ class TestVAOShadersWidget(QOpenGLWidget):
             mvp.setToIdentity()
 
             # Test drawing with shader and VAO
-            print("Drawing with TextureShaderQt and VAO...")
+            print("Drawing with TextureShader and VAO...")
             texture_shader.draw(np.array(mvp.data()), texture_id, vao, 0.5)
             print("Draw call completed successfully")
 
