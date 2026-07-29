@@ -39,6 +39,7 @@ class ImageViewModel:
     _image_stats: nornir_imageregistration.ImageStats
     RawImageSize: NDArray[np.integer]
     _rgb_like_converted_to_grayscale: bool
+    _managed_by_filepath_cache: bool = False
 
     # The largest dimension we allow a texture to have
     MaxTextureDimension: int = int(4096)
@@ -132,12 +133,18 @@ class ImageViewModel:
 
         return _TextureSize
 
-    def __init__(self, input_image: str | NDArray):
+    def __init__(
+            self,
+            input_image: str | NDArray,
+            image_filename: str | None = None,
+            managed_by_filepath_cache: bool = False,
+    ):
         """
         Constructor, _Image is either path to file or a numpy array
         """
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
+        self._managed_by_filepath_cache = managed_by_filepath_cache
         # Accept CuPy arrays from image loader (convert to numpy for viewmodel/tiling)
         get_fn = getattr(input_image, "get", None)
         if callable(get_fn):
@@ -153,6 +160,8 @@ class ImageViewModel:
             Logger.info("Loading done")
         elif isinstance(input_image, np.ndarray):
             self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(input_image)
+            if image_filename is not None:
+                self._ImageFilename = image_filename
         else:
             raise TypeError("Expected a path to an image file or a numpy ndarray")
 
@@ -263,13 +272,29 @@ class ImageViewModel:
         """Returns True if the grid index is within the image grid bounds"""
         return 0 <= ix < self.NumCols and 0 <= iy < self.NumRows
 
-    def __del__(self):
-        """Free the GL Texture array"""
-        if self._ImageArray is None:
+    @property
+    def managed_by_filepath_cache(self) -> bool:
+        """True when lifetime is owned by ImageLoader filepath cache (not slot delete)."""
+        return self._managed_by_filepath_cache
+
+    def mark_managed_by_filepath_cache(self) -> None:
+        """Mark this viewmodel as session-cached; defer GL cleanup until explicit release."""
+        self._managed_by_filepath_cache = True
+
+    def release_gpu_resources(self) -> None:
+        """Delete uploaded GL textures and clear the texture grid."""
+        if self._ImageArray is None or self._ImageArray == []:
+            self._ImageArray = None
             return
 
         textures = [texture for row in self._ImageArray for texture in row]
         if textures:
-            # OpenGL glDeleteTextures expects (n, textures) format
             gl.glDeleteTextures(len(textures), textures)
-            check_for_error("after glDeleteTextures in ImageViewModel.__del__")
+            check_for_error("after glDeleteTextures in ImageViewModel.release_gpu_resources")
+        self._ImageArray = None
+
+    def __del__(self):
+        """Free the GL Texture array when not retained by the filepath cache."""
+        if self._managed_by_filepath_cache:
+            return
+        self.release_gpu_resources()

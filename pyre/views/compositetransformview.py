@@ -157,6 +157,7 @@ class CompositeTransformView(IImageTransformView):
 
         self._source_image_view = None
         self._target_image_view = None
+        self._repaint_callback: Callable[[], None] | None = None
 
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
@@ -206,12 +207,18 @@ class CompositeTransformView(IImageTransformView):
                                   activate_context=self._activate_context,
                                   image_view_model=image,
                                   transform_controller=self._transform_controller,
-                                  gl_funcs=self._gl_funcs)
+                                  gl_funcs=self._gl_funcs,
+                                  eager_tile_meshes=True)
+        view._repaint_callback = self._repaint_callback
 
         if space_mapping == Space.Source:
             self._source_image_view = view
         elif space_mapping == Space.Target:
             self._target_image_view = view
+
+        if self._source_image_view is not None and self._target_image_view is not None:
+            if self._repaint_callback is not None:
+                self._repaint_callback()
 
         # self.center_camera()
 
@@ -222,6 +229,12 @@ class CompositeTransformView(IImageTransformView):
             self._source_image_view = None
         elif space_mapping == Space.Target:
             self._target_image_view = None
+
+    def create_objects(self) -> None:
+        """Initialize GL objects on composite sub-views when the panel context is ready."""
+        for sub_view in (self._source_image_view, self._target_image_view):
+            if sub_view is not None:
+                sub_view.create_objects()  # type: ignore[attr-defined]
 
     def draw(self,
              view_proj: NDArray[np.floating],
@@ -247,9 +260,17 @@ class CompositeTransformView(IImageTransformView):
                 show_mesh_lines = False
 
             with timed('composite_transform_draw'):
+                self._activate_context()
                 height, width = client_size
                 ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
                 fbo_size = (ov_h, ov_w)
+
+                for sub_view in (self._source_image_view, self._target_image_view):
+                    if sub_view is None:
+                        continue
+                    image_vm = sub_view.image_view_model  # type: ignore[attr-defined]
+                    if image_vm is not None:
+                        _ = image_vm.ImageArray
 
                 source_fbo = self._source_frame_buffer.get_or_create_fbo(fbo_size)
                 # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
@@ -260,20 +281,23 @@ class CompositeTransformView(IImageTransformView):
                 gl.glViewport(0, 0, ov_w, ov_h)
                 raise_on_error("after glViewport(source) in compositetransformview.draw")
 
-                # Use glClearDepthf (not glClearDepth) - QOpenGLFunctions_4_1_Core uses the 'f' suffix
-                gl.glClearDepthf(10000.0)
-                raise_on_error("after glClearDepthf(source) in compositetransformview.draw")
-                gl.glClearColor(0, 0.1, 0, 1)
-                raise_on_error("after glClearColor(source) in compositetransformview.draw")
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
-                raise_on_error("after glClear(source) in compositetransformview.draw")
+                gl.glDisable(gl.GL_DEPTH_TEST)
+                gl.glDepthMask(gl.GL_FALSE)
+                try:
+                    gl.glClearColor(0, 0.1, 0, 1)
+                    raise_on_error("after glClearColor(source) in compositetransformview.draw")
+                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
+                    raise_on_error("after glClear(source) in compositetransformview.draw")
 
-                # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
-                # target space and aligns with the target image in the composite overlay.
-                self._source_image_view.draw(view_proj, space, fbo_size, bounding_box,
-                                             show_mesh_lines=show_mesh_lines,
-                                             rigid_composite_fixed_align=True,
-                                             view_type=ViewType.Composite)
+                    # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
+                    # target space and aligns with the target image in the composite overlay.
+                    self._source_image_view.draw(view_proj, space, fbo_size, bounding_box,
+                                                 show_mesh_lines=show_mesh_lines,
+                                                 rigid_composite_fixed_align=True,
+                                                 view_type=ViewType.Composite)
+                finally:
+                    gl.glDepthMask(gl.GL_TRUE)
+                    gl.glEnable(gl.GL_DEPTH_TEST)
 
                 target_fbo = self._target_frame_buffer.get_or_create_fbo(fbo_size)
                 # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
@@ -284,17 +308,20 @@ class CompositeTransformView(IImageTransformView):
                 gl.glViewport(0, 0, ov_w, ov_h)
                 raise_on_error("after glViewport(target) in compositetransformview.draw")
 
-                # Use raw OpenGL for clear operations
-                gl.glClearDepthf(10000.0)
-                raise_on_error("after glClearDepthf(target) in compositetransformview.draw")
-                gl.glClearColor(0, 0.1, 0, 1)
-                raise_on_error("after glClearColor(target) in compositetransformview.draw")
-                gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator]
-                raise_on_error("after glClear(target) in compositetransformview.draw")
+                gl.glDisable(gl.GL_DEPTH_TEST)
+                gl.glDepthMask(gl.GL_FALSE)
+                try:
+                    gl.glClearColor(0, 0.1, 0, 1)
+                    raise_on_error("after glClearColor(target) in compositetransformview.draw")
+                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
+                    raise_on_error("after glClear(target) in compositetransformview.draw")
 
-                self._target_image_view.draw(view_proj, space, fbo_size, bounding_box,
-                                             show_mesh_lines=show_mesh_lines,
-                                             view_type=ViewType.Composite)
+                    self._target_image_view.draw(view_proj, space, fbo_size, bounding_box,
+                                                 show_mesh_lines=show_mesh_lines,
+                                                 view_type=ViewType.Composite)
+                finally:
+                    gl.glDepthMask(gl.GL_TRUE)
+                    gl.glEnable(gl.GL_DEPTH_TEST)
 
                 # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
                 # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).

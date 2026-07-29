@@ -352,6 +352,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                     target_image_name=ViewType.Target.value,
                                                                     transform_controller=self.transform_controller,
                                                                     gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
+                self._wire_tile_mesh_repaint(self._image_transform_view)
                 # Force repaint after view's async setup (posted callbacks set source/target views)
                 QTimer.singleShot(50, self._glpanel.update)
                 QTimer.singleShot(150, self._glpanel.update)
@@ -365,6 +366,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                             image_view_model=image,
                                                             transform_controller=self.transform_controller,
                                                             gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
+            self._wire_tile_mesh_repaint(self._image_transform_view)
             print(f'Added image view model {name} to {self.view_type.value} view')
 
         # Use QTimer to call center_camera after the widget is fully initialized
@@ -445,6 +447,60 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.center_camera()
         self.glcanvas.update()
 
+    def onTransformChanged(self):
+        """Handle transform changes and prefetch visible tile meshes."""
+        super().onTransformChanged()
+        self._update_visible_tile_meshes()
+
+    def onCameraChanged(self):
+        """Handle camera changes and prefetch visible tile meshes."""
+        super().onCameraChanged()
+        self._update_visible_tile_meshes()
+
+    def _mesh_visible_bounds(self) -> nornir_imageregistration.Rectangle | None:
+        """Return the viewport rectangle used for lazy tile mesh builds."""
+        if self.camera is None:
+            return None
+        gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+        if gl_w <= 0 or gl_h <= 0:
+            return None
+        self.camera.focus(gl_w, gl_h)
+        bounding_box = self.camera.VisibleImageBoundingBox
+        if self.view_type == ViewType.Composite and self.transform_controller is not None:
+            _, bounding_box = resolve_composite_display_draw_params(
+                self.camera,
+                self.transform_controller,
+                (gl_h, gl_w),
+            )
+        return bounding_box
+
+    def _wire_tile_mesh_repaint(self, view: object) -> None:
+        """Connect lazy mesh continuation callbacks to this panel's repaint."""
+        repaint = self._glpanel.update
+        if hasattr(view, '_repaint_callback'):
+            view._repaint_callback = repaint  # type: ignore[attr-defined]
+        if isinstance(view, CompositeTransformView):
+            view._repaint_callback = repaint
+            for sub_view in (view._source_image_view, view._target_image_view):
+                if sub_view is not None:
+                    sub_view._repaint_callback = repaint
+
+    def _update_visible_tile_meshes(self) -> None:
+        """Prefetch tile meshes for the current camera viewport."""
+        bounds = self._mesh_visible_bounds()
+        if bounds is None or self._image_transform_view is None:
+            return
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            for sub_view in (
+                    self._image_transform_view._source_image_view,
+                    self._image_transform_view._target_image_view,
+            ):
+                if sub_view is not None:
+                    # Composite sub-views render full tile grids into screen-sized FBOs.
+                    sub_view.update_all_tile_buffers(visible_rect=None)  # type: ignore[attr-defined]
+        else:
+            self._image_transform_view.update_visible_tile_meshes(bounds, margin_tiles=1)  # type: ignore[union-attr]
+
     def lookatfixedpoint(self, point, scale):
         """specify a point to look at in fixed space"""
         if not self.FixedSpace:
@@ -471,11 +527,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             bounding_box = self.camera.VisibleImageBoundingBox
             view_proj = self.camera.view_proj
             draw_space = self.space
+            ratio = self._glpanel.devicePixelRatio()
+            overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
             if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                phys_h, phys_w = overlay_viewport_size[1], overlay_viewport_size[0]
                 view_proj, bounding_box = resolve_composite_display_draw_params(
                     self.camera,
                     self.transform_controller,
-                    (gl_h, gl_w),
+                    (phys_h, phys_w),
                 )
                 draw_space = Space.Target
 
@@ -485,8 +544,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
             # Pass physical viewport size so composite overlay fills the widget after resize/hi-DPI (resizeGL uses physical pixels).
             default_fbo = self._glpanel.defaultFramebufferObject()
-            ratio = self._glpanel.devicePixelRatio()
-            overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
             draw_kwargs: dict[str, object] = {
                 "space": draw_space,
                 "client_size": (gl_h, gl_w),
@@ -504,11 +561,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             point_scale = (1 / self.camera.scale) * self.control_point_scale
             cp_view_proj = self.camera.view_proj
             if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                ratio = self._glpanel.devicePixelRatio()
                 gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+                phys_h, phys_w = int(gl_h * ratio), int(gl_w * ratio)
                 cp_view_proj, _ = resolve_composite_display_draw_params(
                     self.camera,
                     self.transform_controller,
-                    (gl_h, gl_w),
+                    (phys_h, phys_w),
                 )
             self._transform_controller_view.draw(
                 cp_view_proj,

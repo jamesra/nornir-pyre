@@ -42,6 +42,7 @@ class TileGLObjects:
     cached_simplices: NDArray[np.integer] | None = None
     point_count: int = 0
     is_rigid_quad: bool = False
+    mesh_populated: bool = False
 
 
 RenderDataMap = dict[
@@ -530,6 +531,24 @@ def tile_coords_for_visible_bounds(image_height: int,
     return coords
 
 
+def expand_visible_rectangle_by_tiles(
+        visible_rect: nornir_imageregistration.Rectangle,
+        texture_size: tuple[int, int],
+        margin_tiles: int = 1,
+) -> nornir_imageregistration.Rectangle:
+    """Expand a visible rectangle by whole texture tiles on each side for prefetch."""
+    if margin_tiles <= 0:
+        return visible_rect
+    tile_h, tile_w = int(texture_size[0]), int(texture_size[1])
+    margin_y = float(margin_tiles * tile_h)
+    margin_x = float(margin_tiles * tile_w)
+    y0, x0 = visible_rect.BottomLeft
+    y1 = y0 + visible_rect.Height
+    x1 = x0 + visible_rect.Width
+    return nornir_imageregistration.Rectangle.CreateFromBounds(
+        np.array((y0 - margin_y, x0 - margin_x, y1 + margin_y, x1 + margin_x)))
+
+
 def _tile_bounding_rect(
         grid_coords: tuple[int, int],
         texture_size: tuple[int, int]) -> nornir_imageregistration.spatial.Rectangle:
@@ -610,6 +629,7 @@ def apply_tile_mesh_cpu(render_data: TileGLObjects, entry) -> None:
     render_data.cached_simplices = entry.simplices
     render_data.point_count = entry.point_count
     render_data.is_rigid_quad = entry.is_rigid_quad
+    render_data.mesh_populated = True
 
 
 def _update_tile_buffers(transform: nornir_imageregistration.ITransform,

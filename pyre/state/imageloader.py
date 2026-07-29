@@ -19,6 +19,16 @@ from pyre.container import IContainer
 
 logger = logging.getLogger(__name__)
 
+FilepathCacheKey = tuple[str, str | None]
+
+
+def make_filepath_cache_key(image_fullpath: str, mask_fullpath: str | None) -> FilepathCacheKey:
+    """Return a normalized cache key for resolved image and mask paths."""
+    return (
+        os.path.normcase(image_fullpath),
+        os.path.normcase(mask_fullpath) if mask_fullpath is not None else None,
+    )
+
 
 class ImageLoader(IImageLoader):
     """Loads images and creates viewmodels for them."""
@@ -27,7 +37,8 @@ class ImageLoader(IImageLoader):
     _image_viewmodel_manager: IImageViewModelManager
     _search_dirs: list[str] | None
     _replacement_paths: dict[str, str] | None
-    _filepath_cache: dict[tuple[str, str | None], nornir_imageregistration.ImagePermutationHelper]
+    _filepath_cache: dict[FilepathCacheKey, nornir_imageregistration.ImagePermutationHelper]
+    _viewmodel_cache: dict[FilepathCacheKey, ImageViewModel]
 
     @inject
     def __init__(self,
@@ -39,6 +50,7 @@ class ImageLoader(IImageLoader):
         self._search_dirs = settings.ui.image_search_paths
         self._replacement_paths = settings.ui.replacement_paths
         self._filepath_cache = {}
+        self._viewmodel_cache = {}
 
     def load_stos(self,
                   stos_path: str) -> LoadStosResult | None:
@@ -47,18 +59,6 @@ class ImageLoader(IImageLoader):
 
         search_paths = list(self._search_dirs) if self._search_dirs is not None else []
         search_paths.insert(0, os.path.dirname(stos_path))
-
-        # source_key, source_permutations = self.load_image_into_manager(key=ViewType.Source.value,
-        #                                                                image_path=obj.ControlImageFullPath,
-        #                                                                mask_path=obj.ControlMaskFullPath,
-        #                                                                search_dirs=search_paths)
-        # self.create_image_viewmodel(source_key, source_permutations)
-        #
-        # target_key, target_permutations = self.load_image_into_manager(key=ViewType.Target.value,
-        #                                                                image_path=obj.MappedImageFullPath,
-        #                                                                mask_path=obj.MappedMaskFullPath,
-        #                                                                search_dirs=search_paths)
-        # self.create_image_viewmodel(target_key, target_permutations)
 
         with concurrent.futures.ThreadPoolExecutor() as pool:
             source_task = pool.submit(self.load_image_into_manager,
@@ -69,8 +69,7 @@ class ImageLoader(IImageLoader):
                                       replacement_paths=self._replacement_paths)
 
             source_task.add_done_callback(
-                lambda task: self.create_image_viewmodel(name=task.result().key,
-                                                         permutations=task.result().permutations))
+                lambda task: self.create_image_viewmodel(load_result=task.result()))
 
             target_task = pool.submit(self.load_image_into_manager,
                                       key=ViewType.Target.value,
@@ -79,8 +78,7 @@ class ImageLoader(IImageLoader):
                                       search_dirs=search_paths,
                                       replacement_paths=self._replacement_paths)
             target_task.add_done_callback(
-                lambda task: self.create_image_viewmodel(name=task.result().key,
-                                                         permutations=task.result().permutations))
+                lambda task: self.create_image_viewmodel(load_result=task.result()))
 
             result = LoadStosResult(stos=obj,
                                     source=source_task.result(),
@@ -107,10 +105,7 @@ class ImageLoader(IImageLoader):
         if mask_fullpath is not None:
             found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
 
-        cache_key = (
-            os.path.normcase(found_image_fullpath),
-            os.path.normcase(found_mask_fullpath) if found_mask_fullpath is not None else None,
-        )
+        cache_key = make_filepath_cache_key(found_image_fullpath, found_mask_fullpath)
 
         img_color = False
         msk_color = False
@@ -149,11 +144,49 @@ class ImageLoader(IImageLoader):
                                image_original_fullpath=image_fullpath,
                                mask_original_fullpath=mask_fullpath,
                                image_converted_from_color=img_color,
-                               mask_converted_from_color=msk_color)
+                               mask_converted_from_color=msk_color,
+                               filepath_cache_key=cache_key)
+
+    def _get_or_create_cached_viewmodel(self,
+                                        cache_key: FilepathCacheKey,
+                                        permutations: nornir_imageregistration.ImagePermutationHelper,
+                                        image_fullpath: str) -> ImageViewModel:
+        """Return a cached ImageViewModel for a filepath key, creating it on first use."""
+        cached = self._viewmodel_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        viewmodel = ImageViewModel(
+            permutations.Image,
+            image_filename=image_fullpath,
+            managed_by_filepath_cache=True,
+        )
+        viewmodel.mark_managed_by_filepath_cache()
+        self._viewmodel_cache[cache_key] = viewmodel
+        return viewmodel
 
     def create_image_viewmodel(self,
-                               name: str | Enum,
-                               permutations: nornir_imageregistration.ImagePermutationHelper) -> ImageViewModel:
+                               name: str | Enum | None = None,
+                               permutations: nornir_imageregistration.ImagePermutationHelper | None = None,
+                               *,
+                               load_result: ImageLoadResult | None = None) -> ImageViewModel:
+        """Bind a viewmodel to a manager slot, reusing cached GL textures when the filepath matches."""
+        if load_result is not None:
+            name = load_result.key
+            permutations = load_result.permutations
+            cache_key = load_result.filepath_cache_key
+            image_fullpath = load_result.image_fullpath
+        else:
+            cache_key = None
+            image_fullpath = None
+
+        if name is None or permutations is None:
+            raise ValueError("create_image_viewmodel requires name and permutations or load_result")
+
+        if cache_key is not None and image_fullpath is not None:
+            viewmodel = self._get_or_create_cached_viewmodel(cache_key, permutations, image_fullpath)
+            return self._image_viewmodel_manager.assign_slot(str(name), viewmodel)
+
         if name in self._image_viewmodel_manager:  # type: ignore[operator]
             del self._image_viewmodel_manager[name]  # type: ignore[index]
         return self._image_viewmodel_manager.add(str(name), permutations.Image)

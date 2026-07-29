@@ -15,6 +15,7 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.views.composite_display import (
     composite_control_point_draw_rows,
+    composite_tile_cull_rect,
     display_lookat_for_composite,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
@@ -109,6 +110,40 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         apply_composite_display_pan_delta(camera, rigid, delta_display)
         display_after = display_lookat_for_composite(camera, rigid)
         np.testing.assert_allclose(display_after, display_before + delta_display, rtol=1e-4, atol=1e-3)
+
+    def test_composite_tile_cull_rect_maps_display_bounds_to_source_space(self) -> None:
+        import nornir_imageregistration
+        from pyre.views.composite_display import (
+            inverse_transform_visible_rectangle_mesh,
+            transform_visible_rectangle_mesh,
+        )
+
+        source_rect = nornir_imageregistration.Rectangle.CreateFromBounds(
+            np.array([10.0, 20.0, 110.0, 120.0], dtype=np.float64))
+        display_rect = transform_visible_rectangle_mesh(source_rect, self.controller)
+        source_cull = composite_tile_cull_rect(
+            display_rect, self.controller, Space.Source, ViewType.Composite)
+        target_cull = composite_tile_cull_rect(
+            display_rect, self.controller, Space.Target, ViewType.Composite)
+        self.assertIsNotNone(source_cull)
+        assert source_cull is not None
+        roundtrip = transform_visible_rectangle_mesh(source_cull, self.controller)
+        np.testing.assert_allclose(
+            roundtrip.BottomLeft, display_rect.BottomLeft, rtol=1e-4, atol=1e-2)
+        np.testing.assert_allclose(
+            [roundtrip.Height, roundtrip.Width],
+            [display_rect.Height, display_rect.Width],
+            rtol=1e-4,
+            atol=1e-2,
+        )
+        np.testing.assert_allclose(
+            inverse_transform_visible_rectangle_mesh(display_rect, self.controller).BottomLeft,
+            source_cull.BottomLeft,
+            rtol=1e-4,
+            atol=1e-2,
+        )
+        np.testing.assert_allclose(
+            target_cull.BottomLeft, display_rect.BottomLeft, rtol=1e-5, atol=1e-5)
 
 
 if __name__ == "__main__":

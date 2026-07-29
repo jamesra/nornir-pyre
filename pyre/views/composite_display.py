@@ -79,6 +79,39 @@ def transform_visible_rectangle_mesh(
         ]))
 
 
+def inverse_transform_visible_rectangle_mesh(
+        rect: nornir_imageregistration.Rectangle,
+        transform_controller: TransformController,
+) -> nornir_imageregistration.Rectangle:
+    """Return axis-aligned bounds of a rectangle after mesh/grid inverse transform."""
+    corners = np.asarray(rect.Corners, dtype=np.float64)
+    mapped = _as_numpy_f64(transform_controller.InverseTransform(corners))
+    return nornir_imageregistration.Rectangle.CreateFromBounds(
+        np.array([
+            float(np.min(mapped[:, 0])),
+            float(np.min(mapped[:, 1])),
+            float(np.max(mapped[:, 0])),
+            float(np.max(mapped[:, 1])),
+        ]))
+
+
+def composite_tile_cull_rect(
+        display_bounds: nornir_imageregistration.Rectangle | None,
+        transform_controller: TransformController,
+        image_space: Space,
+        view_type: ViewType | None,
+) -> nornir_imageregistration.Rectangle | None:
+    """Map composite display-space bounds to native image coordinates for tile culling."""
+    if display_bounds is None or view_type != ViewType.Composite:
+        return display_bounds
+    model = transform_controller.TransformModel
+    if model is None or is_rigid_transform(model):
+        return display_bounds
+    if image_space == Space.Source:
+        return inverse_transform_visible_rectangle_mesh(display_bounds, transform_controller)
+    return display_bounds
+
+
 def forward_for_composite_view(
         transform_controller: TransformController,
         model: object,

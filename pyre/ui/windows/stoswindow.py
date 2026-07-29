@@ -910,6 +910,7 @@ class StosWindow(PyreWindowBase):
                     ViewType.Source.value,
                     ViewType.Target.value,
                     stos_filename=filename,
+                    stos=load_result.stos,
                     settings_source_image_path=load_result.source.image_fullpath,
                     settings_target_image_path=load_result.target.image_fullpath,
                 )

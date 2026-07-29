@@ -31,6 +31,7 @@ def resolve_warped_and_fixed_image_data(
         source_image_key: str,
         target_image_key: str,
         stos_filename: str | None = None,
+        stos: StosFile | None = None,
         settings_source_image_path: str | None = None,
         settings_target_image_path: str | None = None,
 ) -> tuple[nornir_imageregistration.ImagePermutationHelper,
@@ -47,8 +48,10 @@ def resolve_warped_and_fixed_image_data(
     slot_for_source = image_manager[source_image_key]
     slot_for_target = image_manager[target_image_key]
 
-    if stos_filename and os.path.isfile(stos_filename):
+    if stos is None and stos_filename and os.path.isfile(stos_filename):
         stos = StosFile.Load(stos_filename)
+
+    if stos is not None:
         mapped_bn = _basename_casefold(stos.MappedImageFullPath)
         control_bn = _basename_casefold(stos.ControlImageFullPath)
         source_bn = _basename_casefold(settings_source_image_path)
@@ -78,6 +81,7 @@ def try_resolve_warped_and_fixed_image_data(
         source_image_key: str,
         target_image_key: str,
         stos_filename: str | None = None,
+        stos: StosFile | None = None,
         settings_source_image_path: str | None = None,
         settings_target_image_path: str | None = None,
 ) -> tuple[nornir_imageregistration.ImagePermutationHelper,
@@ -90,6 +94,7 @@ def try_resolve_warped_and_fixed_image_data(
         source_image_key,
         target_image_key,
         stos_filename=stos_filename,
+        stos=stos,
         settings_source_image_path=settings_source_image_path,
         settings_target_image_path=settings_target_image_path,
     )

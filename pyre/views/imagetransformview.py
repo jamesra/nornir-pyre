@@ -31,6 +31,8 @@ from pyre.controllers.transform_display import TileRefreshHint
 from pyre.interfaces.viewtype import ViewType
 from pyre.perf_debug import timed
 
+_LAZY_TILE_MESH_BUDGET = 8
+
 
 class ImageTransformView(IImageTransformView):
     """
@@ -48,11 +50,15 @@ class ImageTransformView(IImageTransformView):
     Debug: bool
     _gl_initialized: bool = False
     _tile_render_data: RenderDataMap
+    _built_mesh_tiles: set[tuple[int, int]]
+    _lazy_mesh_pending_repaint: bool
+    _eager_tile_meshes: bool
     _image_space: Space  # The space the image is in
     _activate_context: Callable[
         [], None]  # A function we can call to ensure the view's GL context is current, must be used before creating GL Objects
 
     _gl_funcs: QOpenGLFunctions
+    _repaint_callback: Callable[[], None] | None = None
 
     @property
     def gl(self) -> QOpenGLFunctions:
@@ -126,6 +132,8 @@ class ImageTransformView(IImageTransformView):
                  image_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  image_mask_view_model: pyre.viewmodels.ImageViewModel | None = None,
                  transform_controller: TransformController | None = None,
+                 *,
+                 eager_tile_meshes: bool = False,
                  ):
         """
         Constructor
@@ -135,6 +143,9 @@ class ImageTransformView(IImageTransformView):
         self._gl_funcs = gl_funcs
         self._activate_context = activate_context
         self._tile_render_data = {}
+        self._built_mesh_tiles = set()
+        self._lazy_mesh_pending_repaint = False
+        self._eager_tile_meshes = eager_tile_meshes
         self._image_space = space
         self._rendercache = RenderCache()
         self._image_viewmodel = image_view_model  # type: ignore[assignment]
@@ -158,7 +169,98 @@ class ImageTransformView(IImageTransformView):
         if not self._gl_initialized:
             self._gl_initialized = True
 
+        if self._uses_lazy_mesh_build():
+            return
         self.update_all_tile_buffers()
+
+    def _uses_lazy_mesh_build(self) -> bool:
+        """True when tile meshes should be built incrementally for the visible viewport."""
+        if self._eager_tile_meshes:
+            return False
+        tc = self._transform_controller
+        if tc is not None and tc.display_strategy.uses_static_tile_quads():
+            return False
+        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+            return False
+        return True
+
+    def _invalidate_tile_meshes(self) -> None:
+        """Drop tile mesh data so the next draw rebuilds visible tiles only."""
+        self._tile_render_data.clear()
+        self._built_mesh_tiles.clear()
+
+    def _tile_mesh_is_ready(self, grid_coords: tuple[int, int]) -> bool:
+        render_data = self._tile_render_data.get(grid_coords)
+        return render_data is not None and render_data.mesh_populated
+
+    def _build_tile_mesh(self, grid_coords: tuple[int, int]) -> None:
+        """Build CPU and GL mesh data for one tile coordinate."""
+        if self._image_viewmodel is None or self.transform is None:
+            return
+        cpu_entry = self._get_or_build_cpu_entry(grid_coords)
+        gltiles._update_tile_buffers(
+            self.transform,
+            grid_coords,
+            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+            self._image_space,
+            get_or_create_tile_globjects=self.get_or_create_tile_globjects,
+            shared_cpu_entry=cpu_entry)
+        self._built_mesh_tiles.add(grid_coords)
+
+    def _ensure_visible_tile_meshes(
+            self,
+            visible_coords: set[tuple[int, int]] | None,
+            *,
+            max_tiles: int | None = _LAZY_TILE_MESH_BUDGET) -> None:
+        """Build meshes for visible tiles, optionally capped per call for responsiveness."""
+        if visible_coords is None or self._image_viewmodel is None or self.transform is None:
+            return
+        if not self._uses_lazy_mesh_build():
+            return
+
+        self._activate_context()
+        built = 0
+        for grid_coords in sorted(visible_coords):
+            if self._tile_mesh_is_ready(grid_coords):
+                continue
+            self._build_tile_mesh(grid_coords)
+            built += 1
+            if max_tiles is not None and built >= max_tiles:
+                if not self._lazy_mesh_pending_repaint:
+                    self._lazy_mesh_pending_repaint = True
+                    qt_post_to_main(self._request_lazy_mesh_repaint,
+                                    activate_context=self._activate_context)
+                break
+
+    def _request_lazy_mesh_repaint(self) -> None:
+        self._lazy_mesh_pending_repaint = False
+        if self._repaint_callback is not None:
+            self._repaint_callback()
+
+    def update_visible_tile_meshes(
+            self,
+            visible_rect: nornir_imageregistration.Rectangle | None,
+            *,
+            margin_tiles: int = 1,
+            max_tiles: int | None = _LAZY_TILE_MESH_BUDGET) -> None:
+        """Incrementally build meshes for tiles intersecting the viewport."""
+        if not self._gl_initialized or visible_rect is None:
+            return
+        if self._image_viewmodel is None or self.transform is None:
+            return
+        if not self._uses_lazy_mesh_build():
+            self.update_all_tile_buffers(visible_rect=visible_rect)
+            return
+
+        expanded = gltiles.expand_visible_rectangle_by_tiles(
+            visible_rect,
+            tuple(int(v) for v in self._image_viewmodel.TextureSize),  # type: ignore[arg-type]
+            margin_tiles=margin_tiles)
+        visible = gltiles.tile_coords_for_visible_bounds(
+            self.height, self.width,
+            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+            expanded)
+        self._ensure_visible_tile_meshes(visible, max_tiles=max_tiles)
 
     def OnTransformChanged(self, transform_controller: TransformController | None = None):
         """Full tile mesh rebuild after transform changes (skipped during interactive drag)."""
@@ -183,7 +285,9 @@ class ImageTransformView(IImageTransformView):
             if needs_rigid_init:
                 self.update_all_tile_buffers()
             return
-        self.update_all_tile_buffers()
+        self._invalidate_tile_meshes()
+        if not self._uses_lazy_mesh_build():
+            self.update_all_tile_buffers()
 
     def OnPointMoved(self, transform_controller: TransformController, indices: NDArray[np.integer]):
         """Incremental tile patch update for control point drag."""
@@ -286,6 +390,7 @@ class ImageTransformView(IImageTransformView):
                                                  self._image_space,
                                                  get_or_create_tile_globjects=self.get_or_create_tile_globjects,
                                                  shared_cpu_entry=cpu_entry)
+                    self._built_mesh_tiles.add(grid_coords)
                     if grid_coords in unused_grid_coords:
                         unused_grid_coords.remove(grid_coords)
 
@@ -439,7 +544,11 @@ class ImageTransformView(IImageTransformView):
             rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
 
         cull_rect = bounding_box
-        if (
+        if view_type == ViewType.Composite:
+            # Composite FBO layers must rasterize the full image tile grids. Display-space
+            # bounds do not map reliably to per-layer native tile indices for mesh/grid STOS.
+            cull_rect = None
+        elif (
                 rigid_composite_fixed_align
                 and self._image_space == Space.Source
                 and bounding_box is not None
@@ -452,6 +561,28 @@ class ImageTransformView(IImageTransformView):
             image_viewmodel.height, image_viewmodel.width,
             image_viewmodel.TextureSize,
             cull_rect)
+
+        if not self._uses_lazy_mesh_build():
+            needs_build = not self._built_mesh_tiles
+            if not needs_build and visible is not None:
+                needs_build = any(not self._tile_mesh_is_ready(coord) for coord in visible)
+            if needs_build:
+                self.update_all_tile_buffers(visible_rect=cull_rect)
+
+        if self._uses_lazy_mesh_build():
+            prefetch_rect = cull_rect
+            if prefetch_rect is not None:
+                prefetch_rect = gltiles.expand_visible_rectangle_by_tiles(
+                    prefetch_rect,
+                    tuple(int(v) for v in image_viewmodel.TextureSize),
+                    margin_tiles=1)
+                prefetch_coords = gltiles.tile_coords_for_visible_bounds(
+                    image_viewmodel.height, image_viewmodel.width,
+                    image_viewmodel.TextureSize,
+                    prefetch_rect)
+            else:
+                prefetch_coords = visible
+            self._ensure_visible_tile_meshes(prefetch_coords)
 
         for ix in range(0, image_viewmodel.NumCols):
             column = image_array[ix]
@@ -468,6 +599,9 @@ class ImageTransformView(IImageTransformView):
 
                 # Skip if shaders aren't initialized yet (render_data will be None)
                 if render_data is None:
+                    continue
+
+                if self._uses_lazy_mesh_build() and not render_data.mesh_populated:
                     continue
 
                 try:

@@ -1,4 +1,5 @@
 import nornir_imageregistration.transforms
+from nornir_imageregistration.files.stosfile import StosFile
 import pyre.settings
 import os
 
@@ -78,6 +79,7 @@ def _sync_registration_roles_from_manager(
         image_manager: ImageManager,
         *,
         stos_filename: str | None,
+        stos: StosFile | None = None,
         settings_source_image_path: str | None,
         settings_target_image_path: str | None,
 ) -> None:
@@ -87,6 +89,7 @@ def _sync_registration_roles_from_manager(
         ViewType.Source.value,
         ViewType.Target.value,
         stos_filename=stos_filename,
+        stos=stos,
         settings_source_image_path=settings_source_image_path,
         settings_target_image_path=settings_target_image_path,
     )
@@ -114,7 +117,7 @@ def UpdateSettingsFromArguments(arg_values,
                 image_fullpath=arg_values.TargetImageFullPath,
                 mask_fullpath=None,
             )
-            image_loader.create_image_viewmodel(result.key, result.permutations)
+            image_loader.create_image_viewmodel(load_result=result)
             settings.stos.target_image = ImageAndMaskPath(
                 image_fullpath=result.image_fullpath,
                 mask_fullpath=result.mask_fullpath,
@@ -125,7 +128,7 @@ def UpdateSettingsFromArguments(arg_values,
                 image_fullpath=arg_values.SourceImageFullPath,
                 mask_fullpath=None,
             )
-            image_loader.create_image_viewmodel(result.key, result.permutations)
+            image_loader.create_image_viewmodel(load_result=result)
             settings.stos.source_image = ImageAndMaskPath(
                 image_fullpath=result.image_fullpath,
                 mask_fullpath=result.mask_fullpath,
@@ -194,6 +197,7 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                 stos_config,
                 image_manager,
                 stos_filename=restore_path,
+                stos=load_result.stos,
                 settings_source_image_path=settings.stos.source_image.image_fullpath,
                 settings_target_image_path=settings.stos.target_image.image_fullpath,
             )
@@ -205,7 +209,7 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                     image_fullpath=settings.stos.target_image.image_fullpath,
                     mask_fullpath=settings.stos.target_image.mask_fullpath,
                 )
-                image_loader.create_image_viewmodel(result.key, result.permutations)
+                image_loader.create_image_viewmodel(load_result=result)
             except (FileNotFoundError, ValueError) as e:
                 _log.warning("Saved target image not found — starting without it: %s", e)
         if settings.stos.source_image is not None and settings.stos.source_image.image_fullpath is not None:
@@ -215,7 +219,7 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                     image_fullpath=settings.stos.source_image.image_fullpath,
                     mask_fullpath=settings.stos.source_image.mask_fullpath,
                 )
-                image_loader.create_image_viewmodel(result.key, result.permutations)
+                image_loader.create_image_viewmodel(load_result=result)
             except (FileNotFoundError, ValueError) as e:
                 _log.warning("Saved source image not found — starting without it: %s", e)
         stos_config = get_current_stos_config()

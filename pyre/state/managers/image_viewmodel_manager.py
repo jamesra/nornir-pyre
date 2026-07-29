@@ -79,6 +79,20 @@ class ImageViewModelManager(IImageViewModelManager):
 
         return self.add(key, image)
 
+    def assign_slot(self, name: str | Enum, viewmodel: ImageViewModel) -> ImageViewModel:
+        """Bind a slot name to an existing viewmodel, firing events only when the instance changes."""
+        key = convert_to_key(name)
+        with self._lock:
+            current = self._models.get(key)
+            if current is viewmodel:
+                return viewmodel
+            if current is not None:
+                del self._models[key]
+                self._fire_change_event(key, Action.REMOVE, current)
+            self._models[key] = viewmodel
+            self._fire_change_event(key, Action.ADD, viewmodel)
+        return viewmodel
+
     def remove(self, name: str | Enum) -> None:
         key = convert_to_key(name)
         del name

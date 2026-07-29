@@ -37,6 +37,11 @@ class IImageViewModelManager(abc.ABC):
         raise NotImplementedError()
 
     @abstractmethod
+    def assign_slot(self, name: str | Enum, viewmodel: "ImageViewModel") -> "ImageViewModel":
+        """Bind a slot name to an existing viewmodel, firing events only when the instance changes."""
+        raise NotImplementedError()
+
+    @abstractmethod
     def remove(self, name: str | Enum) -> None:
         """Remove the GL ImageViewModel for the image"""
         raise NotImplementedError()

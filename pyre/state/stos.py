@@ -292,7 +292,7 @@ class StosState(StateEventsImpl):
             main_color=result.image_converted_from_color,
             mask_color=result.mask_converted_from_color,
         )
-        vm = self._image_loader.create_image_viewmodel(ViewType.Source, result.permutations)
+        vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.FixedImageViewModel = vm
         self._fixed_image_permutations = self._update_image_permutations(
             self.FixedImageViewModel,
@@ -315,7 +315,7 @@ class StosState(StateEventsImpl):
             main_color=result.image_converted_from_color,
             mask_color=result.mask_converted_from_color,
         )
-        vm = self._image_loader.create_image_viewmodel(ViewType.Target, result.permutations)
+        vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.WarpedImageViewModel = vm
         self._warped_image_permutations = self._update_image_permutations(
             self.WarpedImageViewModel,
