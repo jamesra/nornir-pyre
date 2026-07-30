@@ -43,8 +43,12 @@ from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
 from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
 from pyre.viewmodels.controlpointmap import ControlPointMap
-from pyre.transform_edit_policy import fixed_panel_hint_message, rigid_rotation_locked
-from pyre.views.composite_display import resolve_composite_display_draw_params, composite_control_point_draw_rows
+from pyre.transform_edit_policy import source_panel_hint_message, rigid_rotation_locked
+from pyre.views.composite_display import (
+    composite_control_point_draw_rows,
+    composite_legend_rich_text,
+    resolve_composite_display_draw_params,
+)
 
 
 @dataclass
@@ -87,6 +91,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _transform_controller_view: TransformControllerView | None
 
     _fixed_layer_hint: QLabel | None = None
+    _composite_legend: QLabel | None = None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
 
@@ -223,11 +228,22 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self._warped_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             self._warped_layer_hint.hide()
             self._update_layer_policy_hints()
+        elif self._view_type == ViewType.Composite:
+            self._composite_legend = QLabel(self)
+            self._composite_legend.setTextFormat(Qt.TextFormat.RichText)
+            self._composite_legend.setText(composite_legend_rich_text())
+            self._composite_legend.setStyleSheet(
+                "QLabel { background-color: rgba(0, 0, 0, 160); padding: 4px 8px; }")
+            self._composite_legend.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._composite_legend.adjustSize()
+            self._position_composite_legend()
+            self._composite_legend.show()
+            self._composite_legend.raise_()
 
     def _update_layer_policy_hints(self) -> None:
         """Show corner hints when transform-edit policy blocks actions in this panel."""
         if getattr(self, '_fixed_layer_hint', None) is not None:
-            msg = fixed_panel_hint_message(
+            msg = source_panel_hint_message(
                 self._transform_controller.TransformModel,
                 self._transform_controller.type,
                 self._space,
@@ -253,13 +269,25 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Backward-compatible alias for layer policy hint refresh."""
         self._update_layer_policy_hints()
 
+    def _position_composite_legend(self) -> None:
+        """Anchor the composite source/target legend in the bottom-left corner."""
+        if self._composite_legend is None:
+            return
+        self._composite_legend.adjustSize()
+        margin = 8
+        self._composite_legend.move(
+            margin,
+            max(margin, self.height() - self._composite_legend.height() - margin),
+        )
+
     def on_resize(self, event: QResizeEvent) -> None:
-        """Handle resize and keep the fixed-layer hint anchored."""
+        """Handle resize and keep overlay hints anchored."""
         super().on_resize(event)
         if getattr(self, '_fixed_layer_hint', None) is not None and self._fixed_layer_hint.isVisible():
             self._fixed_layer_hint.move(8, 8)
         if getattr(self, '_warped_layer_hint', None) is not None and self._warped_layer_hint.isVisible():
             self._warped_layer_hint.move(8, 8)
+        self._position_composite_legend()
 
     def __del__(self):
         try:
@@ -435,7 +463,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.camera.scale = min(width_scale, height_scale)
 
     def _LabelPreamble(self) -> str:
-        return "Fixed: " if self.FixedSpace else "Warping: "
+        return "Source: " if self.space == Space.Source else "Target: "
 
     def OnImageViewModelChanged(self, space: pyre.Space):
         """Called when the image view model changes"""
@@ -530,11 +558,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             ratio = self._glpanel.devicePixelRatio()
             overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
             if self.view_type == ViewType.Composite and self.transform_controller is not None:
-                phys_h, phys_w = overlay_viewport_size[1], overlay_viewport_size[0]
+                # Use logical GL size for view_proj so mouse pan stays 1:1 with on-screen motion.
+                # Physical pixels are only for FBO/viewport fill via overlay_viewport_size.
                 view_proj, bounding_box = resolve_composite_display_draw_params(
                     self.camera,
                     self.transform_controller,
-                    (phys_h, phys_w),
+                    (gl_h, gl_w),
                 )
                 draw_space = Space.Target
 
@@ -561,13 +590,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             point_scale = (1 / self.camera.scale) * self.control_point_scale
             cp_view_proj = self.camera.view_proj
             if self.view_type == ViewType.Composite and self.transform_controller is not None:
-                ratio = self._glpanel.devicePixelRatio()
                 gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
-                phys_h, phys_w = int(gl_h * ratio), int(gl_w * ratio)
                 cp_view_proj, _ = resolve_composite_display_draw_params(
                     self.camera,
                     self.transform_controller,
-                    (phys_h, phys_w),
+                    (gl_h, gl_w),
                 )
             self._transform_controller_view.draw(
                 cp_view_proj,

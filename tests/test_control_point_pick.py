@@ -29,7 +29,7 @@ class TestControlPointPick(unittest.TestCase):
 
   def test_find_nearest_within_returns_single_point(self) -> None:
       cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
-      hits = cmap.find_nearest_within(np.array([10.5, 20.5]), 5.0)
+      hits = cmap.find_nearest_within(np.array([100.5, 200.5]), 5.0)
       self.assertEqual(hits, {0})
 
   def test_drag_translate_uses_existing_selection(self) -> None:

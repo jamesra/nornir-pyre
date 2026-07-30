@@ -32,6 +32,7 @@ class TestCompositeTileCull(unittest.TestCase):
         view._built_mesh_tiles = set()
         view._lazy_mesh_pending_repaint = False
         view._eager_tile_meshes = True
+        view._warp_into_target_display = True
         view._gl_initialized = True
         view.get_or_create_tile_globjects = MagicMock(return_value=MagicMock(mesh_populated=True))
         return view

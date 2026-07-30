@@ -34,7 +34,7 @@ class TestRotateTranslateWarpedImage(unittest.TestCase):
         self._app_settings.stos.target_image = None
 
     @patch("pyre.common.stos.SliceToSliceRigidRegistrationWithPreprocessedImages")
-    @patch("pyre.common.resolve_warped_and_fixed_image_data")
+    @patch("pyre.common.resolve_source_and_target_image_data")
     def test_brute_force_method_is_passed_to_registration(
             self,
             mock_resolve: MagicMock,

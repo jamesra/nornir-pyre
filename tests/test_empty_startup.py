@@ -16,14 +16,14 @@ from pyre.state import (
 )
 from pyre.state.managers.image_manager import ImageManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
-from pyre.stos_registration import try_resolve_warped_and_fixed_image_data
+from pyre.stos_registration import try_resolve_source_and_target_image_data
 
 
 class TestTryResolveWarpedAndFixed(unittest.TestCase):
     def test_returns_none_when_image_manager_empty(self) -> None:
         manager = ImageManager()
         self.assertIsNone(
-            try_resolve_warped_and_fixed_image_data(
+            try_resolve_source_and_target_image_data(
                 manager,
                 "Source",
                 "Target",

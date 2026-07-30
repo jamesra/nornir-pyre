@@ -21,8 +21,9 @@ Usage:
 
     Optional command-line arguments:
 
-    -Fixed: Path to the target (fixed) image
-    -Warped: Path to the image to be warped (source)
+    -Source: Path to the source (mapped) image
+    -Target: Path to the target (control) image
+    -Fixed / -Warped: Deprecated aliases for -Target / -Source
     -stos: Path to a STOS file to load
     -mosaic: Path to a mosaic file to load
     -tiles: Path to the tiles referred to in the mosaic file
@@ -213,12 +214,30 @@ def ProcessArgs():
     # conflict_handler = 'resolve' replaces old arguments with new if both use the same option flag
     parser = argparse.ArgumentParser('pyre', conflict_handler='resolve')
 
+    parser.add_argument('-Source',
+                        action='store',
+                        required=False,
+                        type=str,
+                        default=None,
+                        help='Path to the source (mapped) image',
+                        dest='SourceImageFullPath'
+                        )
+
+    parser.add_argument('-Target',
+                        action='store',
+                        required=False,
+                        type=str,
+                        default=None,
+                        help='Path to the target (control) image',
+                        dest='TargetImageFullPath'
+                        )
+
     parser.add_argument('-Fixed',
                         action='store',
                         required=False,
                         type=str,
                         default=None,
-                        help='Path to the target image',
+                        help='(deprecated) use -Target',
                         dest='TargetImageFullPath'
                         )
 
@@ -227,7 +246,7 @@ def ProcessArgs():
                         required=False,
                         type=str,
                         default=None,
-                        help='Path to the image to be warped',
+                        help='(deprecated) use -Source',
                         dest='SourceImageFullPath'
                         )
 
@@ -403,8 +422,8 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     # mosaic_window = MosaicWindow(None, 1, "Mosaic Viewer")
 
     # Create STOS windows for source, target, and composite views
-    source_window = StosWindow(None, ViewType.Source, "Fixed Image", ViewType.Source)
-    target_window = StosWindow(None, ViewType.Target, "Warped Image", ViewType.Target)
+    source_window = StosWindow(None, ViewType.Source, "Source Image", ViewType.Source)
+    target_window = StosWindow(None, ViewType.Target, "Target Image", ViewType.Target)
     composite_window = StosWindow(None, ViewType.Composite, "Composite Image", ViewType.Composite)
 
     window_manager.add(ViewType.Source, source_window)
@@ -450,6 +469,7 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
                 f"Could not restore the previous session:\n\n{e}"
                 f"\n\nPyre will start with an empty workspace.",
             )
+        StosWindow.update_window_titles(settings, window_manager)
         if ViewType.Composite in window_manager:
             from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
             StosWindow.open_folder_browser_if_cached_folder_exists(

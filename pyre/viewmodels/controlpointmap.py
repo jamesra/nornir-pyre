@@ -76,11 +76,12 @@ class ControlPointMap:
 
     @staticmethod
     def shader_tween_for_panel_space(space: Space) -> float:
-        """Shader tween for panel space (inverse of ``tweened_points`` float blend).
+        """Shader tween for panel space (0 = SourcePoints, 1 = TargetPoints).
 
-        Returns 1.0 for fixed (Source panel / TargetPoints) and 0.0 for warped.
+        Shader mix(point_source_offset, point_target_offset, tween) with the GL
+        pointset layout yields tween=0 for SourcePoints and tween=1 for TargetPoints.
         """
-        return 1.0 if space == Space.Source else 0.0
+        return 0.0 if space == Space.Source else 1.0
 
     @staticmethod
     def draw_tween_for_pyre_space(space: Space) -> float:
@@ -93,7 +94,7 @@ class ControlPointMap:
             tween: float | Space,
             view_type: ViewType | None = None,
     ) -> NDArray[np.floating]:
-        """Control points for hit-testing in Pyre panel space (Source=fixed, Target=warped)."""
+        """Control points for hit-testing in Pyre panel space (Source=SourcePoints, Target=TargetPoints)."""
         model = transform_controller.TransformModel
         if (
                 view_type == ViewType.Composite
@@ -101,16 +102,16 @@ class ControlPointMap:
                 and not isinstance(model, nornir_imageregistration.IRigidTransform)
         ):
             if tween == Space.Source:
-                fixed = transform_controller.TargetPoints
-                return _as_numpy_f64(transform_controller.Transform(fixed))
+                source_pts = transform_controller.SourcePoints
+                return _as_numpy_f64(transform_controller.Transform(source_pts))
             if tween == Space.Target:
-                return transform_controller.SourcePoints
+                return transform_controller.TargetPoints
         if tween == Space.Source:
-            return transform_controller.TargetPoints
-        elif tween == Space.Target:
             return transform_controller.SourcePoints
-        return (transform_controller.TargetPoints * (1.0 - tween) +
-                transform_controller.SourcePoints * tween)
+        elif tween == Space.Target:
+            return transform_controller.TargetPoints
+        return (transform_controller.SourcePoints * (1.0 - tween) +
+                transform_controller.TargetPoints * tween)
 
     def create_kdtree(self):
         """Create a KDTree from the current control points, if they have changed"""

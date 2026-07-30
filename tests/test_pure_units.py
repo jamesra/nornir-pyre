@@ -18,8 +18,8 @@ class TestViewTypeConvertToKey(unittest.TestCase):
         self.assertEqual(convert_to_key(""), "")
 
     def test_convert_enum_returns_string_value(self):
-        self.assertEqual(convert_to_key(ViewType.Fixed), "Source")
-        self.assertEqual(convert_to_key(ViewType.Warped), "Target")
+        self.assertEqual(convert_to_key(ViewType.Source), "Source")
+        self.assertEqual(convert_to_key(ViewType.Target), "Target")
         self.assertEqual(convert_to_key(ViewType.Composite), "Composite")
 
     def test_convert_invalid_raises_type_error(self):

@@ -76,6 +76,9 @@ def resolve_warped_and_fixed_image_data(
     return slot_for_source, slot_for_target
 
 
+resolve_source_and_target_image_data = resolve_warped_and_fixed_image_data
+
+
 def try_resolve_warped_and_fixed_image_data(
         image_manager: ImageManagerLike,
         source_image_key: str,
@@ -100,6 +103,9 @@ def try_resolve_warped_and_fixed_image_data(
     )
 
 
+try_resolve_source_and_target_image_data = try_resolve_warped_and_fixed_image_data
+
+
 def sync_stos_registration_roles(
         stos_state: object,
         warped: nornir_imageregistration.ImagePermutationHelper,
@@ -119,29 +125,29 @@ def wire_stos_state_after_load(
     """Point StosState viewmodels at the slots populated by ``ImageLoader.load_stos``."""
     from pyre.interfaces.viewtype import ViewType
 
-    if not hasattr(stos_state, "FixedImageViewModel"):
+    if not hasattr(stos_state, "SourceImageViewModel") and not hasattr(stos_state, "FixedImageViewModel"):
         return
 
-    fixed_vm = None
-    warped_vm = None
+    source_vm = None
+    target_vm = None
     try:
-        fixed_vm = image_viewmodel_manager[ViewType.Target.value]
+        source_vm = image_viewmodel_manager[ViewType.Source.value]
     except (KeyError, TypeError):
         pass
     try:
-        warped_vm = image_viewmodel_manager[ViewType.Source.value]
+        target_vm = image_viewmodel_manager[ViewType.Target.value]
     except (KeyError, TypeError):
         pass
 
-    stos_state.FixedImageViewModel = fixed_vm  # type: ignore[attr-defined]
-    stos_state.WarpedImageViewModel = warped_vm  # type: ignore[attr-defined]
+    stos_state.SourceImageViewModel = source_vm  # type: ignore[attr-defined]
+    stos_state.TargetImageViewModel = target_vm  # type: ignore[attr-defined]
 
     update_permutations = getattr(stos_state, "_update_image_permutations", None)
     if callable(update_permutations):
-        fixed_mask = getattr(stos_state, "FixedImageMaskViewModel", None)
-        warped_mask = getattr(stos_state, "WarpedImageMaskViewModel", None)
-        stos_state._fixed_image_permutations = update_permutations(fixed_vm, fixed_mask)  # type: ignore[attr-defined]
-        stos_state._warped_image_permutations = update_permutations(warped_vm, warped_mask)  # type: ignore[attr-defined]
+        source_mask = getattr(stos_state, "FixedImageMaskViewModel", None)
+        target_mask = getattr(stos_state, "WarpedImageMaskViewModel", None)
+        stos_state._fixed_image_permutations = update_permutations(source_vm, source_mask)  # type: ignore[attr-defined]
+        stos_state._warped_image_permutations = update_permutations(target_vm, target_mask)  # type: ignore[attr-defined]
 
 
 def apply_stos_transform_to_controller(

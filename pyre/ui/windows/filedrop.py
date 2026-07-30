@@ -68,10 +68,10 @@ class FileDrop:
                 else:
                     # Prefer ViewType (StosWindow has _view_type or ID); fallback to legacy string ID
                     view_type = getattr(self.window, '_view_type', None) or getattr(self.window, 'ID', None)
-                    if view_type in (ViewType.Source, ViewType.Fixed) or self.window.ID == "Fixed":  # type: ignore[attr-defined]
-                        config.LoadFixedImage(fullpath)
-                    elif view_type in (ViewType.Target, ViewType.Warped) or self.window.ID == "Warped":  # type: ignore[attr-defined]
-                        config.LoadWarpedImage(fullpath)
+                    if view_type == ViewType.Source or self.window.ID == "Fixed":  # type: ignore[attr-defined]
+                        config.LoadSourceImage(fullpath)
+                    elif view_type == ViewType.Target or self.window.ID == "Warped":  # type: ignore[attr-defined]
+                        config.LoadTargetImage(fullpath)
             
             except IOError as error:
                 QMessageBox.critical(self.window, "Error", f"Error opening file\n{str(error)}")

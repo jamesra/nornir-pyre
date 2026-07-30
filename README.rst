@@ -130,7 +130,7 @@ Left Button:
     * Shift+Click to add a new point
     * Alt+Shift+Click to add a new point and auto-align
     * Click+drag to move an existing point
-    * Ctrl+Click+drag to translate warped image
+    * Ctrl+Click+drag to translate the mapped (source) image
     * Alt+Click to move currently selected point to mouse position
 
 Right Button:
@@ -139,9 +139,9 @@ Right Button:
 
 Scroll wheel:
     * Zoom
-    * Shift+scroll to scale warped image about the cursor (rigid / similarity transforms)
-    * Ctrl+scroll to rotate warped image
-    * Ctrl+Shift+scroll to slowly rotate warped image
+    * Shift+scroll to scale the source image about the cursor (rigid / similarity transforms)
+    * Ctrl+scroll to rotate the mapped section (Composite view for rigid)
+    * Ctrl+Shift+scroll to slowly rotate the mapped section
 
 Keyboard Controls
 -----------------
@@ -151,10 +151,10 @@ Navigation:
     * Page Up/Down: Change the magnification
 
 View Controls:
-    * M: Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
+    * M: Match the view on all windows to look at the same point as the current window (not functional for Source panel in some modes)
     * L: Show transform mesh lines
-    * F: Flip the warped image
-    * Tab: Toggle how the warped image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
+    * F: Flip the source (mapped) image
+    * Tab: Toggle how the source image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
 
 Alignment:
     * Rigid: Space refines angle (±5° at 1° steps); Shift+Space also refines scale

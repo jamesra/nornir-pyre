@@ -19,7 +19,7 @@ from ..container import IContainer
 import pyre.interfaces.managers
 from ..settings import ImageAndMaskPath, AppSettings
 from pyre.stos_registration import (
-    try_resolve_warped_and_fixed_image_data,
+    try_resolve_source_and_target_image_data,
     sync_stos_registration_roles,
     apply_stos_transform_to_controller,
     wire_stos_state_after_load,
@@ -83,8 +83,8 @@ def _sync_registration_roles_from_manager(
         settings_source_image_path: str | None,
         settings_target_image_path: str | None,
 ) -> None:
-    """Update StosState warped/fixed roles when both image slots are loaded."""
-    resolved = try_resolve_warped_and_fixed_image_data(
+    """Update StosState source/target registration roles when both image slots are loaded."""
+    resolved = try_resolve_source_and_target_image_data(
         image_manager,
         ViewType.Source.value,
         ViewType.Target.value,

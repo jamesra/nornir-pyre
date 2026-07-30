@@ -45,6 +45,19 @@ _stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre
 _warped_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-warped-save")
 _DEFAULT_BROWSER_LAYOUT_WIDTH = 350
 
+_STOS_WINDOW_BASE_TITLES: dict[ViewType, str] = {
+    ViewType.Source: "Source Image",
+    ViewType.Target: "Target Image",
+    ViewType.Composite: "Composite Image",
+}
+
+
+def format_stos_window_title(base: str, path: str | None) -> str:
+    """Return ``base`` or ``base — <basename>`` when ``path`` is known."""
+    if path is None or path == "":
+        return base
+    return f"{base} — {os.path.basename(path)}"
+
 
 class StosWindow(PyreWindowBase):
     stosfilename = ''
@@ -95,6 +108,29 @@ class StosWindow(PyreWindowBase):
 
     def lookatfixedpoint(self, point, scale):
         self.imagepanel.lookatfixedpoint(point, scale)
+
+    @classmethod
+    def update_window_titles(
+            cls,
+            settings: AppSettings,
+            window_manager: IWindowManager) -> None:
+        """Refresh Source/Target/Composite titles from known STOS and image paths."""
+        stos = settings.stos
+        source_path = (
+            None if stos.source_image is None else stos.source_image.image_fullpath)
+        target_path = (
+            None if stos.target_image is None else stos.target_image.image_fullpath)
+        titles = {
+            ViewType.Source: format_stos_window_title(
+                _STOS_WINDOW_BASE_TITLES[ViewType.Source], source_path),
+            ViewType.Target: format_stos_window_title(
+                _STOS_WINDOW_BASE_TITLES[ViewType.Target], target_path),
+            ViewType.Composite: format_stos_window_title(
+                _STOS_WINDOW_BASE_TITLES[ViewType.Composite], stos.stos_filename),
+        }
+        for view_type, title in titles.items():
+            if view_type in window_manager:
+                window_manager[view_type].setWindowTitle(title)
 
     @inject
     def __init__(self, parent,
@@ -338,21 +374,21 @@ class StosWindow(PyreWindowBase):
         menuOpenStosBrowser = filemenu.addAction("Open Stos &Folder Browser\u2026")
         menuOpenStosBrowser.triggered.connect(self.onOpenStosFolderBrowser)  # type: ignore[union-attr]
 
-        # Open fixed image action
-        menuOpenFixedImage = filemenu.addAction("&Open Fixed Image")
-        menuOpenFixedImage.triggered.connect(self.onOpenFixedImage)  # type: ignore[union-attr]
+        # Open source image action
+        menuOpenSourceImage = filemenu.addAction("&Open Source Image")
+        menuOpenSourceImage.triggered.connect(self.onOpenSourceImage)  # type: ignore[union-attr]
 
-        # Open warped image action
-        menuOpenWarpedImage = filemenu.addAction("&Open Warped Image")
-        menuOpenWarpedImage.triggered.connect(self.onOpenWarpedImage)  # type: ignore[union-attr]
+        # Open target image action
+        menuOpenTargetImage = filemenu.addAction("&Open Target Image")
+        menuOpenTargetImage.triggered.connect(self.onOpenTargetImage)  # type: ignore[union-attr]
 
-        # Open fixed image mask action
-        menuOpenFixedImageMask = filemenu.addAction("&Open Fixed Image Mask")
-        menuOpenFixedImageMask.triggered.connect(self.onOpenFixedImageMask)  # type: ignore[union-attr]
+        # Open source image mask action
+        menuOpenSourceImageMask = filemenu.addAction("&Open Source Image Mask")
+        menuOpenSourceImageMask.triggered.connect(self.onOpenSourceImageMask)  # type: ignore[union-attr]
 
-        # Open warped image mask action
-        menuOpenWarpedImageMask = filemenu.addAction("&Open Warped Image Mask")
-        menuOpenWarpedImageMask.triggered.connect(self.onOpenWarpedImageMask)  # type: ignore[union-attr]
+        # Open target image mask action
+        menuOpenTargetImageMask = filemenu.addAction("&Open Target Image Mask")
+        menuOpenTargetImageMask.triggered.connect(self.onOpenTargetImageMask)  # type: ignore[union-attr]
 
         filemenu.addSeparator()
 
@@ -647,6 +683,22 @@ class StosWindow(PyreWindowBase):
             # Some conversion paths do not require an image shape.
             pass
 
+        if transform_type == nornir_imageregistration.transforms.TransformType.GRID:
+            from pyre.ui.windows.refine_grid_settings_dialog import (
+                ConvertToGridDialog,
+                GridDivisionMode,
+            )
+            grid_settings = ConvertToGridDialog.GetGridDivisionSettings(
+                self, app_settings=self._settings)
+            if grid_settings is None:
+                return
+            if grid_settings.mode == GridDivisionMode.SPACING:
+                spacing_yx = (grid_settings.spacing_y, grid_settings.spacing_x)
+                kwargs["grid_spacing"] = spacing_yx
+                kwargs["cell_size"] = spacing_yx
+            else:
+                kwargs["grid_dims"] = (grid_settings.dims_rows, grid_settings.dims_cols)
+
         try:
             converted_transform = nornir_imageregistration.transforms.ConvertTransform(
                 current_transform,
@@ -724,10 +776,10 @@ class StosWindow(PyreWindowBase):
                     angles_to_search=user_settings.angle_range) as grid_refinement_settings:
                 pyre.common.GridRefineTransform(grid_refinement_settings)
 
-    def onOpenFixedImage(self):
-        """Handle Open Fixed Image action"""
+    def onOpenSourceImage(self):
+        """Handle Open Source Image action."""
         dialog = QFileDialog(self)
-        dialog.setWindowTitle("Choose a fixed image")
+        dialog.setWindowTitle("Choose a source (mapped) image")
         dialog.setDirectory(StosWindow.imagedirname)
         dialog.setNameFilter("All files (*.*)")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -739,12 +791,21 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadFixedImage(filename)
+                    config.LoadSourceImage(filename)
+                    mask_path = (
+                        None if self._settings.stos.source_image is None
+                        else self._settings.stos.source_image.mask_fullpath)
+                    self._settings.stos.source_image = ImageAndMaskPath(
+                        image_fullpath=filename,
+                        mask_fullpath=mask_path)
+                    StosWindow.update_window_titles(self._settings, self._window_manager)
 
-    def onOpenWarpedImage(self):
-        """Handle Open Warped Image action"""
+    onOpenFixedImage = onOpenSourceImage
+
+    def onOpenTargetImage(self):
+        """Handle Open Target Image action."""
         dialog = QFileDialog(self)
-        dialog.setWindowTitle("Choose an image to warp")
+        dialog.setWindowTitle("Choose a target (control) image")
         dialog.setDirectory(StosWindow.imagedirname)
         dialog.setNameFilter("All files (*.*)")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -756,12 +817,21 @@ class StosWindow(PyreWindowBase):
                 if config is not None:
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
-                    config.LoadWarpedImage(filename)
+                    config.LoadTargetImage(filename)
+                    mask_path = (
+                        None if self._settings.stos.target_image is None
+                        else self._settings.stos.target_image.mask_fullpath)
+                    self._settings.stos.target_image = ImageAndMaskPath(
+                        image_fullpath=filename,
+                        mask_fullpath=mask_path)
+                    StosWindow.update_window_titles(self._settings, self._window_manager)
 
-    def onOpenFixedImageMask(self):
-        """Handle Open Fixed Image Mask action"""
+    onOpenWarpedImage = onOpenTargetImage
+
+    def onOpenSourceImageMask(self):
+        """Handle Open Source Image Mask action."""
         dialog = QFileDialog(self)
-        dialog.setWindowTitle("Choose a mask for the fixed image")
+        dialog.setWindowTitle("Choose a mask for the source image")
         dialog.setDirectory(StosWindow.imagedirname)
         dialog.setNameFilter("All files (*.*)")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -775,10 +845,12 @@ class StosWindow(PyreWindowBase):
                     StosWindow.imagedirname = os.path.dirname(filename)
                     config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)
 
-    def onOpenWarpedImageMask(self):
-        """Handle Open Warped Image Mask action"""
+    onOpenFixedImageMask = onOpenSourceImageMask
+
+    def onOpenTargetImageMask(self):
+        """Handle Open Target Image Mask action."""
         dialog = QFileDialog(self)
-        dialog.setWindowTitle("Choose a mask for the warped image")
+        dialog.setWindowTitle("Choose a mask for the target image")
         dialog.setDirectory(StosWindow.imagedirname)
         dialog.setNameFilter("All files (*.*)")
         dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
@@ -791,6 +863,8 @@ class StosWindow(PyreWindowBase):
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
                     config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)
+
+    onOpenWarpedImageMask = onOpenTargetImageMask
 
     def onOpenStos(self):
         """Handle Open Stos File action"""
@@ -881,11 +955,13 @@ class StosWindow(PyreWindowBase):
         super().onExit()
 
     @staticmethod
+    @inject
     def loadStos(filename: str,
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
                      StosContainer.transform_controller],
                  settings: AppSettings = Provide[IContainer.settings],
+                 window_manager: IWindowManager = Provide[IContainer.window_manager],
                  browser_folder: str | None = None,
                  browser_flat_manual: bool = False,
                  browser_basename: str | None = None) -> LoadStosResult | None:
@@ -904,8 +980,8 @@ class StosWindow(PyreWindowBase):
                                                           mask_fullpath=load_result.target.mask_fullpath)
             stos_config = pyre.state.get_current_stos_config()
             if stos_config is not None:
-                from pyre.stos_registration import resolve_warped_and_fixed_image_data, sync_stos_registration_roles
-                warped, fixed = resolve_warped_and_fixed_image_data(
+                from pyre.stos_registration import resolve_source_and_target_image_data, sync_stos_registration_roles
+                warped, fixed = resolve_source_and_target_image_data(
                     image_loader._image_manager,  # type: ignore[attr-defined]
                     ViewType.Source.value,
                     ViewType.Target.value,
@@ -916,6 +992,7 @@ class StosWindow(PyreWindowBase):
                 )
                 sync_stos_registration_roles(stos_config, warped, fixed)
 
+            StosWindow.update_window_titles(settings, window_manager)
             return load_result
 
         except Exception as e:
@@ -930,7 +1007,7 @@ class StosWindow(PyreWindowBase):
         if config is None:
             QMessageBox.warning(self, "Save warped image", "No STOS session is open.")
             return
-        if config.FixedImageViewModel is None or config.WarpedImageViewModel is None:
+        if config.SourceImageViewModel is None or config.TargetImageViewModel is None:
             QMessageBox.warning(
                 self,
                 "Save warped image",
@@ -960,10 +1037,10 @@ class StosWindow(PyreWindowBase):
         self.filename = os.path.basename(fullpath)
         config.OutputImageFullPath = fullpath  # type: ignore[attr-defined]
 
-        fixed_shape = tuple(int(v) for v in config.FixedImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
-        warped_image = config.WarpedImageViewModel.Image  # type: ignore[attr-defined]
+        source_shape = tuple(int(v) for v in config.SourceImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
+        target_image = config.TargetImageViewModel.Image  # type: ignore[attr-defined]
         transform = config.Transform
-        self._submit_async_warped_save(fullpath, transform, fixed_shape, warped_image)
+        self._submit_async_warped_save(fullpath, transform, source_shape, target_image)
 
     def _submit_async_warped_save(
             self,
@@ -1149,6 +1226,8 @@ class StosWindow(PyreWindowBase):
 
             if initiator is not None:
                 initiator._settings.stos.stos_filename = saved_path
+                StosWindow.update_window_titles(
+                    initiator._settings, initiator._window_manager)
             if cls._folder_browser is not None:
                 cls._folder_browser.rescan()
                 cls._folder_browser.set_current_file(saved_path)

@@ -12,7 +12,11 @@ from nornir_imageregistration.settings import SliceToSliceMethod
 from nornir_imageregistration.settings.stos_brute import StosBruteSettings
 
 from pyre.settings.app import AppSettings, GridRefineDefaults
-from pyre.ui.windows.refine_grid_settings_dialog import RefineGridSettingsDialog
+from pyre.ui.windows.refine_grid_settings_dialog import (
+    ConvertToGridDialog,
+    GridDivisionMode,
+    RefineGridSettingsDialog,
+)
 from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
 
 
@@ -120,6 +124,35 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
         self.assertEqual(512, settings.stos.grid_refine.cell_size)
         self.assertEqual(256, settings.stos.grid_refine.grid_spacing)
         self.assertEqual(8, settings.stos.grid_refine.num_iterations)
+
+    def test_convert_dialog_spacing_mode(self) -> None:
+        dlg = ConvertToGridDialog()
+        RefineGridSettingsDialog._set_combo_value(dlg._spacing_y_ctrl, 256)
+        RefineGridSettingsDialog._set_combo_value(dlg._spacing_x_ctrl, 384)
+        dlg._accept_spacing()
+        result = dlg.division_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(GridDivisionMode.SPACING, result.mode)
+        self.assertEqual(256, result.spacing_y)
+        self.assertEqual(384, result.spacing_x)
+
+    def test_convert_dialog_dims_mode(self) -> None:
+        dlg = ConvertToGridDialog()
+        dlg._dims_rows_ctrl.setValue(10)
+        dlg._dims_cols_ctrl.setValue(12)
+        dlg._accept_dims()
+        result = dlg.division_result
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(GridDivisionMode.DIMS, result.mode)
+        self.assertEqual(10, result.dims_rows)
+        self.assertEqual(12, result.dims_cols)
+
+    def test_grid_division_settings_cancelled(self) -> None:
+        with patch.object(ConvertToGridDialog, "exec", return_value=QDialog.DialogCode.Rejected):
+            result = ConvertToGridDialog.GetGridDivisionSettings()
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

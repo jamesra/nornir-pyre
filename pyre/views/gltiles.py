@@ -59,7 +59,7 @@ def _tile_grid_points(tile_bounding_rect: nornir_imageregistration.Rectangle,
     h = int(tile_bounding_rect.Height)
     w = int(tile_bounding_rect.Width)
 
-    # WarpedCornersO = [[y, x],
+    # target_corners_o = [[y, x],
     #                   [y, x + w, ],
     #                   [y + h, x],
     #                   [y + h, x + w]]
@@ -76,9 +76,9 @@ def _tile_grid_points(tile_bounding_rect: nornir_imageregistration.Rectangle,
 
     # for xtemp in range(0, w + 1, xstep):
     # for ytemp in range(0, h + 1, ystep):
-    # WarpedCorners.append([ytemp + y, xtemp + x])
+    # target_corners.append([ytemp + y, xtemp + x])
 
-    # WarpedCorners = np.array(WarpedCorners, dtype=np.float32)
+    # target_corners = np.array(target_corners, dtype=np.float32)
 
     return warped_corners
 
@@ -177,7 +177,8 @@ def _merge_point_pairs_with_transform(points_a: NDArray[np.floating],
     :return:
     """
 
-    # This is a mess.  Transforms use the terminology Fixed & Warped to describe themselves.  The transform function moves the warped points into fixed space.
+    # Transforms use source/target terminology in Pyre; nornir APIs may still say warped/fixed.
+    # The transform maps target-space points into source space.
     points_b = transform_points
     if len(points_a) > 0 and len(points_b) > 0:
         all_point_pairs = np.vstack([points_a, points_b])
@@ -563,10 +564,17 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                         grid_coords: tuple[int, int],
                         texture_size: tuple[int, int],
                         image_space: Space,
-                        cached_entry: TileGLObjects | None = None):
+                        cached_entry: TileGLObjects | None = None,
+                        force_static_quads: bool = False):
+    """Build CPU tile mesh (Delaunay CP mesh or static quad).
+
+    :param force_static_quads: When True, emit identity tile quads even for mesh/grid
+        transforms. Used for Target panels and standalone Source panels so moving
+        TargetPoints cannot fold the displayed image.
+    """
     from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
 
-    if is_rigid_transform(transform):
+    if force_static_quads or is_rigid_transform(transform):
         tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
         verts, indices = _rigid_tile_quad_render_data(tile_bounding_rect, image_space)
         return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
@@ -637,10 +645,12 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
                          texture_size: tuple[int, int],
                          image_space: Space,
                          get_or_create_tile_globjects: Callable[[int, int], TileGLObjects | None],
-                         shared_cpu_entry: 'TileMeshCpuEntry | None' = None):
+                         shared_cpu_entry: 'TileMeshCpuEntry | None' = None,
+                         force_static_quads: bool = False):
     """Create/Update the GL buffers for a given tile.
     :param get_or_create_tile_globjects: Function to get or create the TileGLObjects for a tile
     :param shared_cpu_entry: Optional precomputed CPU mesh from TileMeshCpuCache
+    :param force_static_quads: Prefer identity quads when rebuilding without a shared entry
     """
 
     ix, iy = grid_coords
@@ -653,8 +663,9 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
             apply_tile_mesh_cpu(render_data, shared_cpu_entry)
             return
 
-        from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
-        entry = build_tile_mesh_cpu(transform, grid_coords, texture_size, image_space, cached_entry=render_data)
+        entry = build_tile_mesh_cpu(
+            transform, grid_coords, texture_size, image_space,
+            cached_entry=render_data, force_static_quads=force_static_quads)
         apply_tile_mesh_cpu(render_data, entry)
 
 

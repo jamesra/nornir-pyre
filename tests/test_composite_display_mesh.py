@@ -17,6 +17,7 @@ from pyre.views.composite_display import (
     composite_control_point_draw_rows,
     composite_tile_cull_rect,
     display_lookat_for_composite,
+    lookat_from_display_position,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
 )
@@ -72,17 +73,19 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         roundtrip = np.squeeze(self.controller.Transform(pair.source.reshape(1, 2)))
         np.testing.assert_allclose(roundtrip, pair.target, rtol=1e-4, atol=1e-3)
 
-    def test_composite_controlpointmap_uses_display_fixed_positions(self) -> None:
+    def test_composite_controlpointmap_uses_display_source_positions(self) -> None:
         cmap = ControlPointMap(self.controller, Space.Source, view_type=ViewType.Composite)
-        expected = np.asarray(self.controller.Transform(self.controller.TargetPoints), dtype=np.float64)
+        expected = np.asarray(self.controller.Transform(self.controller.SourcePoints), dtype=np.float64)
         np.testing.assert_allclose(cmap.points, expected, atol=1e-10)
+        wrong = np.asarray(self.controller.Transform(self.controller.TargetPoints), dtype=np.float64)
+        self.assertFalse(np.allclose(cmap.points, wrong, atol=1e-3))
 
-    def test_composite_control_point_draw_rows_transforms_fixed_columns(self) -> None:
+    def test_composite_control_point_draw_rows_transforms_source_columns(self) -> None:
         rows = composite_control_point_draw_rows(self.controller, Space.Source)
         self.assertIsNotNone(rows)
         assert rows is not None
-        expected = np.asarray(self.controller.Transform(self.controller.TargetPoints), dtype=np.float64)
-        np.testing.assert_allclose(rows[:, 0:2], expected, atol=1e-10)
+        expected = np.asarray(self.controller.Transform(self.controller.SourcePoints), dtype=np.float64)
+        np.testing.assert_allclose(rows[:, 2:4], expected, atol=1e-10)
 
     def test_rigid_world_point_pair_available(self) -> None:
         rigid = TransformController(
@@ -144,6 +147,43 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         )
         np.testing.assert_allclose(
             target_cull.BottomLeft, display_rect.BottomLeft, rtol=1e-5, atol=1e-5)
+
+
+class TestCompositeRigidGestureCameraRebase(unittest.TestCase):
+    """Ending a composite rigid translate must keep target-display framing."""
+
+    def test_display_lookat_stable_after_ending_translate_gesture(self) -> None:
+        from nornir_imageregistration.transforms import CenteredSimilarity2DTransform
+
+        model = CenteredSimilarity2DTransform(
+            target_offset=(0.0, 0.0),
+            source_rotation_center=(0.0, 0.0),
+            angle=0.0,
+            scalar=1.0,
+        )
+        controller = TransformController(model)
+        camera = _TestCamera(np.array([40.0, 50.0], dtype=np.float64))
+
+        controller.begin_interactive_edit(Space.Source, view_type=ViewType.Composite)
+        display_before = display_lookat_for_composite(camera, controller)
+        controller.Translate(np.array([12.0, -8.0], dtype=np.float64), space=Space.Source)
+
+        # Mimic execute(): capture while frozen, end gesture, rebase lookat.
+        display_frozen = display_lookat_for_composite(camera, controller)
+        np.testing.assert_allclose(display_frozen, display_before, atol=1e-5)
+        controller.end_interactive_edit()
+        camera.lookat = lookat_from_display_position(controller, display_frozen)
+
+        display_after = display_lookat_for_composite(camera, controller)
+        np.testing.assert_allclose(display_after, display_before, atol=1e-4)
+        # Without rebase, live Transform(old lookat) would have jumped with the translate.
+        unbased = _transform_without_rebase(controller, np.array([40.0, 50.0], dtype=np.float64))
+        self.assertFalse(np.allclose(unbased, display_before, atol=1.0))
+
+
+def _transform_without_rebase(
+        controller: TransformController, source_lookat: np.ndarray) -> np.ndarray:
+    return np.squeeze(np.asarray(controller.Transform(source_lookat.reshape(1, 2)), dtype=np.float64))
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
+from enum import Enum
 from typing import NamedTuple, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QHBoxLayout, QGridLayout, QLabel, QSpinBox, QPushButton, QComboBox,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QGroupBox, QVBoxLayout,
 )
 
 import nornir_imageregistration.settings
@@ -21,6 +22,126 @@ class GridSettingsDialogResult(NamedTuple):
         return list(nornir_imageregistration.settings.AngleSearchRange(
             max_angle=getattr(self, 'max_angle', 180),
             angle_step_size=getattr(self, 'angle_step_size', 1.0)).angle_range)
+
+
+class GridDivisionMode(Enum):
+    """How grid division parameters were chosen for convert-to-grid."""
+
+    SPACING = "spacing"
+    DIMS = "dims"
+
+
+class GridDivisionSettingsResult(NamedTuple):
+    """Grid division parameters for rigid/mesh-to-grid conversion."""
+
+    mode: GridDivisionMode
+    spacing_y: int
+    spacing_x: int
+    dims_rows: int
+    dims_cols: int
+
+
+class ConvertToGridDialog(QDialog):
+    """Prompt for grid spacing or grid dimensions when converting to a grid transform."""
+
+    _DEFAULT_SPACINGS: list[int] = [128, 192, 256, 384, 512, 768]
+
+    def __init__(self, parent=None, defaults: GridRefineDefaults | None = None, **kwargs):
+        super().__init__(parent, **kwargs)
+        if defaults is None:
+            defaults = GridRefineDefaults()
+
+        self._result: GridDivisionSettingsResult | None = None
+        self.setWindowTitle("Convert to Grid")
+
+        layout = QVBoxLayout(self)
+
+        spacing_group = QGroupBox("By spacing (distance between control points)", self)
+        spacing_layout = QGridLayout(spacing_group)
+        self._spacing_y_ctrl = QComboBox(spacing_group)
+        self._spacing_x_ctrl = QComboBox(spacing_group)
+        for combo in (self._spacing_y_ctrl, self._spacing_x_ctrl):
+            for value in self._DEFAULT_SPACINGS:
+                combo.addItem(str(value))
+        RefineGridSettingsDialog._set_combo_value(self._spacing_y_ctrl, defaults.grid_spacing)
+        RefineGridSettingsDialog._set_combo_value(self._spacing_x_ctrl, defaults.grid_spacing)
+        spacing_layout.addWidget(QLabel("Y spacing", spacing_group), 0, 0)
+        spacing_layout.addWidget(self._spacing_y_ctrl, 0, 1)
+        spacing_layout.addWidget(QLabel("X spacing", spacing_group), 1, 0)
+        spacing_layout.addWidget(self._spacing_x_ctrl, 1, 1)
+        self._convert_spacing_btn = QPushButton("Convert by spacing", spacing_group)
+        self._convert_spacing_btn.clicked.connect(self._accept_spacing)
+        spacing_layout.addWidget(self._convert_spacing_btn, 2, 0, 1, 2)
+        layout.addWidget(spacing_group)
+
+        dims_group = QGroupBox("By dimensions (number of grid points)", self)
+        dims_layout = QGridLayout(dims_group)
+        self._dims_rows_ctrl = QSpinBox(dims_group)
+        self._dims_rows_ctrl.setMinimum(2)
+        self._dims_rows_ctrl.setMaximum(512)
+        self._dims_rows_ctrl.setValue(8)
+        self._dims_cols_ctrl = QSpinBox(dims_group)
+        self._dims_cols_ctrl.setMinimum(2)
+        self._dims_cols_ctrl.setMaximum(512)
+        self._dims_cols_ctrl.setValue(8)
+        dims_layout.addWidget(QLabel("Rows (Y)", dims_group), 0, 0)
+        dims_layout.addWidget(self._dims_rows_ctrl, 0, 1)
+        dims_layout.addWidget(QLabel("Columns (X)", dims_group), 1, 0)
+        dims_layout.addWidget(self._dims_cols_ctrl, 1, 1)
+        self._convert_dims_btn = QPushButton("Convert by dimensions", dims_group)
+        self._convert_dims_btn.clicked.connect(self._accept_dims)
+        dims_layout.addWidget(self._convert_dims_btn, 2, 0, 1, 2)
+        layout.addWidget(dims_group)
+
+        cancel_btn = QPushButton("Cancel", self)
+        cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(cancel_btn)
+
+        layout.setContentsMargins(15, 15, 15, 15)
+
+    def _accept_spacing(self) -> None:
+        self._result = GridDivisionSettingsResult(
+            mode=GridDivisionMode.SPACING,
+            spacing_y=int(self._spacing_y_ctrl.currentText()),
+            spacing_x=int(self._spacing_x_ctrl.currentText()),
+            dims_rows=0,
+            dims_cols=0,
+        )
+        self.accept()
+
+    def _accept_dims(self) -> None:
+        self._result = GridDivisionSettingsResult(
+            mode=GridDivisionMode.DIMS,
+            spacing_y=0,
+            spacing_x=0,
+            dims_rows=self._dims_rows_ctrl.value(),
+            dims_cols=self._dims_cols_ctrl.value(),
+        )
+        self.accept()
+
+    @property
+    def division_result(self) -> GridDivisionSettingsResult | None:
+        return self._result
+
+    @staticmethod
+    def GetGridDivisionSettings(
+            parent: Optional[QWidget] = None,
+            app_settings: AppSettings | None = None,
+    ) -> Optional[GridDivisionSettingsResult]:
+        """Prompt for grid spacing or dimensions when converting to a grid transform."""
+        defaults = app_settings.stos.grid_refine if app_settings is not None else None
+        dlg = ConvertToGridDialog(parent, defaults=defaults)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        result = dlg.division_result
+        if result is None:
+            return None
+        if app_settings is not None and result.mode == GridDivisionMode.SPACING:
+            app_settings.stos.grid_refine = GridRefineDefaults(
+                cell_size=result.spacing_y,
+                grid_spacing=result.spacing_y,
+            )
+        return result
 
 
 class RefineGridSettingsDialog(QDialog):
@@ -52,11 +173,14 @@ class RefineGridSettingsDialog(QDialog):
     def angle_step_size(self) -> float:
         return self.angle_step_size_ctrl.value()
 
-    def __init__(self, parent=None, defaults: GridRefineDefaults | None = None, **kwargs):
+    def __init__(self, parent=None, defaults: GridRefineDefaults | None = None,
+                 conversion_only: bool = False, **kwargs):
         super(RefineGridSettingsDialog, self).__init__(parent, **kwargs)
 
         if defaults is None:
             defaults = GridRefineDefaults()
+
+        self._conversion_only = conversion_only
 
         # Create the main layout
         main_layout = QHBoxLayout(self)
@@ -73,7 +197,8 @@ class RefineGridSettingsDialog(QDialog):
         blank = QWidget(panel)
 
         # Create the labels
-        title = QLabel("Refine Grid Settings", panel)
+        title_text = "Grid Division Settings" if conversion_only else "Refine Grid Settings"
+        title = QLabel(title_text, panel)
         cell_size_label = QLabel("Cell Size", panel)
         grid_spacing_label = QLabel("Grid Spacing", panel)
         iterations_label = QLabel("# of Iterations", panel)
@@ -120,24 +245,36 @@ class RefineGridSettingsDialog(QDialog):
         grid_layout.addWidget(self.cell_size_ctrl, 1, 1)
         grid_layout.addWidget(grid_spacing_label, 2, 0)
         grid_layout.addWidget(self.cell_spacing_ctrl, 2, 1)
-        grid_layout.addWidget(iterations_label, 3, 0)
-        grid_layout.addWidget(self.iterations_ctrl, 3, 1)
-        grid_layout.addWidget(max_angle_label, 4, 0)
-        grid_layout.addWidget(self.max_angle_ctrl, 4, 1)
-        grid_layout.addWidget(angle_step_size_label, 5, 0)
-        grid_layout.addWidget(self.angle_step_size_ctrl, 5, 1)
-        grid_layout.addWidget(self.ok_btn, 6, 0)
-        grid_layout.addWidget(self.cancel_btn, 6, 1)
+        next_row = 3
+        if not conversion_only:
+            grid_layout.addWidget(iterations_label, next_row, 0)
+            grid_layout.addWidget(self.iterations_ctrl, next_row, 1)
+            next_row += 1
+            grid_layout.addWidget(max_angle_label, next_row, 0)
+            grid_layout.addWidget(self.max_angle_ctrl, next_row, 1)
+            next_row += 1
+            grid_layout.addWidget(angle_step_size_label, next_row, 0)
+            grid_layout.addWidget(self.angle_step_size_ctrl, next_row, 1)
+            next_row += 1
+        else:
+            iterations_label.hide()
+            self.iterations_ctrl.hide()
+            max_angle_label.hide()
+            self.max_angle_ctrl.hide()
+            angle_step_size_label.hide()
+            self.angle_step_size_ctrl.hide()
+        grid_layout.addWidget(self.ok_btn, next_row, 0)
+        grid_layout.addWidget(self.cancel_btn, next_row, 1)
 
         # Set the stretch factors for the grid
         grid_layout.setColumnStretch(0, 1)
-        grid_layout.setRowStretch(6, 1)
+        grid_layout.setRowStretch(next_row, 1)
 
         # Set the layout margins
         main_layout.setContentsMargins(15, 15, 15, 15)
 
         # Set window title
-        self.setWindowTitle("Refine Grid Settings")
+        self.setWindowTitle(title_text)
 
     @staticmethod
     def _set_combo_value(combo: QComboBox, value: int) -> None:

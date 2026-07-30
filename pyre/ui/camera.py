@@ -94,6 +94,17 @@ class Camera(IReadOnlyCamera):
         del aspect  # Kept for call-site compatibility; size is fully determined by window_size / scale.
         return self._window_size / scale
 
+    def pan_by_cursor_motion(
+            self,
+            prev_y: float,
+            prev_x: float,
+            curr_y: float,
+            curr_x: float) -> None:
+        """Pan so the world point under the cursor is unchanged between two screen positions."""
+        before = self.ImageCoordsForMouse(prev_y, prev_x)
+        after = self.ImageCoordsForMouse(curr_y, curr_x)
+        self.lookat = self.lookat + (before - after)
+
     def pan_by_screen_delta(
             self,
             dx: float,
@@ -101,9 +112,11 @@ class Camera(IReadOnlyCamera):
             width: int,
             height: int) -> None:
         """Pan the camera so content follows a screen-space drag of (dx, dy) pixels."""
-        image_dx = (float(dx) / width) * self.visible_world_width
-        image_dy = (float(dy) / height) * self.visible_world_height
-        self.lookat = (self.y - image_dy, self.x - image_dx)
+        del width, height  # Use window_size so pan matches ImageCoordsForMouse.
+        scale = self._scale
+        if scale == 0.0:
+            return
+        self.lookat = (self.y - float(dy) / scale, self.x - float(dx) / scale)
 
     @property
     def visible_world_size(self) -> NDArray[np.floating]:
@@ -264,12 +277,18 @@ class Camera(IReadOnlyCamera):
             win_height: int) -> NDArray[np.floating]:
         """Build an orthographic view_proj for an alternate lookat without mutating camera state."""
         saved_lookat = self._lookat
+        saved_window_size = np.array(self._window_size, copy=True)
+        saved_view_size = np.array(self._view_size, copy=True)
+        saved_aspect = self._aspect
         self._lookat = np.asarray(lookat, dtype=float)
         try:
             self.focus(win_width, win_height)
             return np.copy(self._view_proj)
         finally:
             self._lookat = saved_lookat
+            self._window_size = saved_window_size
+            self._view_size = saved_view_size
+            self._aspect = saved_aspect
 
     def focus(self, win_width: int, win_height: int):
         self.window_size = (win_height, win_width)

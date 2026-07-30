@@ -134,11 +134,15 @@ class ImageTransformView(IImageTransformView):
                  transform_controller: TransformController | None = None,
                  *,
                  eager_tile_meshes: bool = False,
+                 warp_into_target_display: bool = False,
                  ):
         """
         Constructor
         :param imageviewmodel image_view_model: Textures for image
         :param transform transform_controller: nornir_imageregistration transform
+        :param warp_into_target_display: When True (composite source FBO), build a
+            deformable mesh so the source image is drawn in target display space.
+            Target images and standalone Source panels use static tile quads.
         """
         self._gl_funcs = gl_funcs
         self._activate_context = activate_context
@@ -146,6 +150,7 @@ class ImageTransformView(IImageTransformView):
         self._built_mesh_tiles = set()
         self._lazy_mesh_pending_repaint = False
         self._eager_tile_meshes = eager_tile_meshes
+        self._warp_into_target_display = warp_into_target_display
         self._image_space = space
         self._rendercache = RenderCache()
         self._image_viewmodel = image_view_model  # type: ignore[assignment]
@@ -173,14 +178,26 @@ class ImageTransformView(IImageTransformView):
             return
         self.update_all_tile_buffers()
 
+    def _use_static_tile_quads(self) -> bool:
+        """True when this view draws the image in native space (no control-point warp mesh)."""
+        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+            return True
+        tc = self._transform_controller
+        if tc is not None and tc.display_strategy.uses_static_tile_quads():
+            return True
+        # Target image is always native target coordinates.
+        if self._image_space == Space.Target:
+            return True
+        # Source image warps into target only for the composite source FBO.
+        if self._image_space == Space.Source and not self._warp_into_target_display:
+            return True
+        return False
+
     def _uses_lazy_mesh_build(self) -> bool:
         """True when tile meshes should be built incrementally for the visible viewport."""
         if self._eager_tile_meshes:
             return False
-        tc = self._transform_controller
-        if tc is not None and tc.display_strategy.uses_static_tile_quads():
-            return False
-        if self.transform is not None and gltiles.is_rigid_transform(self.transform):
+        if self._use_static_tile_quads():
             return False
         return True
 
@@ -204,7 +221,8 @@ class ImageTransformView(IImageTransformView):
             self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
             self._image_space,
             get_or_create_tile_globjects=self.get_or_create_tile_globjects,
-            shared_cpu_entry=cpu_entry)
+            shared_cpu_entry=cpu_entry,
+            force_static_quads=self._use_static_tile_quads())
         self._built_mesh_tiles.add(grid_coords)
 
     def _ensure_visible_tile_meshes(
@@ -271,10 +289,7 @@ class ImageTransformView(IImageTransformView):
             hint = tc.display_strategy.on_model_changed(interactive=True)
             if hint == TileRefreshHint.NONE:
                 return
-        uses_quads = (
-            tc is not None
-            and tc.display_strategy.uses_static_tile_quads()
-        ) or (self.transform is not None and gltiles.is_rigid_transform(self.transform))
+        uses_quads = self._use_static_tile_quads()
         if uses_quads:
             needs_rigid_init = not self._tile_render_data
             if not needs_rigid_init:
@@ -293,10 +308,10 @@ class ImageTransformView(IImageTransformView):
         """Incremental tile patch update for control point drag."""
         if not self._gl_initialized:
             return
+        if self._use_static_tile_quads():
+            return
         hint = transform_controller.display_strategy.on_point_moved(indices)
         if hint != TileRefreshHint.INCREMENTAL:
-            return
-        if self.transform is not None and transform_controller.display_strategy.uses_static_tile_quads():
             return
         self.update_tiles_for_point_indices(indices)
 
@@ -311,7 +326,8 @@ class ImageTransformView(IImageTransformView):
         cache = self._transform_controller.tile_mesh_cache
         vm_id = self._view_model_cache_id()
         entry = cache.get(vm_id, self._image_space, grid_coords)
-        if entry is not None:
+        want_static = self._use_static_tile_quads()
+        if entry is not None and entry.is_rigid_quad == want_static:
             return entry
         render_data = self.get_or_create_tile_globjects(grid_coords[0], grid_coords[1])
         entry = gltiles.build_tile_mesh_cpu(
@@ -319,7 +335,8 @@ class ImageTransformView(IImageTransformView):
             grid_coords,
             self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
             self._image_space,
-            cached_entry=render_data)
+            cached_entry=render_data,
+            force_static_quads=want_static)
         cache.put(vm_id, self._image_space, grid_coords, entry)
         return entry
 
@@ -345,6 +362,8 @@ class ImageTransformView(IImageTransformView):
         if visible is not None:
             tile_coords &= visible
 
+        self._transform_controller.tile_mesh_cache.invalidate_tiles(tile_coords)
+
         with timed(f'update_tiles_for_points n={len(tile_coords)}'):
             for grid_coords in tile_coords:
                 gltiles._update_tile_buffers(
@@ -353,7 +372,8 @@ class ImageTransformView(IImageTransformView):
                     self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
                     self._image_space,
                     get_or_create_tile_globjects=self.get_or_create_tile_globjects,
-                    shared_cpu_entry=None)
+                    shared_cpu_entry=None,
+                    force_static_quads=self._use_static_tile_quads())
 
     def update_all_tile_buffers(self, visible_rect: nornir_imageregistration.Rectangle | None = None):
         """Update the buffers for all tiles in the image viewmodel (or visible subset)."""
@@ -389,7 +409,8 @@ class ImageTransformView(IImageTransformView):
                                                  self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
                                                  self._image_space,
                                                  get_or_create_tile_globjects=self.get_or_create_tile_globjects,
-                                                 shared_cpu_entry=cpu_entry)
+                                                 shared_cpu_entry=cpu_entry,
+                                                 force_static_quads=self._use_static_tile_quads())
                     self._built_mesh_tiles.add(grid_coords)
                     if grid_coords in unused_grid_coords:
                         unused_grid_coords.remove(grid_coords)
@@ -467,7 +488,7 @@ class ImageTransformView(IImageTransformView):
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
              show_mesh_lines: bool = False,
-             rigid_composite_fixed_align: bool = False,
+             rigid_composite_source_align: bool = False,
              view_type: ViewType | None = None):
         """
         Draw the image in either source (fixed) or target (warped) space
@@ -487,7 +508,7 @@ class ImageTransformView(IImageTransformView):
                                   space=space,
                                   bounding_box=bounding_box,
                                   show_mesh_lines=show_mesh_lines,
-                                  rigid_composite_fixed_align=rigid_composite_fixed_align,
+                                  rigid_composite_source_align=rigid_composite_source_align,
                                   view_type=view_type)
 
     def _draw_imageviewmodel(self,
@@ -496,7 +517,7 @@ class ImageTransformView(IImageTransformView):
                              space: pyre.Space,
                              bounding_box: nornir_imageregistration.Rectangle | None = None,
                              show_mesh_lines: bool = False,
-                             rigid_composite_fixed_align: bool = False,
+                             rigid_composite_source_align: bool = False,
                              view_type: ViewType | None = None):
 
         if image_viewmodel is None:
@@ -525,23 +546,23 @@ class ImageTransformView(IImageTransformView):
         draw_state = tc.resolve_draw_state(
             image_space=self._image_space,
             view_type=view_type,
-            composite_fixed_align=rigid_composite_fixed_align,
+            composite_source_align=rigid_composite_source_align,
             tween=tween,
         )
         use_rigid_path = draw_state.use_rigid_path
         rigid_forward = draw_state.source_to_target
         rigid_inverse = draw_state.target_to_source
-        rigid_native_is_warped = draw_state.rigid_native_is_warped
-        rigid_composite_align = draw_state.rigid_fixed_warped_into_target
+        rigid_native_is_target = draw_state.rigid_native_is_target
+        rigid_source_in_target_display = draw_state.rigid_source_in_target_display
         overlay = draw_state.rigid_overlay
         if overlay is not None:
             rigid_interactive_native_shift = overlay.interactive_native_shift
-            rigid_warped_display_matrix = overlay.warped_display_matrix
-            rigid_fixed_display_matrix = overlay.fixed_display_matrix
+            rigid_source_display_matrix = overlay.source_display_matrix
+            rigid_target_display_matrix = overlay.target_display_matrix
         else:
             rigid_interactive_native_shift = np.zeros(2, dtype=np.float32)
-            rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
-            rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
+            rigid_source_display_matrix = np.eye(3, dtype=np.float32)
+            rigid_target_display_matrix = np.eye(3, dtype=np.float32)
 
         cull_rect = bounding_box
         if view_type == ViewType.Composite:
@@ -549,7 +570,7 @@ class ImageTransformView(IImageTransformView):
             # bounds do not map reliably to per-layer native tile indices for mesh/grid STOS.
             cull_rect = None
         elif (
-                rigid_composite_fixed_align
+                rigid_composite_source_align
                 and self._image_space == Space.Source
                 and bounding_box is not None
                 and use_rigid_path
@@ -609,11 +630,11 @@ class ImageTransformView(IImageTransformView):
                                                 use_rigid_path=use_rigid_path,
                                                 rigid_source_to_target=rigid_forward,
                                                 rigid_target_to_source=rigid_inverse,
-                                                rigid_native_is_warped=rigid_native_is_warped,
-                                                rigid_fixed_warped_into_target=rigid_composite_align,
+                                                rigid_native_is_target=rigid_native_is_target,
+                                                rigid_source_in_target_display=rigid_source_in_target_display,
                                                 rigid_interactive_native_shift=rigid_interactive_native_shift,
-                                                rigid_warped_display_matrix=rigid_warped_display_matrix,
-                                                rigid_fixed_display_matrix=rigid_fixed_display_matrix)
+                                                rigid_source_display_matrix=rigid_source_display_matrix,
+                                                rigid_target_display_matrix=rigid_target_display_matrix)
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

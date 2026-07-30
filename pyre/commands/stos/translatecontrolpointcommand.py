@@ -17,6 +17,8 @@ from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.container import IContainer
+from pyre.selection_event_data import PointPair
+from pyre.views.gltiles import is_rigid_transform
 
 
 class TranslateControlPointCommand(NavigationCommandBase):
@@ -25,7 +27,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
     _selected_point_set: ObservableSet[int]  # The indices of the selected points
     _command_points: set[int]  # Points under mouse when command was triggered
     _space: Space
-    _translate_origin: NDArray[np.floating]
+    _translate_origin: NDArray[np.floating] | None
     _original_points: NDArray[np.floating]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
@@ -58,8 +60,8 @@ class TranslateControlPointCommand(NavigationCommandBase):
                          camera=camera, bounds=bounds,
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
-        mouse_position = self._mouse_position_history[space]
-        self._translate_origin = mouse_position
+        # Defer origin until the first motion so a stale shared mouse history cannot jump points.
+        self._translate_origin = None
         self._selected_point_set = selected_points
 
         if translate_all:
@@ -76,6 +78,33 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def __str__(self):
         return "TranslateControlPointCommand"
+
+    def _world_point_for_translate(self, point_pair: PointPair) -> NDArray[np.floating]:
+        """Return world coords for CP drag delta in this panel's command space."""
+        model = self._transform_controller.TransformModel
+        if (
+                self._view_type() == ViewType.Composite
+                and model is not None
+                and not is_rigid_transform(model)
+        ):
+            return point_pair.target
+        return point_pair.source if self.space == Space.Source else point_pair.target
+
+    def _edit_space_for_translate(self) -> Space:
+        """Space passed to MovePoint for this drag.
+
+        Composite mesh/grid glyphs are in target display space. Grid transforms only
+        edit TargetPoints, so composite drags must update Target even though the
+        panel command space is Source.
+        """
+        model = self._transform_controller.TransformModel
+        if (
+                self._view_type() == ViewType.Composite
+                and model is not None
+                and not is_rigid_transform(model)
+        ):
+            return Space.Target
+        return self.space
 
     def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
@@ -102,13 +131,21 @@ class TranslateControlPointCommand(NavigationCommandBase):
         self._width, self._height = self.parent.size().width(), self.parent.size().height()
         point_pair = self.get_world_positions(event)
 
-        world_point = point_pair.source if self.space == Space.Source else point_pair.target
+        world_point = self._world_point_for_translate(point_pair)
+
+        if self._translate_origin is None:
+            self._translate_origin = world_point
+            return
 
         delta = world_point - self._translate_origin
         self._translate_origin = world_point
 
-        new_selected_indicies = self._transform_controller.MovePoint(list(self._selected_point_set), delta[1], delta[0],
-                                                                     space=self.space)
+        new_selected_indicies = self._transform_controller.MovePoint(
+            list(self._selected_point_set),
+            delta[1],
+            delta[0],
+            space=self._edit_space_for_translate(),
+        )
 
         # Update selected points in the UI if indicies have changed
         new_indices_set = set(np.atleast_1d(new_selected_indicies).tolist())
@@ -148,8 +185,12 @@ class TranslateControlPointCommand(NavigationCommandBase):
             delta[0] *= multiplier
             delta[1] *= multiplier
 
-            self._transform_controller.MovePoint(list(self._selected_point_set), delta[1], delta[0],
-                                                 space=self._space)
+            self._transform_controller.MovePoint(
+                list(self._selected_point_set),
+                delta[1],
+                delta[0],
+                space=self._edit_space_for_translate(),
+            )
         return
 
     def activate(self):

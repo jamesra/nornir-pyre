@@ -19,6 +19,10 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.controllers.transformcontroller import TransformController
 from pyre.perf_debug import timed
+from pyre.views.composite_display import (
+    COMPOSITE_SOURCE_CHANNEL_MIX,
+    COMPOSITE_TARGET_CHANNEL_MIX,
+)
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 import pyre.qt_eventmanager
@@ -203,12 +207,16 @@ class CompositeTransformView(IImageTransformView):
         from pyre.views import ImageTransformView
         """Process an add event from the imageviewmodel manager"""
         space_mapping = Space.Source if name == self._source_viewmodel_name else Space.Target
-        view = ImageTransformView(space=space_mapping,
-                                  activate_context=self._activate_context,
-                                  image_view_model=image,
-                                  transform_controller=self._transform_controller,
-                                  gl_funcs=self._gl_funcs,
-                                  eager_tile_meshes=True)
+        view = ImageTransformView(
+            space=space_mapping,
+            activate_context=self._activate_context,
+            image_view_model=image,
+            transform_controller=self._transform_controller,
+            gl_funcs=self._gl_funcs,
+            eager_tile_meshes=True,
+            # Only the source FBO needs a deformable mesh; target stays native quads.
+            warp_into_target_display=(space_mapping == Space.Source),
+        )
         view._repaint_callback = self._repaint_callback
 
         if space_mapping == Space.Source:
@@ -244,7 +252,7 @@ class CompositeTransformView(IImageTransformView):
              default_fbo: int | None = None,
              overlay_viewport_size: tuple[int, int] | None = None,
              show_mesh_lines: bool = False,
-             rigid_composite_fixed_align: bool = False,
+             rigid_composite_source_align: bool = False,
              view_type: ViewType | None = None):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
@@ -289,11 +297,11 @@ class CompositeTransformView(IImageTransformView):
                     gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
                     raise_on_error("after glClear(source) in compositetransformview.draw")
 
-                    # Both sub-views must use Space.Target (tween=1.0) so the source image is warped into
-                    # target space and aligns with the target image in the composite overlay.
-                    self._source_image_view.draw(view_proj, space, fbo_size, bounding_box,
+                    # Source FBO: deformable mesh built in Space.Source (UVs at SourcePoints);
+                    # tween=0 selects TargetPoints so the mapped image lands in target display space.
+                    self._source_image_view.draw(view_proj, Space.Source, fbo_size, bounding_box,
                                                  show_mesh_lines=show_mesh_lines,
-                                                 rigid_composite_fixed_align=True,
+                                                 rigid_composite_source_align=True,
                                                  view_type=ViewType.Composite)
                 finally:
                     gl.glDepthMask(gl.GL_TRUE)
@@ -316,7 +324,8 @@ class CompositeTransformView(IImageTransformView):
                     gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
                     raise_on_error("after glClear(target) in compositetransformview.draw")
 
-                    self._target_image_view.draw(view_proj, space, fbo_size, bounding_box,
+                    # Target FBO: static native quads in target space (not a CP warp mesh).
+                    self._target_image_view.draw(view_proj, Space.Target, fbo_size, bounding_box,
                                                  show_mesh_lines=show_mesh_lines,
                                                  view_type=ViewType.Composite)
                 finally:
@@ -370,8 +379,8 @@ class CompositeTransformView(IImageTransformView):
                                                 source_texture=self._source_frame_buffer.fbo_texture,
                                                 target_texture=self._target_frame_buffer.fbo_texture,
                                                 overlay_type=shaders.OverlayType.Tween,
-                                                source_channel_mix=np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32),
-                                                target_channel_mix=np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32))
+                                                source_channel_mix=COMPOSITE_SOURCE_CHANNEL_MIX,
+                                                target_channel_mix=COMPOSITE_TARGET_CHANNEL_MIX)
                 finally:
                     gl.glDepthMask(gl.GL_TRUE)
                     gl.glEnable(gl.GL_DEPTH_TEST)

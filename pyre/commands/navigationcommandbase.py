@@ -227,9 +227,16 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
         try:
             width, height = self.parent.size().width(), self.parent.size().height()
+            if width > 0 and height > 0:
+                self.camera.window_size = np.array((height, width))
             (y, x) = self.GetCorrectedMousePosition(event, height)
 
             if self._last_mouse_position is None:
+                self._last_mouse_position = (y, x)
+                return
+
+            # Only pan after a right-press established the drag; ignore buttoned moves that arrive first.
+            if not (event.buttons() & Qt.MouseButton.RightButton):
                 self._last_mouse_position = (y, x)
                 return
 
@@ -238,8 +245,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
             self._last_mouse_position = (y, x)
 
-            if event.buttons() & Qt.MouseButton.RightButton:
-                self.camera.pan_by_screen_delta(dx, dy, width, height)
+            self.camera.pan_by_screen_delta(dx, dy, width, height)
 
             # Commenting this block until I have a command to translate control points
             # if event.buttons() & Qt.MouseButton.LeftButton:
@@ -286,13 +292,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 try:
                     point_pair = self.get_world_positions(e)
+                    # ScaleWarpedAboutSourcePoint expects source-space pivot (same as rigid rotate).
+                    source_pivot = np.asarray(point_pair.source, dtype=np.float32)
                     view = self._view_type()
-                    if view == ViewType.Composite:
-                        source_pivot = np.asarray(point_pair.source, dtype=np.float32)
-                    elif self.space == Space.Source:
-                        source_pivot = np.asarray(point_pair.source, dtype=np.float32)
-                    else:
-                        source_pivot = np.asarray(point_pair.target, dtype=np.float32)
 
                     self._transform_controller.begin_interactive_edit(
                         self.space,

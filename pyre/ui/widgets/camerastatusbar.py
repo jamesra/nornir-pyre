@@ -97,10 +97,10 @@ class CameraStatusBar(QStatusBar):
 
     def update_status_bar(self, space: Space, point: tuple[float, float]):
         if space == Space.Source:
-            src_txt = f'Source/Warped: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
+            src_txt = f'Source space: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
             self.setStatusText(src_txt, 0)
         elif space == Space.Target:
-            tgt_txt = f'Target/Fixed: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
+            tgt_txt = f'Target space: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
             self.setStatusText(tgt_txt, 1)
         else:
             raise ValueError("Invalid space")

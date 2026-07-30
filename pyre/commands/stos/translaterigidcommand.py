@@ -21,13 +21,18 @@ from pyre.transform_edit_policy import fixed_image_manipulation_locked
 from pyre.interfaces.viewtype import ViewType
 from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
+from pyre.views.composite_display import (
+    display_lookat_for_composite,
+    lookat_from_display_position,
+)
+from pyre.views.gltiles import is_rigid_transform
 
 
 class ManipulateRigidTransformCommand(NavigationCommandBase):
     """This command takes a selection of control points and adjusts the position"""
 
     _space: Space
-    _translate_origin: NDArray[np.floating]
+    _translate_origin: NDArray[np.floating] | None
     _original_points: NDArray[np.floating]
 
     @property
@@ -65,10 +70,8 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                          camera=camera, bounds=bounds,
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
-        if self._view_type() == ViewType.Composite:
-            self._translate_origin = self._mouse_position_history[Space.Target]
-        else:
-            self._translate_origin = self._mouse_position_history[space]
+        # Defer origin until the first motion so a stale shared mouse history cannot jump the layer.
+        self._translate_origin = None
         self._selected_point_set = selected_points
 
         if not isinstance(self._transform_controller.TransformModel, IRigidTransform):
@@ -109,8 +112,12 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         point_pair = self.get_world_positions(event)
         world_point = self._world_point_for_translate(point_pair)
 
+        if self._translate_origin is None:
+            self._translate_origin = world_point
+            return
+
         delta = world_point - self._translate_origin
-        if self.space != Space.Source:
+        if self.space == Space.Source:
             delta = -delta
 
         self._transform_controller.Translate(delta, space=self.space)
@@ -156,6 +163,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
             delta[0] *= multiplier
             delta[1] *= multiplier
 
+            if self._space == Space.Source:
+                delta[0] = -delta[0]
+                delta[1] = -delta[1]
+
             self._transform_controller.Translate(delta,
                                                  space=self._space)
 
@@ -185,14 +196,41 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     def can_execute(self) -> bool:
         return True
 
+    def _end_interactive_edit_preserving_composite_display(self) -> None:
+        """End the gesture without letting composite view_proj jump onto the source.
+
+        Capture target-display lookat while the translate freeze is still active,
+        clear the gesture, then rebase ``camera.lookat`` so live ``Transform(lookat)``
+        matches that same display point.
+        """
+        display_yx: NDArray[np.floating] | None = None
+        if self._view_type() == ViewType.Composite:
+            model = self._transform_controller.TransformModel
+            if model is not None and is_rigid_transform(model):
+                display_yx = display_lookat_for_composite(
+                    self.camera, self._transform_controller)
+        self._transform_controller.end_interactive_edit()
+        if display_yx is not None:
+            self.camera.lookat = lookat_from_display_position(
+                self._transform_controller, display_yx)
+
     def cancel(self):
+        display_yx: NDArray[np.floating] | None = None
+        if self._view_type() == ViewType.Composite:
+            model = self._transform_controller.TransformModel
+            if model is not None and is_rigid_transform(model):
+                display_yx = display_lookat_for_composite(
+                    self.camera, self._transform_controller)
         self._transform_controller.end_interactive_edit()
         self._transform_controller.TransformModel = self._original_points  # type: ignore[assignment]
+        if display_yx is not None:
+            self.camera.lookat = lookat_from_display_position(
+                self._transform_controller, display_yx)
         super().cancel()
         return
 
     def execute(self):
-        self._transform_controller.end_interactive_edit()
+        self._end_interactive_edit_preserving_composite_display()
         super().execute()
 
     def subscribe_to_parent(self):

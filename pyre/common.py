@@ -31,7 +31,7 @@ from pyre.interfaces.managers.command_history import ICommandHistory
 from pyre.interfaces.viewtype import ViewType
 from pyre.controllers.transformcontroller import TransformController
 from pyre.settings import AppSettings
-from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_warped_and_fixed_image_data
+from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_source_and_target_image_data
 
 
 def SaveRegisteredWarpedImage(
@@ -110,12 +110,16 @@ def stos_image_dims_from_stos_config(
     mapped_dim: list[float] | None = None
     if stos_config is None:
         return control_dim, mapped_dim
-    fixed_vm = getattr(stos_config, "FixedImageViewModel", None)
-    warped_vm = getattr(stos_config, "WarpedImageViewModel", None)
-    if fixed_vm is not None and getattr(fixed_vm, "Image", None) is not None:
-        control_dim = stos_image_dim_from_shape(fixed_vm.Image.shape)
-    if warped_vm is not None and getattr(warped_vm, "Image", None) is not None:
-        mapped_dim = stos_image_dim_from_shape(warped_vm.Image.shape)
+    source_vm = getattr(stos_config, "SourceImageViewModel", None) or getattr(
+        stos_config, "FixedImageViewModel", None
+    )
+    target_vm = getattr(stos_config, "TargetImageViewModel", None) or getattr(
+        stos_config, "WarpedImageViewModel", None
+    )
+    if source_vm is not None and getattr(source_vm, "Image", None) is not None:
+        control_dim = stos_image_dim_from_shape(source_vm.Image.shape)
+    if target_vm is not None and getattr(target_vm, "Image", None) is not None:
+        mapped_dim = stos_image_dim_from_shape(target_vm.Image.shape)
     return control_dim, mapped_dim
 
 
@@ -266,7 +270,7 @@ def RefineRigidTransformLocal(
     target_settings_path = (
         stos_settings.target_image.image_fullpath if stos_settings.target_image is not None else None
     )
-    warped_image, fixed_image = resolve_warped_and_fixed_image_data(
+    warped_image, fixed_image = resolve_source_and_target_image_data(
         image_manager=image_manager,
         source_image_key=source_image_key,
         target_image_key=target_image_key,
@@ -337,7 +341,7 @@ def RotateTranslateWarpedImage(source_image_key: str,
     target_settings_path = (
         stos_settings.target_image.image_fullpath if stos_settings.target_image is not None else None
     )
-    warped_image, fixed_image = resolve_warped_and_fixed_image_data(
+    warped_image, fixed_image = resolve_source_and_target_image_data(
         image_manager=image_manager,
         source_image_key=source_image_key,
         target_image_key=target_image_key,

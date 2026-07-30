@@ -286,6 +286,12 @@ class TransformControllerView:
 
         if display_point_rows is not None:
             self._controlpoint_view.points = display_point_rows
+            try:
+                self._apply_selection_texture(blink_phase)
+                self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)
+            finally:
+                self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
+            return
 
         self._apply_selection_texture(blink_phase)
         self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)

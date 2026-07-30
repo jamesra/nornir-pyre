@@ -1,20 +1,21 @@
 """Map source-space camera state to target display space for composite rendering.
 
-Composite view product default
-------------------------------
-The composite window is for aligning the **warped (green)** section to the fixed
-(purple) reference. User edits should move or deform the warped layer on screen,
-not drag the fixed layer opposite the control points.
+Composite display invariant
+---------------------------
+The composite window uses **target display space** for overlay, camera, and hit-testing.
+
+* **Target (control) layer** — drawn in native target coordinates; static reference.
+* **Source (mapped) layer** — warped into target space via the forward transform;
+  moves/deforms during alignment.
 
 For mesh, grid, and RBF transforms, control-point drags on composite use
-``Space.Source`` command space (fixed anchors / ``TargetPoints``) but glyphs,
-hit-testing, and mouse deltas are resolved in **target display space** so the
-green image follows the cursor. Fixed CP positions are drawn at
-``Transform(fixed_point)`` in that space.
+``Space.Source`` command space but glyphs, hit-testing, and mouse deltas are
+resolved in **target display space** at ``Transform(SourcePoints)``.
 
-Rigid whole-layer translate/rotate on composite is a deliberate exception: the
-purple layer moves during the gesture while green stays frozen
-(``RigidDisplayStrategy``); registration still updates the shared transform.
+Rigid whole-layer translate/rotate on composite uses ``Space.Source`` commands
+(``TranslateWarped`` / source rotation). During the gesture the **target** tile
+layer is frozen and the **source** overlay follows the live registration
+(``RigidDisplayStrategy``).
 """
 
 from __future__ import annotations
@@ -33,6 +34,20 @@ from pyre.selection_event_data import PointPair
 from pyre.space import Space
 from pyre.ui.camera import Camera
 from pyre.views.gltiles import is_rigid_transform
+
+# Overlay shader channel mixes in compositetransformview: source magenta, target green.
+COMPOSITE_SOURCE_CHANNEL_MIX = np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32)
+COMPOSITE_TARGET_CHANNEL_MIX = np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32)
+COMPOSITE_SOURCE_LEGEND_COLOR = "#ff00ff"
+COMPOSITE_TARGET_LEGEND_COLOR = "#00ff00"
+
+
+def composite_legend_rich_text() -> str:
+    """Rich text for the composite view source/target color legend."""
+    return (
+        f'<span style="color:{COMPOSITE_SOURCE_LEGEND_COLOR}">Source</span> '
+        f'<span style="color:{COMPOSITE_TARGET_LEGEND_COLOR}">Target</span>'
+    )
 
 
 def _as_numpy_f64(values: NDArray[np.floating] | object) -> NDArray[np.floating]:
@@ -119,7 +134,7 @@ def forward_for_composite_view(
     """Forward matrix used to couple camera lookat to composite view_proj.
 
     During whole-layer translate gestures the view_proj must not track live
-    registration translation (green is frozen); only shader uniforms update.
+    registration translation (target layer is frozen); only shader uniforms update.
     """
     forward, _ = TextureShader.rigid_matrices_from_transform(model)
     strategy = transform_controller.display_strategy
@@ -163,6 +178,24 @@ def lookat_from_display_position(
 ) -> NDArray[np.floating]:
     """Map a composite display-space (y,x) position back to source-camera lookat."""
     return _transform_single_point(transform_controller.InverseTransform, display_yx)
+
+
+def rebase_composite_camera_after_rigid_gesture(
+        camera: Camera,
+        transform_controller: TransformController,
+) -> None:
+    """Keep composite target-display framing stable when a rigid gesture ends.
+
+    During COMPOSITE_TRANSLATE the view_proj uses the frozen forward matrix while
+    ``camera.lookat`` stays in source space. Clearing the freeze without rebasing
+    makes ``Transform(lookat)`` jump, so the view snaps onto the moved source
+    instead of staying locked to the target reference.
+    """
+    model = transform_controller.TransformModel
+    if model is None or not is_rigid_transform(model):
+        return
+    display_yx = display_lookat_for_composite(camera, transform_controller)
+    camera.lookat = lookat_from_display_position(transform_controller, display_yx)
 
 
 def resolve_composite_display_draw_params(
@@ -264,8 +297,8 @@ def composite_control_point_draw_rows(
     if space != Space.Source:
         return None
     rows = _as_numpy_f64(transform_controller.points).copy()
-    fixed_yx = rows[:, 0:2]
-    rows[:, 0:2] = _as_numpy_f64(transform_controller.Transform(fixed_yx))
+    source_yx = rows[:, 2:4]
+    rows[:, 2:4] = _as_numpy_f64(transform_controller.Transform(source_yx))
     return rows
 
 

@@ -39,16 +39,16 @@ class RigidOverlayState:
     """Optional rigid shader overlay uniforms (identity when model-authoritative)."""
 
     interactive_native_shift: NDArray[np.floating]
-    warped_display_matrix: NDArray[np.floating]
-    fixed_display_matrix: NDArray[np.floating]
+    source_display_matrix: NDArray[np.floating]
+    target_display_matrix: NDArray[np.floating]
 
     @staticmethod
     def identity() -> RigidOverlayState:
         eye = np.eye(3, dtype=np.float32)
         return RigidOverlayState(
             interactive_native_shift=np.zeros(2, dtype=np.float32),
-            warped_display_matrix=eye.copy(),
-            fixed_display_matrix=eye.copy(),
+            source_display_matrix=eye.copy(),
+            target_display_matrix=eye.copy(),
         )
 
 
@@ -59,8 +59,8 @@ class TransformDrawState:
     use_rigid_path: bool
     source_to_target: NDArray[np.floating] | None
     target_to_source: NDArray[np.floating] | None
-    rigid_native_is_warped: bool
-    rigid_fixed_warped_into_target: bool
+    rigid_native_is_target: bool
+    rigid_source_in_target_display: bool
     rigid_overlay: RigidOverlayState | None
     tween: float
 
@@ -99,7 +99,7 @@ class TransformDisplayStrategy(ABC):
             *,
             image_space: Space,
             view_type: ViewType | None,
-            composite_fixed_align: bool,
+            composite_source_align: bool,
             model: nornir_imageregistration.ITransform,
             tween: float,
             interactive_edit_in_progress: bool,
@@ -196,18 +196,18 @@ class RigidDisplayStrategy(TransformDisplayStrategy):
             self,
             *,
             image_space: Space,
-            composite_fixed_align: bool,
+            composite_source_align: bool,
             interactive_edit_in_progress: bool,
             edit_space: Space | None) -> bool:
         """True when this layer should show registration frozen at gesture start."""
         if not interactive_edit_in_progress or edit_space is None:
             return False
         if edit_space == Space.Source:
-            if image_space == Space.Target and not composite_fixed_align:
+            if image_space == Space.Target and not composite_source_align:
                 return True
             return False
         if edit_space == Space.Target:
-            if image_space == Space.Source and not composite_fixed_align:
+            if image_space == Space.Source and not composite_source_align:
                 return True
             return False
         return False
@@ -217,7 +217,7 @@ class RigidDisplayStrategy(TransformDisplayStrategy):
             *,
             image_space: Space,
             view_type: ViewType | None,
-            composite_fixed_align: bool,
+            composite_source_align: bool,
             model: nornir_imageregistration.ITransform,
             tween: float,
             interactive_edit_in_progress: bool,
@@ -228,7 +228,7 @@ class RigidDisplayStrategy(TransformDisplayStrategy):
         fwd, inv = TextureShader.rigid_matrices_from_transform(model)
         if self._use_frozen_registration(
                 image_space=image_space,
-                composite_fixed_align=composite_fixed_align,
+                composite_source_align=composite_source_align,
                 interactive_edit_in_progress=interactive_edit_in_progress,
                 edit_space=edit_space):
             if self._matrix_at_edit_start is not None:
@@ -240,8 +240,8 @@ class RigidDisplayStrategy(TransformDisplayStrategy):
             use_rigid_path=True,
             source_to_target=fwd.astype(np.float32, copy=False),
             target_to_source=inv.astype(np.float32, copy=False),
-            rigid_native_is_warped=image_space == Space.Target,
-            rigid_fixed_warped_into_target=composite_fixed_align,
+            rigid_native_is_target=image_space == Space.Target,
+            rigid_source_in_target_display=composite_source_align,
             rigid_overlay=RigidOverlayState.identity(),
             tween=tween,
         )
@@ -293,7 +293,7 @@ class MeshLikeDisplayStrategy(TransformDisplayStrategy):
             *,
             image_space: Space,
             view_type: ViewType | None,
-            composite_fixed_align: bool,
+            composite_source_align: bool,
             model: nornir_imageregistration.ITransform,
             tween: float,
             interactive_edit_in_progress: bool,
@@ -302,15 +302,15 @@ class MeshLikeDisplayStrategy(TransformDisplayStrategy):
             use_rigid_path=False,
             source_to_target=None,
             target_to_source=None,
-            rigid_native_is_warped=False,
-            rigid_fixed_warped_into_target=False,
+            rigid_native_is_target=False,
+            rigid_source_in_target_display=False,
             rigid_overlay=None,
             tween=tween,
         )
 
     def on_model_changed(self, *, interactive: bool) -> TileRefreshHint:
         if interactive:
-            return TileRefreshHint.FULL
+            return TileRefreshHint.NONE
         return TileRefreshHint.FULL
 
     def on_point_moved(self, indices: Sequence[int]) -> TileRefreshHint:
@@ -369,7 +369,7 @@ def gesture_for_interactive_edit(
     if space == Space.Source:
         if view_type == ViewType.Composite:
             return TransformGesture.COMPOSITE_TRANSLATE
-        return TransformGesture.COMPOSITE_TRANSLATE
+        return TransformGesture.WARPED_TRANSLATE
     if space == Space.Target:
         return TransformGesture.WARPED_TRANSLATE
     return TransformGesture.NONE

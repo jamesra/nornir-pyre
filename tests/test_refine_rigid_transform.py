@@ -130,7 +130,7 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
         )
 
     @patch("pyre.common.stos.SliceToSliceRigidRegistrationWithPreprocessedImages")
-    @patch("pyre.common.resolve_warped_and_fixed_image_data")
+    @patch("pyre.common.resolve_source_and_target_image_data")
     def test_angle_only_locks_scale_and_passes_hint(
             self,
             mock_resolve: MagicMock,
@@ -170,7 +170,7 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
         self.assertAlmostEqual(result.scalar, 1.05)
 
     @patch("pyre.common.stos.SliceToSliceRigidRegistrationWithPreprocessedImages")
-    @patch("pyre.common.resolve_warped_and_fixed_image_data")
+    @patch("pyre.common.resolve_source_and_target_image_data")
     def test_scale_refine_keeps_brute_scalar(
             self,
             mock_resolve: MagicMock,

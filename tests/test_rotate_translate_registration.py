@@ -29,7 +29,7 @@ def _load_stos_registration_module():
 
 
 _stos_registration = _load_stos_registration_module()
-resolve_warped_and_fixed_image_data = _stos_registration.resolve_warped_and_fixed_image_data
+resolve_source_and_target_image_data = _stos_registration.resolve_source_and_target_image_data
 
 
 def _wrap_angle_diff(measured: float, expected: float) -> float:
@@ -101,7 +101,7 @@ class TestResolveWarpedAndFixed(unittest.TestCase):
         manager = _MinimalImageManager()
         manager["Source"] = self._mapped
         manager["Target"] = self._control
-        warped, fixed = resolve_warped_and_fixed_image_data(
+        warped, fixed = resolve_source_and_target_image_data(
             manager,
             "Source",
             "Target",
@@ -136,7 +136,7 @@ class TestRotateTranslateRegistration(unittest.TestCase):
         manager["Target"] = nornir_imageregistration.ImagePermutationHelper(
             self._paths["control_image"], self._paths["control_mask"])
 
-        warped, fixed = resolve_warped_and_fixed_image_data(
+        warped, fixed = resolve_source_and_target_image_data(
             manager,
             "Source",
             "Target",

@@ -13,10 +13,10 @@ from pyre.space import Space
 from pyre.transform_edit_policy import (
     blocks_control_point_translate_action,
     blocks_layer_translate_action,
-    fixed_image_manipulation_locked,
-    fixed_panel_control_points_locked,
-    fixed_panel_hint_message,
+    source_panel_control_points_locked,
+    source_panel_hint_message,
     rigid_rotation_locked,
+    target_panel_manipulation_locked,
 )
 
 
@@ -59,34 +59,34 @@ class TestTransformEditPolicy(unittest.TestCase):
         self.assertFalse(
             rigid_rotation_locked(TransformType.MESH, ViewType.Target))
 
-    def test_fixed_standalone_still_locked_for_rigid(self) -> None:
+    def test_target_standalone_locked_for_rigid(self) -> None:
         self.assertTrue(
-            fixed_image_manipulation_locked(
-                TransformType.RIGID, Space.Source, ViewType.Source))
+            target_panel_manipulation_locked(
+                TransformType.RIGID, Space.Target, ViewType.Target))
         self.assertFalse(
-            fixed_image_manipulation_locked(
+            target_panel_manipulation_locked(
                 TransformType.RIGID, Space.Source, ViewType.Composite))
 
-    def test_blocks_rigid_translate_on_fixed_panel(self) -> None:
+    def test_blocks_rigid_translate_on_target_panel(self) -> None:
         self.assertTrue(
             blocks_layer_translate_action(
-                TransformType.RIGID, Space.Source, ControlPointAction.TRANSLATE, ViewType.Source))
+                TransformType.RIGID, Space.Target, ControlPointAction.TRANSLATE, ViewType.Target))
 
-    def test_allows_mesh_control_point_translate_on_fixed_panel(self) -> None:
+    def test_allows_mesh_control_point_translate_on_source_panel(self) -> None:
         mesh = _mesh()
         self.assertFalse(
             blocks_layer_translate_action(
                 TransformType.MESH, Space.Source, ControlPointAction.TRANSLATE, ViewType.Source))
         self.assertFalse(
-            fixed_panel_control_points_locked(mesh, Space.Source, ViewType.Source))
+            source_panel_control_points_locked(mesh, Space.Source, ViewType.Source))
         self.assertFalse(
             blocks_control_point_translate_action(
                 mesh, Space.Source, ControlPointAction.TRANSLATE, ViewType.Source))
 
-    def test_blocks_grid_control_point_translate_on_fixed_panel(self) -> None:
+    def test_blocks_grid_control_point_translate_on_source_panel(self) -> None:
         grid = _grid()
         self.assertTrue(
-            fixed_panel_control_points_locked(grid, Space.Source, ViewType.Source))
+            source_panel_control_points_locked(grid, Space.Source, ViewType.Source))
         self.assertTrue(
             blocks_control_point_translate_action(
                 grid, Space.Source, ControlPointAction.TRANSLATE, ViewType.Source))
@@ -94,19 +94,19 @@ class TestTransformEditPolicy(unittest.TestCase):
             blocks_control_point_translate_action(
                 grid, Space.Target, ControlPointAction.TRANSLATE, ViewType.Target))
 
-    def test_grid_fixed_panel_hint_mentions_warped_view(self) -> None:
+    def test_grid_source_panel_hint_mentions_target_view(self) -> None:
         grid = _grid()
-        msg = fixed_panel_hint_message(
+        msg = source_panel_hint_message(
             grid, TransformType.GRID, Space.Source, ViewType.Source)
         self.assertIsNotNone(msg)
         assert msg is not None
-        self.assertIn("Warped", msg)
+        self.assertIn("Target", msg)
         self.assertIn("cannot be moved", msg)
 
-    def test_blocks_translate_all_on_fixed_panel_for_grid(self) -> None:
+    def test_blocks_translate_all_on_target_panel_for_grid(self) -> None:
         self.assertTrue(
             blocks_layer_translate_action(
-                TransformType.GRID, Space.Source, ControlPointAction.TRANSLATE_ALL, ViewType.Source))
+                TransformType.GRID, Space.Target, ControlPointAction.TRANSLATE_ALL, ViewType.Target))
 
 
 if __name__ == "__main__":

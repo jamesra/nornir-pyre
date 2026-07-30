@@ -66,7 +66,7 @@ class TestRigidDisplayStrategy(unittest.TestCase):
         state = self.strategy.resolve_draw_state(
             image_space=Space.Source,
             view_type=ViewType.Composite,
-            composite_fixed_align=True,
+            composite_source_align=True,
             model=self.model,
             tween=1.0,
             interactive_edit_in_progress=False,
@@ -78,9 +78,9 @@ class TestRigidDisplayStrategy(unittest.TestCase):
         self.assertTrue(state.use_rigid_path)
         self.assertIsNotNone(state.rigid_overlay)
         np.testing.assert_allclose(
-            state.rigid_overlay.fixed_display_matrix, np.eye(3, dtype=np.float32))
+            state.rigid_overlay.target_display_matrix, np.eye(3, dtype=np.float32))
 
-    def test_warped_frozen_during_composite_source_edit(self) -> None:
+    def test_target_frozen_during_composite_source_edit(self) -> None:
         self.strategy.begin_gesture(TransformGesture.COMPOSITE_TRANSLATE, Space.Source)
         self.strategy.snapshot_edit_matrices(self.model)
         frozen_fwd = self.strategy.matrix_at_edit_start.copy()
@@ -88,7 +88,7 @@ class TestRigidDisplayStrategy(unittest.TestCase):
         state = self.strategy.resolve_draw_state(
             image_space=Space.Target,
             view_type=ViewType.Composite,
-            composite_fixed_align=False,
+            composite_source_align=False,
             model=self.model,
             tween=1.0,
             interactive_edit_in_progress=True,
@@ -123,9 +123,9 @@ class TestTransformEditPolicy(unittest.TestCase):
         self.assertFalse(rigid_rotation_locked(TransformType.RIGID, ViewType.Composite))
         self.assertTrue(rigid_rotation_locked(TransformType.RIGID, ViewType.Target))
 
-    def test_wheel_rotate_locked_on_fixed_panel(self) -> None:
+    def test_wheel_rotate_locked_on_target_panel(self) -> None:
         self.assertTrue(wheel_rotate_locked(
-            TransformType.RIGID, Space.Source, ViewType.Source))
+            TransformType.RIGID, Space.Target, ViewType.Target))
 
 
 class TestMeshLikeStrategy(unittest.TestCase):

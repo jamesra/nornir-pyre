@@ -49,3 +49,13 @@ correct `TransformDrawState` fields.
 - [`gltiles.py`](../pyre/views/gltiles.py) — tile mesh CPU build (quad vs Delaunay)
 
 See also `.cursor/skills/pyre-stos-rigid-transform-ui/SKILL.md` for rigid STOS invariants.
+
+## Vocabulary (source / target)
+
+| Term | Registration | Pyre `Space` | `ViewType` slot |
+|------|--------------|--------------|-----------------|
+| Source | `SourcePoints`, `MappedImage*` | `Space.Source` | `ViewType.Source` |
+| Target | `TargetPoints`, `ControlImage*` | `Space.Target` | `ViewType.Target` |
+
+`Transform()` maps source → target. Composite draws the target layer in native target
+coordinates (static) and warps the source layer into target display space.

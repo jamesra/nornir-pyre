@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 import nornir_imageregistration
+from pyre.space import Space
 from pyre.views import gltiles
 
 
@@ -28,6 +29,26 @@ class TestGltilesVisibleExpand(unittest.TestCase):
             np.array((0.0, 0.0, 64.0, 64.0)))
         coords = gltiles.tile_coords_for_visible_bounds(512, 512, (128, 128), rect)
         self.assertEqual(coords, {(0, 0)})
+
+
+class TestBuildTileMeshStaticQuads(unittest.TestCase):
+    """force_static_quads keeps mesh/grid Target panels on identity quads."""
+
+    def test_force_static_quads_for_mesh_transform(self) -> None:
+        from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+
+        points = np.array([
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 64.0, 0.0, 64.0],
+            [64.0, 0.0, 64.0, 0.0],
+            [64.0, 64.0, 64.0, 64.0],
+        ], dtype=np.float32)
+        transform = MeshWithRBFFallback(points)
+        entry = gltiles.build_tile_mesh_cpu(
+            transform, (0, 0), (64, 64), Space.Target, force_static_quads=True)
+        self.assertTrue(entry.is_rigid_quad)
+        self.assertEqual(entry.point_count, 4)
+        self.assertEqual(len(entry.indices), 6)
 
 
 if __name__ == "__main__":

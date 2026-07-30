@@ -13,13 +13,13 @@ _texture_vertex_shader_program = """
         #version 330
         uniform float tween;
         uniform float use_rigid_path;
-        uniform float rigid_native_is_warped;
-        uniform float rigid_fixed_warped_into_target;
+        uniform float rigid_native_is_target;
+        uniform float rigid_source_in_target_display;
         uniform mat3 rigid_source_to_target;
         uniform mat3 rigid_target_to_source;
         uniform vec2 rigid_interactive_native_shift;
-        uniform mat3 rigid_warped_display_matrix;
-        uniform mat3 rigid_fixed_display_matrix;
+        uniform mat3 rigid_source_display_matrix;
+        uniform mat3 rigid_target_display_matrix;
         uniform mat4 model_view_projection_matrix;
         out vec2 frag_texture_coordinate;
         in vec3 vertex_source_position;
@@ -27,51 +27,51 @@ _texture_vertex_shader_program = """
         in vec2 vertex_texture_coordinate;
         void main(){
             vec3 native_pos = vertex_source_position;
-            vec3 warped_pos = native_pos;
-            vec3 fixed_pos = native_pos;
+            vec3 source_pos = native_pos;
+            vec3 target_pos = native_pos;
             if (use_rigid_path > 0.5) {
                 vec3 yx_in = vec3(native_pos.y, native_pos.x, 1.0);
-                fixed_pos = native_pos;
-                if (rigid_native_is_warped > 0.5) {
-                    // Target image tiles: corners are already in fixed/target space.
-                    warped_pos = native_pos;
+                target_pos = native_pos;
+                if (rigid_native_is_target > 0.5) {
+                    // Target image tiles: corners are already in target space.
+                    source_pos = native_pos;
                 } else {
-                    // Source/mapped image tiles: warped slot maps native corners through forward.
+                    // Source image tiles: map native corners through forward transform.
                     vec3 yx_out = rigid_source_to_target * yx_in;
-                    warped_pos = vec3(yx_out.y, yx_out.x, native_pos.z);
+                    source_pos = vec3(yx_out.y, yx_out.x, native_pos.z);
                 }
             } else {
-                warped_pos = vertex_source_position;
-                fixed_pos = vertex_target_position;
+                source_pos = vertex_source_position;
+                target_pos = vertex_target_position;
             }
-            if (use_rigid_path > 0.5 && rigid_fixed_warped_into_target > 0.5 && rigid_native_is_warped < 0.5) {
-                // Composite source FBO: fixed image drawn at tween=1 must use transformed
-                // positions (old mesh target slot), not native fixed corners.
-                fixed_pos = warped_pos;
+            if (use_rigid_path > 0.5 && rigid_source_in_target_display > 0.5 && rigid_native_is_target < 0.5) {
+                // Composite source FBO: source image at tween=1 uses transformed positions
+                // (mesh target slot), not native source corners.
+                target_pos = source_pos;
             }
             if (length(rigid_interactive_native_shift) > 0.001) {
                 // Uniform is (delta_y, delta_x); native_pos.x is image X, native_pos.y is image Y.
                 vec3 shift = vec3(rigid_interactive_native_shift.y,
                                   rigid_interactive_native_shift.x, 0.0);
-                if (rigid_native_is_warped > 0.5) {
-                    warped_pos += shift;
-                } else if (rigid_fixed_warped_into_target < 0.5) {
-                    fixed_pos += shift;
+                if (rigid_native_is_target > 0.5) {
+                    source_pos += shift;
+                } else if (rigid_source_in_target_display < 0.5) {
+                    target_pos += shift;
                 }
             }
-            if (use_rigid_path > 0.5 && rigid_native_is_warped > 0.5) {
-                vec3 yx_in = vec3(warped_pos.y, warped_pos.x, 1.0);
-                vec3 yx_out = rigid_warped_display_matrix * yx_in;
-                warped_pos = vec3(yx_out.y, yx_out.x, warped_pos.z);
+            if (use_rigid_path > 0.5 && rigid_native_is_target > 0.5) {
+                vec3 yx_in = vec3(source_pos.y, source_pos.x, 1.0);
+                vec3 yx_out = rigid_source_display_matrix * yx_in;
+                source_pos = vec3(yx_out.y, yx_out.x, source_pos.z);
             }
-            if (use_rigid_path > 0.5 && rigid_native_is_warped < 0.5 && rigid_fixed_warped_into_target > 0.5) {
-                vec3 yx_in = vec3(fixed_pos.y, fixed_pos.x, 1.0);
-                vec3 yx_out = rigid_fixed_display_matrix * yx_in;
-                fixed_pos = vec3(yx_out.y, yx_out.x, fixed_pos.z);
-                warped_pos = fixed_pos;
+            if (use_rigid_path > 0.5 && rigid_native_is_target < 0.5 && rigid_source_in_target_display > 0.5) {
+                vec3 yx_in = vec3(target_pos.y, target_pos.x, 1.0);
+                vec3 yx_out = rigid_target_display_matrix * yx_in;
+                target_pos = vec3(yx_out.y, yx_out.x, target_pos.z);
+                source_pos = target_pos;
             }
-            gl_Position = model_view_projection_matrix * mix(vec4(fixed_pos, 1),
-                                                             vec4(warped_pos, 1),
+            gl_Position = model_view_projection_matrix * mix(vec4(target_pos, 1),
+                                                             vec4(source_pos, 1),
                                                              tween);
             frag_texture_coordinate = vertex_texture_coordinate;  
         }
@@ -103,13 +103,13 @@ class TextureShader(BaseShader):
     _tween_location = None
     _model_view_projection_matrix_location = None
     _use_rigid_path_location = None
-    _rigid_native_is_warped_location = None
-    _rigid_fixed_warped_into_target_location = None
+    _rigid_native_is_target_location = None
+    _rigid_source_in_target_display_location = None
     _rigid_matrix_location = None
     _rigid_inverse_matrix_location = None
     _rigid_interactive_native_shift_location = None
-    _rigid_warped_display_matrix_location = None
-    _rigid_fixed_display_matrix_location = None
+    _rigid_source_display_matrix_location = None
+    _rigid_target_display_matrix_location = None
     _attributes: Sequence[VertexAttribute] | None = None
 
     def __init__(self):
@@ -199,19 +199,19 @@ class TextureShader(BaseShader):
         return self._rigid_matrix_location
 
     @property
-    def rigid_fixed_warped_into_target_location(self) -> int:
-        if self._rigid_fixed_warped_into_target_location is None:
-            self._rigid_fixed_warped_into_target_location = gl.glGetUniformLocation(
-                self.program, "rigid_fixed_warped_into_target")
-            raise_on_error("after glGetUniformLocation(rigid_fixed_warped_into_target) in texture_shader")
-        return self._rigid_fixed_warped_into_target_location
+    def rigid_source_in_target_display_location(self) -> int:
+        if self._rigid_source_in_target_display_location is None:
+            self._rigid_source_in_target_display_location = gl.glGetUniformLocation(
+                self.program, "rigid_source_in_target_display")
+            raise_on_error("after glGetUniformLocation(rigid_source_in_target_display) in texture_shader")
+        return self._rigid_source_in_target_display_location
 
     @property
-    def rigid_native_is_warped_location(self) -> int:
-        if self._rigid_native_is_warped_location is None:
-            self._rigid_native_is_warped_location = gl.glGetUniformLocation(self.program, "rigid_native_is_warped")
-            raise_on_error("after glGetUniformLocation(rigid_native_is_warped) in texture_shader")
-        return self._rigid_native_is_warped_location
+    def rigid_native_is_target_location(self) -> int:
+        if self._rigid_native_is_target_location is None:
+            self._rigid_native_is_target_location = gl.glGetUniformLocation(self.program, "rigid_native_is_target")
+            raise_on_error("after glGetUniformLocation(rigid_native_is_target) in texture_shader")
+        return self._rigid_native_is_target_location
 
     @property
     def rigid_inverse_matrix_location(self) -> int:
@@ -229,20 +229,20 @@ class TextureShader(BaseShader):
         return self._rigid_interactive_native_shift_location
 
     @property
-    def rigid_warped_display_matrix_location(self) -> int:
-        if self._rigid_warped_display_matrix_location is None:
-            self._rigid_warped_display_matrix_location = gl.glGetUniformLocation(
-                self.program, "rigid_warped_display_matrix")
-            raise_on_error("after glGetUniformLocation(rigid_warped_display_matrix) in texture_shader")
-        return self._rigid_warped_display_matrix_location
+    def rigid_source_display_matrix_location(self) -> int:
+        if self._rigid_source_display_matrix_location is None:
+            self._rigid_source_display_matrix_location = gl.glGetUniformLocation(
+                self.program, "rigid_source_display_matrix")
+            raise_on_error("after glGetUniformLocation(rigid_source_display_matrix) in texture_shader")
+        return self._rigid_source_display_matrix_location
 
     @property
-    def rigid_fixed_display_matrix_location(self) -> int:
-        if self._rigid_fixed_display_matrix_location is None:
-            self._rigid_fixed_display_matrix_location = gl.glGetUniformLocation(
-                self.program, "rigid_fixed_display_matrix")
-            raise_on_error("after glGetUniformLocation(rigid_fixed_display_matrix) in texture_shader")
-        return self._rigid_fixed_display_matrix_location
+    def rigid_target_display_matrix_location(self) -> int:
+        if self._rigid_target_display_matrix_location is None:
+            self._rigid_target_display_matrix_location = gl.glGetUniformLocation(
+                self.program, "rigid_target_display_matrix")
+            raise_on_error("after glGetUniformLocation(rigid_target_display_matrix) in texture_shader")
+        return self._rigid_target_display_matrix_location
 
     @staticmethod
     def _as_numpy_mat3(matrix) -> NDArray[np.floating]:
@@ -271,11 +271,11 @@ class TextureShader(BaseShader):
              tween: float, use_rigid_path: bool = False,
              rigid_source_to_target: NDArray[np.floating] | None = None,
              rigid_target_to_source: NDArray[np.floating] | None = None,
-             rigid_native_is_warped: bool = False,
-             rigid_fixed_warped_into_target: bool = False,
+             rigid_native_is_target: bool = False,
+             rigid_source_in_target_display: bool = False,
              rigid_interactive_native_shift: NDArray[np.floating] | None = None,
-             rigid_warped_display_matrix: NDArray[np.floating] | None = None,
-             rigid_fixed_display_matrix: NDArray[np.floating] | None = None):
+             rigid_source_display_matrix: NDArray[np.floating] | None = None,
+             rigid_target_display_matrix: NDArray[np.floating] | None = None):
         """Draws the texture using the vertex and index buffers."""
         try:
             gl.glUseProgram(self.program)
@@ -292,10 +292,10 @@ class TextureShader(BaseShader):
             check_for_error()
             gl.glUniform1f(self.use_rigid_path_location, 1.0 if use_rigid_path else 0.0)
             check_for_error()
-            gl.glUniform1f(self.rigid_native_is_warped_location, 1.0 if rigid_native_is_warped else 0.0)
+            gl.glUniform1f(self.rigid_native_is_target_location, 1.0 if rigid_native_is_target else 0.0)
             check_for_error()
-            gl.glUniform1f(self.rigid_fixed_warped_into_target_location,
-                            1.0 if rigid_fixed_warped_into_target else 0.0)
+            gl.glUniform1f(self.rigid_source_in_target_display_location,
+                            1.0 if rigid_source_in_target_display else 0.0)
             check_for_error()
             if rigid_source_to_target is None:
                 rigid_source_to_target = np.eye(3, dtype=np.float32)
@@ -312,15 +312,15 @@ class TextureShader(BaseShader):
             gl.glUniform2fv(self.rigid_interactive_native_shift_location, 1,
                             rigid_interactive_native_shift.astype(np.float32, copy=False))
             check_for_error()
-            if rigid_warped_display_matrix is None:
-                rigid_warped_display_matrix = np.eye(3, dtype=np.float32)
-            gl.glUniformMatrix3fv(self.rigid_warped_display_matrix_location, 1, True,
-                                  rigid_warped_display_matrix.astype(np.float32, copy=False))
+            if rigid_source_display_matrix is None:
+                rigid_source_display_matrix = np.eye(3, dtype=np.float32)
+            gl.glUniformMatrix3fv(self.rigid_source_display_matrix_location, 1, True,
+                                  rigid_source_display_matrix.astype(np.float32, copy=False))
             check_for_error()
-            if rigid_fixed_display_matrix is None:
-                rigid_fixed_display_matrix = np.eye(3, dtype=np.float32)
-            gl.glUniformMatrix3fv(self.rigid_fixed_display_matrix_location, 1, True,
-                                  rigid_fixed_display_matrix.astype(np.float32, copy=False))
+            if rigid_target_display_matrix is None:
+                rigid_target_display_matrix = np.eye(3, dtype=np.float32)
+            gl.glUniformMatrix3fv(self.rigid_target_display_matrix_location, 1, True,
+                                  rigid_target_display_matrix.astype(np.float32, copy=False))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()

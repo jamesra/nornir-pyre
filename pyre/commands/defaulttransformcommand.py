@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QMessageBox
 from PyQt6.QtGui import QMouseEvent, QKeyEvent, QCursor
@@ -29,7 +30,10 @@ from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
 from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action, fixed_image_manipulation_locked
-from pyre.views.composite_display import apply_composite_display_pan_delta
+from pyre.views.composite_display import (
+    apply_composite_display_pan_delta,
+    world_point_pair_for_composite_mouse,
+)
 from pyre.views.gltiles import is_rigid_transform
 
 DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
@@ -75,6 +79,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _last_mouse_press_event_args: QMouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
     _action_to_command: dict  # type: ignore[type-arg]
+    _right_pan_active: bool = False
 
     log: Logger = logging.Logger("DefaultTransformCommand")
 
@@ -142,6 +147,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._commandqueue = commandqueue
         self._space = space
         self._selected_points = selected_points
+        self._right_pan_active = False
         transform_action_map_factory = transform_control_point_action_maps()[
             transform_controller.type]
 
@@ -254,9 +260,45 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return
 
+    def _sync_camera_geometry(self) -> tuple[int, int]:
+        """Align camera pixel geometry with the GL panel before mapping mouse events."""
+        width, height = self.parent.size().width(), self.parent.size().height()
+        if width > 0 and height > 0:
+            self._width, self._height = width, height
+            self.camera.window_size = np.array((height, width))
+        return width, height
+
+    def _pan_camera_by_cursor_motion(
+            self,
+            prev_cy: float,
+            prev_cx: float,
+            cy: float,
+            cx: float) -> None:
+        """Pan so image content tracks a right-drag between two corrected screen positions."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            before = world_point_pair_for_composite_mouse(
+                self.camera, self._transform_controller, prev_cy, prev_cx)
+            after = world_point_pair_for_composite_mouse(
+                self.camera, self._transform_controller, cy, cx)
+            if before is not None and after is not None:
+                apply_composite_display_pan_delta(
+                    self.camera,
+                    self._transform_controller,
+                    before.target - after.target,
+                )
+            return
+        self.camera.pan_by_cursor_motion(prev_cy, prev_cx, cy, cx)
+
     def on_mouse_press(self, event: QMouseEvent):
         """Determine the command for the mouse action, if any"""
         self.parent.setFocus()
+        width, height = self._sync_camera_geometry()
+        cy, cx = self.GetCorrectedMousePosition(event, height)
+        self._last_mouse_position = (cy, cx)
+        # Arm pan only on press so a move-with-button-before-press cannot use a stale anchor.
+        self._right_pan_active = bool(event.buttons() & Qt.MouseButton.RightButton)
         point_pair = self.get_world_positions(event)
 
         # Update the mouse position history
@@ -406,8 +448,18 @@ class DefaultTransformCommand(NavigationCommandBase):
         self.selected_points.update(new_selections)
 
     def on_mouse_motion(self, event: QMouseEvent):
-        # Use current parent size so mouse coords and cursor updates are correct after resize (e.g. composite).
-        self._width, self._height = self.parent.size().width(), self.parent.size().height()
+        _, height = self._sync_camera_geometry()
+        cy, cx = self.GetCorrectedMousePosition(event, height)
+        if self._right_pan_active and (event.buttons() & Qt.MouseButton.RightButton):
+            if self._last_mouse_position is not None:
+                prev_cy, prev_cx = self._last_mouse_position
+                if prev_cy != cy or prev_cx != cx:
+                    self._pan_camera_by_cursor_motion(prev_cy, prev_cx, cy, cx)
+            self._last_mouse_position = (cy, cx)
+        elif not (event.buttons() & Qt.MouseButton.RightButton):
+            self._right_pan_active = False
+            self._last_mouse_position = (cy, cx)
+
         point_pair = self.get_world_positions(event)
         try:
             point = self._get_space_point(point_pair)
@@ -429,22 +481,7 @@ class DefaultTransformCommand(NavigationCommandBase):
             if event.buttons() & Qt.MouseButton.LeftButton:
                 # Draw a rectangle to select point
                 pass
-            elif event.buttons() & Qt.MouseButton.RightButton:
-                view = self._view_type()
-                model = self._transform_controller.TransformModel
-                if view == ViewType.Composite and model is not None:
-                    delta_display = (
-                        self._mouse_position_history[Space.Target] - point_pair.target
-                    )
-                    apply_composite_display_pan_delta(
-                        self.camera, self._transform_controller, delta_display)
-                else:
-                    dy, dx = self._mouse_position_history[self.space] - point
-                    self.camera.translate((dy, dx))
-
-                # Update the point pair to account for camera motion
-                point_pair = self.get_world_positions(event)
-            else:
+            elif not (event.buttons() & Qt.MouseButton.RightButton):
                 self._update_cursor_for_possible_actions(selection_event_data)
 
         finally:
@@ -464,6 +501,10 @@ class DefaultTransformCommand(NavigationCommandBase):
             self.parent.setCursor(cursor)
 
     def on_mouse_release(self, event):
+        self._right_pan_active = False
+        _, height = self._sync_camera_geometry()
+        cy, cx = self.GetCorrectedMousePosition(event, height)
+        self._last_mouse_position = (cy, cx)
         point_pair = self.get_world_positions(event)
         point = self._get_space_point(point_pair)
 

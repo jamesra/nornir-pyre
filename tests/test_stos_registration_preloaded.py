@@ -22,7 +22,7 @@ def _load_stos_registration_module():
 
 
 _stos_registration = _load_stos_registration_module()
-resolve_warped_and_fixed_image_data = _stos_registration.resolve_warped_and_fixed_image_data
+resolve_source_and_target_image_data = _stos_registration.resolve_source_and_target_image_data
 
 
 class TestStosRegistrationPreloaded(unittest.TestCase):
@@ -39,7 +39,7 @@ class TestStosRegistrationPreloaded(unittest.TestCase):
     stos.ControlImageFullPath = r"Y:\control.png"
 
     with patch.object(_stos_registration, "StosFile") as mock_stos_file:
-      warped_out, fixed_out = resolve_warped_and_fixed_image_data(
+      warped_out, fixed_out = resolve_source_and_target_image_data(
           image_manager,
           "Source",
           "Target",

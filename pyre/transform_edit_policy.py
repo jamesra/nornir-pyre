@@ -10,14 +10,22 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 
 
+def target_panel_manipulation_locked(
+        transform_type: TransformType,
+        space: Space,
+        view_type: ViewType | None = None) -> bool:
+    """True when the standalone target-image panel must not translate or rotate the layer."""
+    if view_type == ViewType.Composite:
+        return False
+    return space == Space.Target and transform_type in (TransformType.RIGID, TransformType.GRID)
+
+
 def fixed_image_manipulation_locked(
         transform_type: TransformType,
         space: Space,
         view_type: ViewType | None = None) -> bool:
-    """True when the standalone fixed-image panel must not translate or rotate the layer."""
-    if view_type == ViewType.Composite:
-        return False
-    return space == Space.Source and transform_type in (TransformType.RIGID, TransformType.GRID)
+    """Deprecated alias for :func:`target_panel_manipulation_locked`."""
+    return target_panel_manipulation_locked(transform_type, space, view_type)
 
 
 def rigid_rotation_locked(
@@ -34,7 +42,7 @@ def wheel_rotate_locked(
         space: Space,
         view_type: ViewType | None = None) -> bool:
     """True when Ctrl+scroll layer rotation must not run for this panel."""
-    if fixed_image_manipulation_locked(transform_type, space, view_type):
+    if target_panel_manipulation_locked(transform_type, space, view_type):
         return True
     return rigid_rotation_locked(transform_type, view_type)
 
@@ -44,14 +52,14 @@ def layer_translate_locked(
         space: Space,
         view_type: ViewType | None = None) -> bool:
     """True when empty-space drag must not translate the whole layer."""
-    return fixed_image_manipulation_locked(transform_type, space, view_type)
+    return target_panel_manipulation_locked(transform_type, space, view_type)
 
 
-def fixed_panel_control_points_locked(
+def source_panel_control_points_locked(
         transform_model: Any,
         space: Space,
         view_type: ViewType | None = None) -> bool:
-    """True when fixed-panel control points are view-only (target-space-only transforms)."""
+    """True when source-panel control points are view-only (target-space-only transforms)."""
     if view_type == ViewType.Composite or space != Space.Source:
         return False
     return (
@@ -60,25 +68,50 @@ def fixed_panel_control_points_locked(
     )
 
 
+def target_panel_control_points_locked(
+        transform_model: Any,
+        space: Space,
+        view_type: ViewType | None = None) -> bool:
+    """Deprecated alias for :func:`source_panel_control_points_locked`."""
+    return source_panel_control_points_locked(transform_model, space, view_type)
+
+
+def fixed_panel_control_points_locked(
+        transform_model: Any,
+        space: Space,
+        view_type: ViewType | None = None) -> bool:
+    """Deprecated alias for :func:`source_panel_control_points_locked`."""
+    return source_panel_control_points_locked(transform_model, space, view_type)
+
+
+def source_panel_hint_message(
+        transform_model: Any,
+        transform_type: TransformType,
+        space: Space,
+        view_type: ViewType | None = None) -> str | None:
+    """Corner-hint text for the standalone source panel, or None when no hint applies."""
+    if view_type == ViewType.Composite or space != Space.Source:
+        return None
+    if source_panel_control_points_locked(transform_model, space, view_type):
+        return (
+            "Grid transform — source control points cannot be moved here; "
+            "adjust target points in the Target view or Composite")
+    if target_panel_manipulation_locked(transform_type, space, view_type):
+        if transform_type == TransformType.RIGID:
+            return (
+                "Source image — translate mapped layer in Source or Composite; "
+                "rotate in Composite view")
+        return "Source image — translate mapped layer in Source or Composite view"
+    return None
+
+
 def fixed_panel_hint_message(
         transform_model: Any,
         transform_type: TransformType,
         space: Space,
         view_type: ViewType | None = None) -> str | None:
-    """Corner-hint text for the standalone fixed panel, or None when no hint applies."""
-    if view_type == ViewType.Composite or space != Space.Source:
-        return None
-    if fixed_panel_control_points_locked(transform_model, space, view_type):
-        return (
-            "Grid transform — fixed control points cannot be moved here; "
-            "adjust warped points in the Warped view")
-    if fixed_image_manipulation_locked(transform_type, space, view_type):
-        if transform_type == TransformType.RIGID:
-            return (
-                "Fixed image — translate warped layer in Warped or Composite; "
-                "rotate in Composite view")
-        return "Fixed image — translate warped layer in Warped or Composite view"
-    return None
+    """Deprecated alias for :func:`source_panel_hint_message`."""
+    return source_panel_hint_message(transform_model, transform_type, space, view_type)
 
 
 def blocks_control_point_translate_action(
@@ -89,7 +122,7 @@ def blocks_control_point_translate_action(
     """True when a control-point drag must be ignored in this panel."""
     if action != ControlPointAction.TRANSLATE:
         return False
-    return fixed_panel_control_points_locked(transform_model, space, view_type)
+    return source_panel_control_points_locked(transform_model, space, view_type)
 
 
 def blocks_layer_translate_action(
@@ -97,7 +130,7 @@ def blocks_layer_translate_action(
         space: Space,
         action: ControlPointAction,
         view_type: ViewType | None = None) -> bool:
-    """True when a whole-layer translate action must be ignored on the fixed panel."""
+    """True when a whole-layer translate action must be ignored on the target panel."""
     if not layer_translate_locked(transform_type, space, view_type):
         return False
     if action == ControlPointAction.TRANSLATE_ALL:

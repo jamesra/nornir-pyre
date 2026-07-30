@@ -2,6 +2,7 @@ import concurrent.futures
 from dataclasses import dataclass
 import logging
 import os
+import warnings
 
 logger = logging.getLogger(__name__)
 
@@ -149,12 +150,22 @@ class StosState(StateEventsImpl):
         return self._window_manager
 
     @property
-    def FixedWindow(self) -> QMainWindow:
+    def SourceWindow(self) -> QMainWindow:
         return self._require_window_manager()[ViewType.Source]
 
     @property
-    def WarpedWindow(self) -> QMainWindow:
+    def TargetWindow(self) -> QMainWindow:
         return self._require_window_manager()[ViewType.Target]
+
+    @property
+    def FixedWindow(self) -> QMainWindow:
+        """Deprecated: use :attr:`SourceWindow`."""
+        return self.SourceWindow
+
+    @property
+    def WarpedWindow(self) -> QMainWindow:
+        """Deprecated: use :attr:`TargetWindow`."""
+        return self.TargetWindow
 
     @property
     def CompositeWindow(self) -> QMainWindow:
@@ -182,11 +193,11 @@ class StosState(StateEventsImpl):
         return None if self.WarpedImageMaskViewModel is None or self.WarpedImageMaskViewModel.ImageFilename is None else self.WarpedImageMaskViewModel.ImageFilename
 
     @property
-    def FixedImageViewModel(self) -> ImageViewModel | None:
+    def SourceImageViewModel(self) -> ImageViewModel | None:
         return self._FixedImageViewModel
 
-    @FixedImageViewModel.setter
-    def FixedImageViewModel(self, val: ImageViewModel | None):
+    @SourceImageViewModel.setter
+    def SourceImageViewModel(self, val: ImageViewModel | None):
         self._FixedImageViewModel = val
         if val is not None:
             assert (isinstance(val, ImageViewModel))
@@ -194,16 +205,34 @@ class StosState(StateEventsImpl):
         # self.FireOnImageChanged(pyre.Space.Source)
 
     @property
-    def WarpedImageViewModel(self) -> ImageViewModel | None:
+    def TargetImageViewModel(self) -> ImageViewModel | None:
         return self._WarpedImageViewModel
 
-    @WarpedImageViewModel.setter
-    def WarpedImageViewModel(self, val: ImageViewModel | None):
+    @TargetImageViewModel.setter
+    def TargetImageViewModel(self, val: ImageViewModel | None):
         self._WarpedImageViewModel = val
         if val is not None:
             assert (isinstance(val, ImageViewModel))
 
         self.FireOnImageChanged(pyre.Space.Target)
+
+    @property
+    def FixedImageViewModel(self) -> ImageViewModel | None:
+        """Deprecated: use :attr:`SourceImageViewModel`."""
+        return self.SourceImageViewModel
+
+    @FixedImageViewModel.setter
+    def FixedImageViewModel(self, val: ImageViewModel | None):
+        self.SourceImageViewModel = val
+
+    @property
+    def WarpedImageViewModel(self) -> ImageViewModel | None:
+        """Deprecated: use :attr:`TargetImageViewModel`."""
+        return self.TargetImageViewModel
+
+    @WarpedImageViewModel.setter
+    def WarpedImageViewModel(self, val: ImageViewModel | None):
+        self.TargetImageViewModel = val
 
     @property
     def FixedImageMaskViewModel(self) -> ImageViewModel | None:
@@ -278,8 +307,8 @@ class StosState(StateEventsImpl):
         for func in self._OnImageChangeEventListeners:
             func(image_space)
 
-    def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:
-        """Load the fixed (source) image into the image/viewmodel managers and update STOS permutation state."""
+    def LoadSourceImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Load the source (mapped) image into the image/viewmodel managers and update STOS permutation state."""
         search_dirs = [os.path.dirname(ImageFileFullPath) or "."]
         result = self._image_loader.load_image_into_manager(
             ViewType.Source,
@@ -293,16 +322,16 @@ class StosState(StateEventsImpl):
             mask_color=result.mask_converted_from_color,
         )
         vm = self._image_loader.create_image_viewmodel(load_result=result)
-        self.FixedImageViewModel = vm
+        self.SourceImageViewModel = vm
         self._fixed_image_permutations = self._update_image_permutations(
-            self.FixedImageViewModel,
+            self.SourceImageViewModel,
             self.FixedImageMaskViewModel,
         )
         self.FireOnImageChanged(pyre.Space.Source)
         return vm
 
-    def LoadWarpedImage(self, ImageFileFullPath: str) -> ImageViewModel:
-        """Load the warped (target) image into the image/viewmodel managers and update STOS permutation state."""
+    def LoadTargetImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Load the target (control) image into the image/viewmodel managers and update STOS permutation state."""
         search_dirs = [os.path.dirname(ImageFileFullPath) or "."]
         result = self._image_loader.load_image_into_manager(
             ViewType.Target,
@@ -316,12 +345,30 @@ class StosState(StateEventsImpl):
             mask_color=result.mask_converted_from_color,
         )
         vm = self._image_loader.create_image_viewmodel(load_result=result)
-        self.WarpedImageViewModel = vm
+        self.TargetImageViewModel = vm
         self._warped_image_permutations = self._update_image_permutations(
-            self.WarpedImageViewModel,
+            self.TargetImageViewModel,
             self.WarpedImageMaskViewModel,
         )
         return vm
+
+    def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Deprecated: use :meth:`LoadSourceImage`."""
+        warnings.warn(
+            "LoadFixedImage is deprecated; use LoadSourceImage",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.LoadSourceImage(ImageFileFullPath)
+
+    def LoadWarpedImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Deprecated: use :meth:`LoadTargetImage`."""
+        warnings.warn(
+            "LoadWarpedImage is deprecated; use LoadTargetImage",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.LoadTargetImage(ImageFileFullPath)
 
     def LoadFixedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel | None:
         self.FixedImageMaskViewModel = LoadImage(ImageFileFullPath)
@@ -331,7 +378,7 @@ class StosState(StateEventsImpl):
         ):
             _warn_single_file_rgb_like_converted(ImageFileFullPath)
         self._fixed_image_permutations = self._update_image_permutations(
-            self.FixedImageViewModel,
+            self.SourceImageViewModel,
             self.FixedImageMaskViewModel,
         )
         return self.FixedImageMaskViewModel
@@ -344,7 +391,7 @@ class StosState(StateEventsImpl):
         ):
             _warn_single_file_rgb_like_converted(ImageFileFullPath)
         self._warped_image_permutations = self._update_image_permutations(
-            self.WarpedImageViewModel,
+            self.TargetImageViewModel,
             self.WarpedImageMaskViewModel,
         )
         return self.WarpedImageMaskViewModel
@@ -362,6 +409,6 @@ class StosState(StateEventsImpl):
     def WindowsLookAtFixedPoint(self, fixed_point, scale):
         """Force all open windows to look at this point"""
 
-        self.FixedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
-        self.WarpedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.SourceWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.TargetWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
         self.CompositeWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
