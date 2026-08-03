@@ -4,6 +4,7 @@ Future (not implemented): sortable columns for filename and overall quality scor
 
 - Open Folder scans a STOS group directory and merges automatic ``*.stos`` files with
   overrides in ``Manual/`` (Nornir buildmanager layout).
+- Refresh re-scans the current folder (disk changes) without reopening the dialog.
 - Rows with a manual override show ``[Manual]`` and load the manual file on double-click.
 - Manual-only rows (manual present, automatic missing) use a darker yellow list color.
 - **File Source** selector (Auto / Original / Manual) controls which variant loads on open and navigation.
@@ -24,6 +25,8 @@ Future (not implemented): sortable columns for filename and overall quality scor
 from __future__ import annotations
 
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 
 from dependency_injector.wiring import inject, Provide
 from PyQt6.QtWidgets import (
@@ -31,10 +34,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QListWidget, QListWidgetItem, QFileDialog,
     QMessageBox, QMenu,
 )
-from PyQt6.QtCore import Qt, QObject, QEvent
+from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
 from PyQt6.QtGui import QFontMetrics, QKeyEvent, QColor, QKeySequence, QShortcut, QMouseEvent, QGuiApplication
 
 from pyre.container import IContainer
+from pyre.qt_eventmanager import qt_post_to_main
 from pyre.settings import AppSettings
 from pyre.stos_manual_paths import (
     BrowseMode,
@@ -45,6 +49,15 @@ from pyre.stos_manual_paths import (
     scan_stos_browser_rows,
 )
 from pyre.ui.widgets.stos_file_source_selector import StosFileSourceSelector
+
+
+@dataclass(frozen=True)
+class _PendingStosLoad:
+    """Queued browser navigation load request."""
+    generation: int
+    filepath: str
+    index: int
+    browser_basename: str | None
 
 
 class StosBrowserMouseNavigationFilter(QObject):
@@ -101,6 +114,8 @@ _BROWSER_LAYOUT_PADDING = 44  # list margins + scrollbar reserve
 class StosFileBrowserWindow(QMainWindow):
     """Floating Stos Directory window listing transforms in a STOS group folder."""
 
+    NAV_LOAD_DEBOUNCE_MS: int = 75
+
     _folder: str | None
     _browse_mode: BrowseMode
     _rows: list[StosBrowserRow]
@@ -112,6 +127,10 @@ class StosFileBrowserWindow(QMainWindow):
     _file_source_selector: StosFileSourceSelector
     _manual_override_color = QColor("#c9a227")
     _manual_only_color = QColor("#8b6914")
+    _load_generation: int
+    _pending_load: _PendingStosLoad | None
+    _debounce_timer: QTimer
+    _load_executor: ThreadPoolExecutor
 
     @staticmethod
     def has_cached_folder(settings: AppSettings) -> bool:
@@ -139,6 +158,12 @@ class StosFileBrowserWindow(QMainWindow):
         self._nav_shortcuts = []
         self._mouse_nav_filter = None
         self._list_delete_filter = None
+        self._load_generation = 0
+        self._pending_load = None
+        self._load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stos-nav-load")
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.timeout.connect(self._execute_pending_load)
 
         self._setup_ui()
         self._install_mouse_navigation_filter()
@@ -165,7 +190,16 @@ class StosFileBrowserWindow(QMainWindow):
         self._open_btn = QPushButton("Open Folder\u2026")
         self._open_btn.clicked.connect(self.open_folder)
         btn_row.addWidget(self._open_btn)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setToolTip("Re-scan the current folder for STOS files (F5)")
+        self._refresh_btn.clicked.connect(self.rescan)
+        self._refresh_btn.setEnabled(False)
+        btn_row.addWidget(self._refresh_btn)
         layout.addLayout(btn_row)
+
+        refresh_shortcut = QShortcut(QKeySequence(Qt.Key.Key_F5), self)
+        refresh_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        refresh_shortcut.activated.connect(self.rescan)
 
         self._folder_label = QLabel("No folder selected")
         self._folder_label.setWordWrap(True)
@@ -237,11 +271,26 @@ class StosFileBrowserWindow(QMainWindow):
         return self._browse_mode
 
     def rescan(self) -> None:
-        """Refresh the listing after an external save."""
+        """Re-scan the current folder and refresh the list (preserves selection when possible)."""
         if not self._folder:
             return
+        previous_basename: str | None = None
+        if 0 <= self._current_index < len(self._rows):
+            previous_basename = self._rows[self._current_index].basename
         self._rows = scan_stos_browser_rows(self._folder, self._browse_mode)
         self._populate_list()
+        if previous_basename is not None:
+            for index, row in enumerate(self._rows):
+                if row.basename == previous_basename:
+                    self._current_index = index
+                    self._list_widget.setCurrentRow(index)
+                    return
+            if self._rows:
+                self._current_index = min(self._current_index, len(self._rows) - 1)
+                self._current_index = max(0, self._current_index)
+                self._list_widget.setCurrentRow(self._current_index)
+            else:
+                self._current_index = -1
 
     def open_folder(self) -> None:
         """Show a folder chooser and populate the list with discovered transforms."""
@@ -341,6 +390,7 @@ class StosFileBrowserWindow(QMainWindow):
         if persist:
             self._settings.ui.stos_browser_folder = folder
         self._folder_label.setText(folder)
+        self._refresh_btn.setEnabled(True)
         self._file_source_selector.set_flat_manual_mode(mode == BrowseMode.flat_manual)
         self._rows = scan_stos_browser_rows(folder, self._browse_mode)
         self._current_index = -1
@@ -529,16 +579,61 @@ class StosFileBrowserWindow(QMainWindow):
     ) -> None:
         if not filepath:
             return
-        from pyre.ui.windows.stoswindow import StosWindow
-        StosWindow.loadStos(
-            filepath,
-            browser_folder=self._folder,
-            browser_flat_manual=(self._browse_mode == BrowseMode.flat_manual),
-            browser_basename=browser_basename,
-        )
+        self._load_generation += 1
+        generation = self._load_generation
         self._current_index = index
         self._list_widget.setCurrentRow(index)
         self.setWindowTitle(f"Stos Directory \u2014 {os.path.basename(filepath)}")
+        self._pending_load = _PendingStosLoad(
+            generation=generation,
+            filepath=filepath,
+            index=index,
+            browser_basename=browser_basename,
+        )
+        self._debounce_timer.start(self.NAV_LOAD_DEBOUNCE_MS)
+
+    def _execute_pending_load(self) -> None:
+        """Start (or flush) the debounced STOS load for the latest pending request."""
+        self._debounce_timer.stop()
+        pending = self._pending_load
+        if pending is None:
+            return
+        self._pending_load = None
+        generation = pending.generation
+        filepath = pending.filepath
+        browser_basename = pending.browser_basename
+        browser_folder = self._folder
+        browser_flat_manual = self._browse_mode == BrowseMode.flat_manual
+
+        def _worker() -> object:
+            from pyre.ui.windows.stoswindow import StosWindow
+            return StosWindow.load_stos_data(filepath)
+
+        def _on_done(future: Future) -> None:
+            def _apply() -> None:
+                if generation != self._load_generation:
+                    return
+                try:
+                    load_result = future.result()
+                except Exception as exc:
+                    print(f"Error loading stos file: {exc}")
+                    return
+                from pyre.ui.windows.stoswindow import StosWindow
+                try:
+                    StosWindow.apply_stos_load_result(
+                        filepath,
+                        load_result,
+                        browser_folder=browser_folder,
+                        browser_flat_manual=browser_flat_manual,
+                        browser_basename=browser_basename,
+                    )
+                except Exception as exc:
+                    print(f"Error applying stos file: {exc}")
+
+            qt_post_to_main(_apply)
+
+        future = self._load_executor.submit(_worker)
+        future.add_done_callback(lambda f: _on_done(f))
 
     # ------------------------------------------------------------------
     # Delete automatic STOS
@@ -616,5 +711,9 @@ class StosFileBrowserWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Drop the application event filter when the browser window closes."""
+        self._debounce_timer.stop()
+        self._pending_load = None
+        self._load_generation += 1  # supersede any in-flight apply
         self._remove_mouse_navigation_filter()
+        self._load_executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)

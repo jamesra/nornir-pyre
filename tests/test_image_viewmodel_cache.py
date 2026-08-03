@@ -48,6 +48,7 @@ class TestImageViewModelCache(unittest.TestCase):
         self.loader._image_viewmodel_manager = self.vm_manager
         self.loader._filepath_cache = {}
         self.loader._viewmodel_cache = {}
+        self.loader._cache_lock = __import__("threading").RLock()
 
     def test_reuses_viewmodel_for_same_filepath_cache_key(self) -> None:
         image = _sample_image(32)

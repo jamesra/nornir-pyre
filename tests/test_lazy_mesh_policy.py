@@ -41,7 +41,16 @@ class TestLazyMeshPolicy(unittest.TestCase):
             with patch("pyre.views.gltiles.is_rigid_transform", return_value=True):
                 self.assertFalse(view._uses_lazy_mesh_build())
 
-    def test_lazy_mesh_disabled_for_composite_eager_subviews(self) -> None:
+    def test_lazy_mesh_disabled_for_composite_source_eager_subview(self) -> None:
+        """Composite source FBO uses eager full-grid meshes so magenta always appears."""
+        view = self._make_view()
+        view._eager_tile_meshes = True
+        mesh_transform = MagicMock()
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: mesh_transform)):
+            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
+                self.assertFalse(view._uses_lazy_mesh_build())
+
+    def test_lazy_mesh_disabled_when_eager_flag_set(self) -> None:
         view = self._make_view()
         view._eager_tile_meshes = True
         mesh_transform = MagicMock()

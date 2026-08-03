@@ -120,7 +120,12 @@ def composite_tile_cull_rect(
     if display_bounds is None or view_type != ViewType.Composite:
         return display_bounds
     model = transform_controller.TransformModel
-    if model is None or is_rigid_transform(model):
+    if model is None:
+        return display_bounds
+    if is_rigid_transform(model):
+        if image_space == Space.Source:
+            _, inverse = TextureShader.rigid_matrices_from_transform(model)
+            return transform_visible_rectangle(display_bounds, inverse)
         return display_bounds
     if image_space == Space.Source:
         return inverse_transform_visible_rectangle_mesh(display_bounds, transform_controller)

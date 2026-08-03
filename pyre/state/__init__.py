@@ -177,6 +177,8 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                        restore_path, e)
             _clear_stale_stos_restore_settings(settings)
             raise
+        image_loader.create_image_viewmodel(load_result=load_result.source)
+        image_loader.create_image_viewmodel(load_result=load_result.target)
         try:
             apply_stos_transform_to_controller(stos_transform_controller, load_result.stos.Transform)  # type: ignore[arg-type]
         except Exception as e:

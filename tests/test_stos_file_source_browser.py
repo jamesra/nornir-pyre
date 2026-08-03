@@ -40,6 +40,7 @@ class TestStosBrowserFileSource(unittest.TestCase):
         ]
         browser._current_index = 0
         browser._file_source_selector.set_source(source)
+        browser._debounce_timer.stop()
         return browser
 
     def test_load_at_index_uses_manual_when_source_manual(self) -> None:
@@ -54,14 +55,13 @@ class TestStosBrowserFileSource(unittest.TestCase):
                 manual_path=manual,
                 source=StosFileSource.manual,
             )
-            with patch("pyre.ui.windows.stoswindow.StosWindow.loadStos") as mock_load:
-                browser._load_stos_at_index(0)
-            mock_load.assert_called_once_with(
-                manual,
-                browser_folder="/tmp/stos_group",
-                browser_flat_manual=False,
-                browser_basename="10-11.stos",
-            )
+            browser._load_stos_at_index(0)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, manual)
+            self.assertEqual(pending.browser_basename, "10-11.stos")
+            self.assertEqual(pending.index, 0)
 
     def test_load_at_index_uses_auto_when_source_original(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,14 +75,11 @@ class TestStosBrowserFileSource(unittest.TestCase):
                 manual_path=manual,
                 source=StosFileSource.original,
             )
-            with patch("pyre.ui.windows.stoswindow.StosWindow.loadStos") as mock_load:
-                browser._load_stos_at_index(0)
-            mock_load.assert_called_once_with(
-                auto,
-                browser_folder="/tmp/stos_group",
-                browser_flat_manual=False,
-                browser_basename="10-11.stos",
-            )
+            browser._load_stos_at_index(0)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, auto)
 
     def test_missing_manual_falls_back_to_auto_instead_of_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -94,15 +91,12 @@ class TestStosBrowserFileSource(unittest.TestCase):
                 source=StosFileSource.manual,
             )
             with patch("pyre.ui.windows.stosfilebrowser.QMessageBox.information") as mock_box:
-                with patch("pyre.ui.windows.stoswindow.StosWindow.loadStos") as mock_load:
-                    browser._load_stos_at_index(0)
+                browser._load_stos_at_index(0)
             mock_box.assert_not_called()
-            mock_load.assert_called_once_with(
-                auto,
-                browser_folder="/tmp/stos_group",
-                browser_flat_manual=False,
-                browser_basename="10-11.stos",
-            )
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, auto)
             self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
 
     def test_copy_full_path_uses_resolved_path_for_file_source(self) -> None:

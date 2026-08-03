@@ -956,6 +956,61 @@ class StosWindow(PyreWindowBase):
 
     @staticmethod
     @inject
+    def load_stos_data(
+            filename: str,
+            image_loader: IImageLoader = Provide[IContainer.image_loader],
+    ) -> LoadStosResult:
+        """Decode STOS images off the UI path; does not create viewmodels or install transform."""
+        return image_loader.load_stos_images(filename)  # type: ignore[attr-defined, no-any-return]
+
+    @staticmethod
+    @inject
+    def apply_stos_load_result(
+            filename: str,
+            load_result: LoadStosResult,
+            image_loader: IImageLoader = Provide[IContainer.image_loader],
+            stos_transform_controller: pyre.state.TransformController = Provide[
+                StosContainer.transform_controller],
+            settings: AppSettings = Provide[IContainer.settings],
+            window_manager: IWindowManager = Provide[IContainer.window_manager],
+            browser_folder: str | None = None,
+            browser_flat_manual: bool = False,
+            browser_basename: str | None = None) -> LoadStosResult:
+        """Commit a decoded STOS load on the main thread (managers, transform, titles)."""
+        image_loader.commit_load_results_to_image_manager(load_result)  # type: ignore[attr-defined]
+        image_loader.create_image_viewmodel(load_result=load_result.source)
+        image_loader.create_image_viewmodel(load_result=load_result.target)
+
+        settings.stos.stos_filename = filename
+        settings.stos.stos_opened_from_browser_folder = browser_folder
+        settings.stos.stos_browser_flat_manual = browser_flat_manual
+        settings.stos.stos_browser_basename = browser_basename
+        transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
+        stos_transform_controller.TransformModel = transform
+
+        settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
+                                                      mask_fullpath=load_result.source.mask_fullpath)
+        settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
+                                                      mask_fullpath=load_result.target.mask_fullpath)
+        stos_config = pyre.state.get_current_stos_config()
+        if stos_config is not None:
+            from pyre.stos_registration import resolve_source_and_target_image_data, sync_stos_registration_roles
+            warped, fixed = resolve_source_and_target_image_data(
+                image_loader._image_manager,  # type: ignore[attr-defined]
+                ViewType.Source.value,
+                ViewType.Target.value,
+                stos_filename=filename,
+                stos=load_result.stos,
+                settings_source_image_path=load_result.source.image_fullpath,
+                settings_target_image_path=load_result.target.image_fullpath,
+            )
+            sync_stos_registration_roles(stos_config, warped, fixed)
+
+        StosWindow.update_window_titles(settings, window_manager)
+        return load_result
+
+    @staticmethod
+    @inject
     def loadStos(filename: str,
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
@@ -966,34 +1021,18 @@ class StosWindow(PyreWindowBase):
                  browser_flat_manual: bool = False,
                  browser_basename: str | None = None) -> LoadStosResult | None:
         try:
-            load_result = image_loader.load_stos(filename)
-            settings.stos.stos_filename = filename
-            settings.stos.stos_opened_from_browser_folder = browser_folder
-            settings.stos.stos_browser_flat_manual = browser_flat_manual
-            settings.stos.stos_browser_basename = browser_basename
-            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
-            stos_transform_controller.TransformModel = transform
-
-            settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
-                                                          mask_fullpath=load_result.source.mask_fullpath)
-            settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
-                                                          mask_fullpath=load_result.target.mask_fullpath)
-            stos_config = pyre.state.get_current_stos_config()
-            if stos_config is not None:
-                from pyre.stos_registration import resolve_source_and_target_image_data, sync_stos_registration_roles
-                warped, fixed = resolve_source_and_target_image_data(
-                    image_loader._image_manager,  # type: ignore[attr-defined]
-                    ViewType.Source.value,
-                    ViewType.Target.value,
-                    stos_filename=filename,
-                    stos=load_result.stos,
-                    settings_source_image_path=load_result.source.image_fullpath,
-                    settings_target_image_path=load_result.target.image_fullpath,
-                )
-                sync_stos_registration_roles(stos_config, warped, fixed)
-
-            StosWindow.update_window_titles(settings, window_manager)
-            return load_result
+            load_result = StosWindow.load_stos_data(filename, image_loader=image_loader)
+            return StosWindow.apply_stos_load_result(
+                filename,
+                load_result,
+                image_loader=image_loader,
+                stos_transform_controller=stos_transform_controller,
+                settings=settings,
+                window_manager=window_manager,
+                browser_folder=browser_folder,
+                browser_flat_manual=browser_flat_manual,
+                browser_basename=browser_basename,
+            )
 
         except Exception as e:
             print(f"Error loading stos file: {e}")

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock
 
@@ -27,6 +29,11 @@ def _make_rows(count: int) -> list[StosBrowserRow]:
         )
         for i in range(count)
     ]
+
+
+def _touch(path: str) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("stub")
 
 
 class TestStosFileBrowserNavigation(unittest.TestCase):
@@ -111,6 +118,32 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
 
         self.assertFalse(handled)
         browser._load_stos_at_index.assert_not_called()
+
+    def test_refresh_button_disabled_until_folder_applied(self) -> None:
+        browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
+        self.assertFalse(browser._refresh_btn.isEnabled())
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, "a.stos"))
+            browser._apply_folder(tmp, persist=False, confirm_manual=False)
+            self.assertTrue(browser._refresh_btn.isEnabled())
+
+    def test_rescan_picks_up_new_files_and_keeps_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first = os.path.join(tmp, "a.stos")
+            second = os.path.join(tmp, "b.stos")
+            _touch(first)
+            browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
+            browser._apply_folder(tmp, persist=False, confirm_manual=False)
+            self.assertEqual(len(browser._rows), 1)
+            browser._current_index = 0
+            browser._list_widget.setCurrentRow(0)
+
+            _touch(second)
+            browser.rescan()
+
+            self.assertEqual(len(browser._rows), 2)
+            self.assertEqual(browser._rows[browser._current_index].basename, "a.stos")
+            self.assertEqual(browser._list_widget.count(), 2)
 
 
 if __name__ == "__main__":

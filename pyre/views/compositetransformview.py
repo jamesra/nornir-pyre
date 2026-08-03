@@ -213,7 +213,10 @@ class CompositeTransformView(IImageTransformView):
             image_view_model=image,
             transform_controller=self._transform_controller,
             gl_funcs=self._gl_funcs,
-            eager_tile_meshes=True,
+            # Composite source must build the full deformable mesh; display-space
+            # budgeted/lazy fills leave the magenta FBO empty (tiles built off-camera
+            # first, and continuation often never catches up). Target stays static quads.
+            eager_tile_meshes=(space_mapping == Space.Source),
             # Only the source FBO needs a deformable mesh; target stays native quads.
             warp_into_target_display=(space_mapping == Space.Source),
         )

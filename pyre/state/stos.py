@@ -323,10 +323,14 @@ class StosState(StateEventsImpl):
         )
         vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.SourceImageViewModel = vm
-        self._fixed_image_permutations = self._update_image_permutations(
-            self.SourceImageViewModel,
-            self.FixedImageMaskViewModel,
-        )
+        # Reuse loader helper when no separate mask VM; avoid rebuilding extrema/stats.
+        if self.FixedImageMaskViewModel is None:
+            self._fixed_image_permutations = result.permutations
+        else:
+            self._fixed_image_permutations = self._update_image_permutations(
+                self.SourceImageViewModel,
+                self.FixedImageMaskViewModel,
+            )
         self.FireOnImageChanged(pyre.Space.Source)
         return vm
 
@@ -346,10 +350,13 @@ class StosState(StateEventsImpl):
         )
         vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.TargetImageViewModel = vm
-        self._warped_image_permutations = self._update_image_permutations(
-            self.TargetImageViewModel,
-            self.WarpedImageMaskViewModel,
-        )
+        if self.WarpedImageMaskViewModel is None:
+            self._warped_image_permutations = result.permutations
+        else:
+            self._warped_image_permutations = self._update_image_permutations(
+                self.TargetImageViewModel,
+                self.WarpedImageMaskViewModel,
+            )
         return vm
 
     def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:

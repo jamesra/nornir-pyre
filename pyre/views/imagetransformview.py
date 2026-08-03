@@ -223,7 +223,8 @@ class ImageTransformView(IImageTransformView):
             get_or_create_tile_globjects=self.get_or_create_tile_globjects,
             shared_cpu_entry=cpu_entry,
             force_static_quads=self._use_static_tile_quads())
-        self._built_mesh_tiles.add(grid_coords)
+        if self._tile_mesh_is_ready(grid_coords):
+            self._built_mesh_tiles.add(grid_coords)
 
     def _ensure_visible_tile_meshes(
             self,
@@ -238,17 +239,25 @@ class ImageTransformView(IImageTransformView):
 
         self._activate_context()
         built = 0
+        remaining = False
         for grid_coords in sorted(visible_coords):
             if self._tile_mesh_is_ready(grid_coords):
                 continue
+            if max_tiles is not None and built >= max_tiles:
+                remaining = True
+                break
             self._build_tile_mesh(grid_coords)
             built += 1
-            if max_tiles is not None and built >= max_tiles:
-                if not self._lazy_mesh_pending_repaint:
-                    self._lazy_mesh_pending_repaint = True
-                    qt_post_to_main(self._request_lazy_mesh_repaint,
-                                    activate_context=self._activate_context)
-                break
+        if remaining:
+            self._schedule_lazy_mesh_repaint()
+
+    def _schedule_lazy_mesh_repaint(self) -> None:
+        """Request another frame so budgeted mesh builds can continue."""
+        if self._lazy_mesh_pending_repaint:
+            return
+        self._lazy_mesh_pending_repaint = True
+        qt_post_to_main(self._request_lazy_mesh_repaint,
+                        activate_context=self._activate_context)
 
     def _request_lazy_mesh_repaint(self) -> None:
         self._lazy_mesh_pending_repaint = False
@@ -261,8 +270,12 @@ class ImageTransformView(IImageTransformView):
             *,
             margin_tiles: int = 1,
             max_tiles: int | None = _LAZY_TILE_MESH_BUDGET) -> None:
-        """Incrementally build meshes for tiles intersecting the viewport."""
-        if not self._gl_initialized or visible_rect is None:
+        """Incrementally build meshes for tiles intersecting the viewport.
+
+        When ``visible_rect`` is None, budget-build the full tile grid (used by
+        composite FBO layers where display-space culls are unreliable).
+        """
+        if not self._gl_initialized:
             return
         if self._image_viewmodel is None or self.transform is None:
             return
@@ -270,14 +283,17 @@ class ImageTransformView(IImageTransformView):
             self.update_all_tile_buffers(visible_rect=visible_rect)
             return
 
-        expanded = gltiles.expand_visible_rectangle_by_tiles(
-            visible_rect,
-            tuple(int(v) for v in self._image_viewmodel.TextureSize),  # type: ignore[arg-type]
-            margin_tiles=margin_tiles)
-        visible = gltiles.tile_coords_for_visible_bounds(
-            self.height, self.width,
-            self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
-            expanded)
+        if visible_rect is None:
+            visible = set(self._image_viewmodel.generate_grid_indicies())
+        else:
+            expanded = gltiles.expand_visible_rectangle_by_tiles(
+                visible_rect,
+                tuple(int(v) for v in self._image_viewmodel.TextureSize),  # type: ignore[arg-type]
+                margin_tiles=margin_tiles)
+            visible = gltiles.tile_coords_for_visible_bounds(
+                self.height, self.width,
+                self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
+                expanded)
         self._ensure_visible_tile_meshes(visible, max_tiles=max_tiles)
 
     def OnTransformChanged(self, transform_controller: TransformController | None = None):
@@ -566,8 +582,9 @@ class ImageTransformView(IImageTransformView):
 
         cull_rect = bounding_box
         if view_type == ViewType.Composite:
-            # Composite FBO layers must rasterize the full image tile grids. Display-space
-            # bounds do not map reliably to per-layer native tile indices for mesh/grid STOS.
+            # Composite FBO layers must rasterize the full image tile grids. Corner-based
+            # inverse AABB from display bounds underestimates warped coverage for mesh/grid STOS
+            # (missing magenta source + window-width cropping of green target).
             cull_rect = None
         elif (
                 rigid_composite_source_align
@@ -591,10 +608,9 @@ class ImageTransformView(IImageTransformView):
                 self.update_all_tile_buffers(visible_rect=cull_rect)
 
         if self._uses_lazy_mesh_build():
-            prefetch_rect = cull_rect
-            if prefetch_rect is not None:
+            if cull_rect is not None:
                 prefetch_rect = gltiles.expand_visible_rectangle_by_tiles(
-                    prefetch_rect,
+                    cull_rect,
                     tuple(int(v) for v in image_viewmodel.TextureSize),
                     margin_tiles=1)
                 prefetch_coords = gltiles.tile_coords_for_visible_bounds(
@@ -602,7 +618,8 @@ class ImageTransformView(IImageTransformView):
                     image_viewmodel.TextureSize,
                     prefetch_rect)
             else:
-                prefetch_coords = visible
+                # Full grid, budgeted across frames (composite / unreliable cull).
+                prefetch_coords = set(image_viewmodel.generate_grid_indicies())
             self._ensure_visible_tile_meshes(prefetch_coords)
 
         for ix in range(0, image_viewmodel.NumCols):

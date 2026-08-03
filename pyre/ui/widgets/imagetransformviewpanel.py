@@ -478,11 +478,18 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def onTransformChanged(self):
         """Handle transform changes and prefetch visible tile meshes."""
         super().onTransformChanged()
+        # Composite sub-views rebuild via their own OnTransformChanged (source is eager
+        # full-grid). Avoid a second full mesh rebuild here.
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            return
         self._update_visible_tile_meshes()
 
     def onCameraChanged(self):
         """Handle camera changes and prefetch visible tile meshes."""
         super().onCameraChanged()
+        # Composite FBO meshes are not view-dependent (full grid); skip on pan/zoom.
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            return
         self._update_visible_tile_meshes()
 
     def _mesh_visible_bounds(self) -> nornir_imageregistration.Rectangle | None:
@@ -519,13 +526,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if bounds is None or self._image_transform_view is None:
             return
         if isinstance(self._image_transform_view, CompositeTransformView):
+            # Full-grid budgeted builds: display-space bounds are not a reliable cull for
+            # warped composite source tiles (and incorrectly crop the target layer).
             for sub_view in (
                     self._image_transform_view._source_image_view,
                     self._image_transform_view._target_image_view,
             ):
                 if sub_view is not None:
-                    # Composite sub-views render full tile grids into screen-sized FBOs.
-                    sub_view.update_all_tile_buffers(visible_rect=None)  # type: ignore[attr-defined]
+                    sub_view.update_visible_tile_meshes(None, margin_tiles=1)  # type: ignore[attr-defined]
         else:
             self._image_transform_view.update_visible_tile_meshes(bounds, margin_tiles=1)  # type: ignore[union-attr]
 

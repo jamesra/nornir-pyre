@@ -125,11 +125,13 @@ class TestStosFileBrowserDelete(unittest.TestCase):
             browser = self._browser_for_folder(tmp)
             browser._settings.stos.stos_file_source = StosFileSource.auto.value
             browser._file_source_selector.set_source(StosFileSource.auto)
-            with patch("pyre.ui.windows.stoswindow.StosWindow.loadStos") as load_stos:
-                browser._load_stos_at_index(0)
-            load_stos.assert_called_once()
+            browser._debounce_timer.stop()
+            browser._load_stos_at_index(0)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
             self.assertEqual(
-                os.path.normcase(os.path.abspath(load_stos.call_args.args[0])),
+                os.path.normcase(os.path.abspath(pending.filepath)),
                 os.path.normcase(os.path.abspath(manual)),
             )
 
@@ -140,11 +142,13 @@ class TestStosFileBrowserDelete(unittest.TestCase):
             browser = self._browser_for_folder(tmp)
             browser._settings.stos.stos_file_source = StosFileSource.original.value
             browser._file_source_selector.set_source(StosFileSource.original)
-            with patch("pyre.ui.windows.stoswindow.StosWindow.loadStos") as load_stos:
-                browser._load_stos_at_index(0)
-            load_stos.assert_called_once()
+            browser._debounce_timer.stop()
+            browser._load_stos_at_index(0)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
             self.assertEqual(
-                os.path.normcase(os.path.abspath(load_stos.call_args.args[0])),
+                os.path.normcase(os.path.abspath(pending.filepath)),
                 os.path.normcase(os.path.abspath(manual)),
             )
             self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
