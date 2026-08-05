@@ -165,9 +165,6 @@ class ImageLoader(IImageLoader):
                 # Another worker may have filled the cache while we decoded.
                 permutations = self._filepath_cache.setdefault(cache_key, helper)
 
-        # Overlap extrema/stats with later viewmodel creation / GL upload.
-        permutations.prefetch_extrema_async()
-
         return ImageLoadResult(key=str(key),
                                permutations=permutations,
                                image_fullpath=found_image_fullpath,
