@@ -3,7 +3,8 @@
 - Open Folder scans a STOS group directory and merges automatic ``*.stos`` files with
   overrides in ``Manual/`` (Nornir buildmanager layout).
 - Refresh re-scans the current folder (disk changes) without reopening the dialog.
-- Rows with a manual override show ``[Manual]`` and load the manual file on double-click.
+- Rows with a manual override show ``[Manual]`` and load the manual file on double-click
+  (any table column) or Enter.
 - Manual-only rows (manual present, automatic missing) use a darker yellow list color.
 - **File Source** selector (Auto / Original / Manual) controls which variant loads on open and navigation.
 - When the selected source cannot resolve a path, load falls back to Auto (manual preferred).
