@@ -135,6 +135,44 @@ class TestStosBrowserFileSource(unittest.TestCase):
             )
             self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
 
+    def test_cell_double_clicked_loads_stos(self) -> None:
+        """Double-click on either table column must queue a STOS load."""
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            open(auto, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto,
+                manual_path=None,
+                source=StosFileSource.auto,
+            )
+            browser._populate_list()
+            browser._on_cell_double_clicked(0, 1)  # ZNCC column
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, auto)
+            self.assertEqual(pending.index, 0)
+
+    def test_item_activated_loads_stos(self) -> None:
+        """Enter / platform activate on a table item must queue a STOS load."""
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            open(auto, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto,
+                manual_path=None,
+                source=StosFileSource.auto,
+            )
+            browser._populate_list()
+            item = browser._list_widget.item(0, 0)
+            self.assertIsNotNone(item)
+            assert item is not None
+            browser._on_item_activated(item)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, auto)
+
 
 if __name__ == "__main__":
     unittest.main()

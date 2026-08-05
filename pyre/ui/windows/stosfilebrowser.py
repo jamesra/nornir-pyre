@@ -239,7 +239,11 @@ class StosFileBrowserWindow(QMainWindow):
         header = self._list_widget.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        # Enter / platform "activate" (itemActivated) plus explicit double-click.
+        # itemActivated alone is not reliable for QTableWidget double-click on Windows
+        # when SH_ItemView_ActivateItemOnSingleClick is false.
         self._list_widget.itemActivated.connect(self._on_item_activated)
+        self._list_widget.cellDoubleClicked.connect(self._on_cell_double_clicked)
         self._list_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
         self._list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list_widget.customContextMenuRequested.connect(self._on_context_menu)
@@ -466,11 +470,15 @@ class StosFileBrowserWindow(QMainWindow):
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
                 label = f"{row.basename} [Manual]"
             name_item = QTableWidgetItem(label)
+            name_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             name_item.setToolTip(self._row_tooltip(row))
             color = self._row_list_color(row)
             if color is not None:
                 name_item.setForeground(color)
             score_item = QTableWidgetItem(format_quality_score(row.quality_score))
+            score_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             score_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
             score_item.setToolTip(self._row_tooltip(row))
             if color is not None:
@@ -637,6 +645,11 @@ class StosFileBrowserWindow(QMainWindow):
 
     def _on_item_activated(self, item: QTableWidgetItem) -> None:
         self._load_stos_at_index(item.row())
+
+    def _on_cell_double_clicked(self, row: int, column: int) -> None:
+        """Open the STOS for *row* on double-click (any column, including ZNCC)."""
+        del column
+        self._load_stos_at_index(row)
 
     def _on_context_menu(self, position) -> None:
         item = self._list_widget.itemAt(position)
