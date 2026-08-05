@@ -69,7 +69,7 @@ class TestStosFileBrowserDelete(unittest.TestCase):
             self.assertTrue(os.path.isfile(manual))
             self.assertEqual(len(browser._rows), 1)
             self.assertTrue(browser._rows[0].is_manual_only)
-            item = browser._list_widget.item(0)
+            item = browser._list_widget.item(0, 0)
             self.assertIsNotNone(item)
             assert item is not None
             self.assertEqual(item.foreground().color(), QColor("#8b6914"))
@@ -103,7 +103,7 @@ class TestStosFileBrowserDelete(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _touch(os.path.join(tmp, "Manual", "05-06.stos"))
             browser = self._browser_for_folder(tmp)
-            item = browser._list_widget.item(0)
+            item = browser._list_widget.item(0, 0)
             self.assertIsNotNone(item)
             assert item is not None
             self.assertEqual(item.foreground().color(), browser._manual_only_color)
@@ -113,7 +113,7 @@ class TestStosFileBrowserDelete(unittest.TestCase):
             _touch(os.path.join(tmp, "05-06.stos"))
             _touch(os.path.join(tmp, "Manual", "05-06.stos"))
             browser = self._browser_for_folder(tmp)
-            item = browser._list_widget.item(0)
+            item = browser._list_widget.item(0, 0)
             self.assertIsNotNone(item)
             assert item is not None
             self.assertEqual(item.foreground().color(), browser._manual_override_color)

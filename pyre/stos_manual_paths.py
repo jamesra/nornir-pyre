@@ -154,7 +154,7 @@ class StosBrowserRow:
     basename: str
     auto_path: str | None
     manual_path: str | None
-    # quality_score: float | None = None  # Future: sortable quality column
+    quality_score: float | None = None
 
     @property
     def has_manual_override(self) -> bool:
@@ -174,6 +174,15 @@ class StosBrowserRow:
     def load_path_for_source(self, source: StosFileSource) -> str | None:
         """Return the path to load for *source*."""
         return resolve_load_path(self.auto_path, self.manual_path, source)
+
+    def with_quality_score(self, score: float | None) -> StosBrowserRow:
+        """Return a copy of this row with *score* attached."""
+        return StosBrowserRow(
+            basename=self.basename,
+            auto_path=self.auto_path,
+            manual_path=self.manual_path,
+            quality_score=score,
+        )
 
     @property
     def sort_key(self) -> tuple:

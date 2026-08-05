@@ -1,7 +1,5 @@
 """Stos Directory window — browse STOS group folders with Manual override support.
 
-Future (not implemented): sortable columns for filename and overall quality score.
-
 - Open Folder scans a STOS group directory and merges automatic ``*.stos`` files with
   overrides in ``Manual/`` (Nornir buildmanager layout).
 - Refresh re-scans the current folder (disk changes) without reopening the dialog.
@@ -20,6 +18,9 @@ Future (not implemented): sortable columns for filename and overall quality scor
 - ``+`` / ``-`` / ``=`` step one transform when a folder is loaded (application-wide).
   On US QWERTY, unshifted ``=`` and ``-`` step down; ``Shift+=`` (``+``) steps up.
   ``Shift++`` / ``Shift+-`` step ten transforms (numpad; main keyboard ``Shift+-`` only).
+- Transform table shows pair ZNCC when ``stos_quality.json`` has a fresh score; missing or
+  stale scores are computed in the background. A histogram under the table marks the
+  selected score.
 """
 
 from __future__ import annotations
@@ -31,12 +32,18 @@ from dataclasses import dataclass
 from dependency_injector.wiring import inject, Provide
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QListWidget, QListWidgetItem, QFileDialog,
-    QMessageBox, QMenu,
+    QPushButton, QLabel, QTableWidget, QTableWidgetItem, QFileDialog,
+    QMessageBox, QMenu, QHeaderView, QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QObject, QEvent, QTimer
 from PyQt6.QtGui import QFontMetrics, QKeyEvent, QColor, QKeySequence, QShortcut, QMouseEvent, QGuiApplication
 
+from nornir_imageregistration.stos_quality import (
+    QualityCache,
+    load_quality_cache,
+    save_quality_cache,
+    score_stos_into_cache,
+)
 from pyre.container import IContainer
 from pyre.qt_eventmanager import qt_post_to_main
 from pyre.settings import AppSettings
@@ -48,7 +55,13 @@ from pyre.stos_manual_paths import (
     parent_stos_group_folder,
     scan_stos_browser_rows,
 )
+from pyre.stos_quality_browser import (
+    attach_quality_scores,
+    format_quality_score,
+    histogram_from_rows,
+)
 from pyre.ui.widgets.stos_file_source_selector import StosFileSourceSelector
+from pyre.ui.widgets.stos_quality_histogram import StosQualityHistogramWidget
 
 
 @dataclass(frozen=True)
@@ -87,7 +100,7 @@ class StosBrowserMouseNavigationFilter(QObject):
 
 
 class StosBrowserListDeleteFilter(QObject):
-    """Intercept Delete on the list widget so the main window need not hold focus."""
+    """Intercept Delete on the table widget so the main window need not hold focus."""
 
     _browser: StosFileBrowserWindow
 
@@ -125,6 +138,9 @@ class StosFileBrowserWindow(QMainWindow):
     _mouse_nav_filter: StosBrowserMouseNavigationFilter | None
     _list_delete_filter: StosBrowserListDeleteFilter | None
     _file_source_selector: StosFileSourceSelector
+    _quality_histogram: StosQualityHistogramWidget
+    _quality_cache: QualityCache
+    _score_generation: int
     _manual_override_color = QColor("#c9a227")
     _manual_only_color = QColor("#8b6914")
     _load_generation: int
@@ -150,7 +166,7 @@ class StosFileBrowserWindow(QMainWindow):
         super().__init__(parent)
         self._settings = settings
         self.setWindowTitle("Stos Directory")
-        self.resize(350, 600)
+        self.resize(380, 700)
         self._rows = []
         self._current_index = -1
         self._browse_mode = BrowseMode.stos_group
@@ -159,6 +175,8 @@ class StosFileBrowserWindow(QMainWindow):
         self._mouse_nav_filter = None
         self._list_delete_filter = None
         self._load_generation = 0
+        self._score_generation = 0
+        self._quality_cache = QualityCache()
         self._pending_load = None
         self._load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stos-nav-load")
         self._debounce_timer = QTimer(self)
@@ -212,14 +230,25 @@ class StosFileBrowserWindow(QMainWindow):
         self._file_source_selector.source_changed.connect(self._on_file_source_changed)
         layout.addWidget(self._file_source_selector)
 
-        self._list_widget = QListWidget()
+        self._list_widget = QTableWidget(0, 2)
+        self._list_widget.setHorizontalHeaderLabels(['Transform', 'ZNCC'])
+        self._list_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._list_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._list_widget.verticalHeader().setVisible(False)
+        header = self._list_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._list_widget.itemActivated.connect(self._on_item_activated)
-        self._list_widget.currentRowChanged.connect(self._on_list_selection_changed)
+        self._list_widget.itemSelectionChanged.connect(self._on_table_selection_changed)
         self._list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list_widget.customContextMenuRequested.connect(self._on_context_menu)
         self._list_delete_filter = StosBrowserListDeleteFilter(self)
         self._list_widget.installEventFilter(self._list_delete_filter)
         layout.addWidget(self._list_widget)
+
+        self._quality_histogram = StosQualityHistogramWidget(self)
+        layout.addWidget(self._quality_histogram)
 
         self._setup_navigation_shortcuts()
 
@@ -283,12 +312,12 @@ class StosFileBrowserWindow(QMainWindow):
             for index, row in enumerate(self._rows):
                 if row.basename == previous_basename:
                     self._current_index = index
-                    self._list_widget.setCurrentRow(index)
+                    self._set_current_row(index)
                     return
             if self._rows:
                 self._current_index = min(self._current_index, len(self._rows) - 1)
                 self._current_index = max(0, self._current_index)
-                self._list_widget.setCurrentRow(self._current_index)
+                self._set_current_row(self._current_index)
             else:
                 self._current_index = -1
 
@@ -307,7 +336,7 @@ class StosFileBrowserWindow(QMainWindow):
             for candidate in (row.auto_path, row.manual_path, row.default_load_path):
                 if candidate and os.path.normcase(os.path.abspath(candidate)) == norm:
                     self._current_index = index
-                    self._list_widget.setCurrentRow(index)
+                    self._set_current_row(index)
                     return
 
     def navigate_by_delta(self, delta: int) -> None:
@@ -410,23 +439,112 @@ class StosFileBrowserWindow(QMainWindow):
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
                 label = f"{row.basename} [Manual]"
             max_text = max(max_text, metrics.horizontalAdvance(label))
-        return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING)
+        return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING + 64)
+
+    def _set_current_row(self, index: int) -> None:
+        """Select table row *index* (stand-in for ``QListWidget.setCurrentRow``)."""
+        if index < 0 or index >= self._list_widget.rowCount():
+            self._list_widget.clearSelection()
+            return
+        self._list_widget.setCurrentCell(index, 0)
 
     def _populate_list(self) -> None:
-        self._list_widget.clear()
-        for row in self._rows:
+        if self._folder:
+            self._rows, self._quality_cache, stale = attach_quality_scores(
+                self._folder,
+                self._rows,
+                self._source_for_load(),
+                cache=load_quality_cache(self._folder),
+            )
+        else:
+            stale = []
+
+        self._list_widget.setRowCount(0)
+        self._list_widget.setRowCount(len(self._rows))
+        for index, row in enumerate(self._rows):
             label = row.basename
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
                 label = f"{row.basename} [Manual]"
-            item = QListWidgetItem(label)
-            item.setToolTip(self._row_tooltip(row))
+            name_item = QTableWidgetItem(label)
+            name_item.setToolTip(self._row_tooltip(row))
             color = self._row_list_color(row)
             if color is not None:
-                item.setForeground(color)
-            self._list_widget.addItem(item)
+                name_item.setForeground(color)
+            score_item = QTableWidgetItem(format_quality_score(row.quality_score))
+            score_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            score_item.setToolTip(self._row_tooltip(row))
+            if color is not None:
+                score_item.setForeground(color)
+            self._list_widget.setItem(index, 0, name_item)
+            self._list_widget.setItem(index, 1, score_item)
+
         if 0 <= self._current_index < len(self._rows):
-            self._list_widget.setCurrentRow(self._current_index)
+            self._set_current_row(self._current_index)
         self._update_source_selector_for_current_row()
+        self._refresh_quality_histogram()
+        if self._folder and stale:
+            self._queue_quality_scores(stale)
+
+    def _refresh_quality_histogram(self) -> None:
+        selected = None
+        row = self._current_row()
+        if row is not None:
+            selected = row.quality_score
+        self._quality_histogram.set_histogram(
+            histogram_from_rows(self._rows),
+            selected_score=selected,
+        )
+
+    def _queue_quality_scores(self, paths: list[str]) -> None:
+        """Compute missing/stale pair ZNCC scores in the background."""
+        if not self._folder or not paths:
+            return
+        folder = self._folder
+        self._score_generation += 1
+        generation = self._score_generation
+        unique_paths = list(dict.fromkeys(paths))
+
+        def _worker() -> QualityCache:
+            cache = load_quality_cache(folder)
+            for path in unique_paths:
+                if generation != self._score_generation:
+                    break
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    cache, _entry, _computed = score_stos_into_cache(
+                        folder, path, cache=cache, max_side=2048)
+                except Exception as exc:
+                    print(f"STOS quality score failed for {path}: {exc}")
+            save_quality_cache(folder, cache)
+            return cache
+
+        def _on_done(future: Future) -> None:
+            def _apply() -> None:
+                if generation != self._score_generation or self._folder != folder:
+                    return
+                try:
+                    cache = future.result()
+                except Exception as exc:
+                    print(f"STOS quality score worker failed: {exc}")
+                    return
+                self._quality_cache = cache
+                self._rows, self._quality_cache, _stale = attach_quality_scores(
+                    folder,
+                    [row.with_quality_score(None) for row in self._rows],
+                    self._source_for_load(),
+                    cache=cache,
+                )
+                for index, row in enumerate(self._rows):
+                    score_item = self._list_widget.item(index, 1)
+                    if score_item is not None:
+                        score_item.setText(format_quality_score(row.quality_score))
+                self._refresh_quality_histogram()
+
+            qt_post_to_main(_apply)
+
+        future = self._load_executor.submit(_worker)
+        future.add_done_callback(lambda f: _on_done(f))
 
     def _row_list_color(self, row: StosBrowserRow) -> QColor | None:
         """Return list foreground color for manual override / manual-only rows."""
@@ -467,15 +585,20 @@ class StosFileBrowserWindow(QMainWindow):
             self._file_source_selector.set_source(fallback)
             self._settings.stos.stos_file_source = fallback.value
 
-    def _on_list_selection_changed(self, index: int) -> None:
+    def _on_table_selection_changed(self) -> None:
+        index = self._list_widget.currentRow()
         if index < 0:
             self._current_index = -1
         else:
             self._current_index = index
         self._update_source_selector_for_current_row()
+        self._refresh_quality_histogram()
 
     def _on_file_source_changed(self, source: StosFileSource) -> None:
         self._settings.stos.stos_file_source = source.value
+        if self._folder:
+            # Re-attach scores for the newly preferred Auto/Manual path.
+            self._populate_list()
         if self._current_index >= 0:
             self._load_stos_at_index(self._current_index)
 
@@ -508,16 +631,18 @@ class StosFileBrowserWindow(QMainWindow):
         tip = f"Automatic: {auto}\nManual: {manual}"
         if row.is_manual_only:
             tip += "\n(automatic missing)"
+        if row.quality_score is not None:
+            tip += f"\nPair ZNCC: {row.quality_score:.3f}"
         return tip
 
-    def _on_item_activated(self, item: QListWidgetItem) -> None:
-        self._load_stos_at_index(self._list_widget.row(item))
+    def _on_item_activated(self, item: QTableWidgetItem) -> None:
+        self._load_stos_at_index(item.row())
 
     def _on_context_menu(self, position) -> None:
         item = self._list_widget.itemAt(position)
         if item is None:
             return
-        index = self._list_widget.row(item)
+        index = item.row()
         if index < 0 or index >= len(self._rows):
             return
         row = self._rows[index]
@@ -582,7 +707,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._load_generation += 1
         generation = self._load_generation
         self._current_index = index
-        self._list_widget.setCurrentRow(index)
+        self._set_current_row(index)
         self.setWindowTitle(f"Stos Directory \u2014 {os.path.basename(filepath)}")
         self._pending_load = _PendingStosLoad(
             generation=generation,
@@ -687,11 +812,11 @@ class StosFileBrowserWindow(QMainWindow):
         for new_index, new_row in enumerate(self._rows):
             if new_row.basename == basename:
                 self._current_index = new_index
-                self._list_widget.setCurrentRow(new_index)
+                self._set_current_row(new_index)
                 return
         if self._rows:
             self._current_index = min(index, len(self._rows) - 1)
-            self._list_widget.setCurrentRow(self._current_index)
+            self._set_current_row(self._current_index)
         else:
             self._current_index = -1
 
@@ -714,6 +839,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._debounce_timer.stop()
         self._pending_load = None
         self._load_generation += 1  # supersede any in-flight apply
+        self._score_generation += 1
         self._remove_mouse_navigation_filter()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
         super().closeEvent(event)

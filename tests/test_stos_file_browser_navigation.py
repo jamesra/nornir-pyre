@@ -136,14 +136,14 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
             browser._apply_folder(tmp, persist=False, confirm_manual=False)
             self.assertEqual(len(browser._rows), 1)
             browser._current_index = 0
-            browser._list_widget.setCurrentRow(0)
+            browser._set_current_row(0)
 
             _touch(second)
             browser.rescan()
 
             self.assertEqual(len(browser._rows), 2)
             self.assertEqual(browser._rows[browser._current_index].basename, "a.stos")
-            self.assertEqual(browser._list_widget.count(), 2)
+            self.assertEqual(browser._list_widget.rowCount(), 2)
 
 
 if __name__ == "__main__":
