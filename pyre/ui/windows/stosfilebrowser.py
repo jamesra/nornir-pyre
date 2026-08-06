@@ -21,7 +21,8 @@
   ``Shift++`` / ``Shift+-`` step ten transforms (numpad; main keyboard ``Shift+-`` only).
 - Transform table shows pair ZNCC when ``stos_quality.json`` has a fresh score; missing or
   stale scores are computed in the background. A histogram under the table marks the
-  selected score.
+  selected score. ZNCC text is tinted by empirical percentile in the folder (magenta low,
+  soft white mid, green high); Manual gold styling is unchanged.
 """
 
 from __future__ import annotations
@@ -60,6 +61,9 @@ from pyre.stos_quality_browser import (
     attach_quality_scores,
     format_quality_score,
     histogram_from_rows,
+    quality_score_rgb,
+    score_to_percentile,
+    scores_from_rows,
 )
 from pyre.ui.widgets.stos_file_source_selector import StosFileSourceSelector
 from pyre.ui.widgets.stos_quality_histogram import StosQualityHistogramWidget
@@ -466,6 +470,7 @@ class StosFileBrowserWindow(QMainWindow):
 
         self._list_widget.setRowCount(0)
         self._list_widget.setRowCount(len(self._rows))
+        scored_values = scores_from_rows(self._rows)
         for index, row in enumerate(self._rows):
             label = row.basename
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
@@ -473,7 +478,7 @@ class StosFileBrowserWindow(QMainWindow):
             name_item = QTableWidgetItem(label)
             name_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            name_item.setToolTip(self._row_tooltip(row))
+            name_item.setToolTip(self._row_tooltip(row, scored_values))
             color = self._row_list_color(row)
             if color is not None:
                 name_item.setForeground(color)
@@ -481,9 +486,13 @@ class StosFileBrowserWindow(QMainWindow):
             score_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             score_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-            score_item.setToolTip(self._row_tooltip(row))
+            score_item.setToolTip(self._row_tooltip(row, scored_values))
             if color is not None:
                 score_item.setForeground(color)
+            elif row.quality_score is not None:
+                rgb = quality_score_rgb(float(row.quality_score), scored_values)
+                if rgb is not None:
+                    score_item.setForeground(QColor.fromRgbF(rgb[0], rgb[1], rgb[2]))
             self._list_widget.setItem(index, 0, name_item)
             self._list_widget.setItem(index, 1, score_item)
 
@@ -634,7 +643,7 @@ class StosFileBrowserWindow(QMainWindow):
         return None, source
 
     @staticmethod
-    def _row_tooltip(row: StosBrowserRow) -> str:
+    def _row_tooltip(row: StosBrowserRow, scored_values: list[float] | None = None) -> str:
         auto = row.auto_path or "(none)"
         manual = row.manual_path or "(none)"
         tip = f"Automatic: {auto}\nManual: {manual}"
@@ -642,6 +651,10 @@ class StosFileBrowserWindow(QMainWindow):
             tip += "\n(automatic missing)"
         if row.quality_score is not None:
             tip += f"\nPair ZNCC: {row.quality_score:.3f}"
+            if scored_values is not None:
+                percentile = score_to_percentile(float(row.quality_score), scored_values)
+                if percentile is not None:
+                    tip += f"\nPercentile: {100.0 * percentile:.0f}%"
         return tip
 
     def _on_item_activated(self, item: QTableWidgetItem) -> None:

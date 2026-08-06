@@ -20,7 +20,11 @@ from pyre.stos_quality_browser import (
     attach_quality_scores,
     format_quality_score,
     histogram_from_rows,
+    percentile_to_rgb,
+    quality_score_rgb,
     score_path_for_row,
+    score_to_percentile,
+    scores_from_rows,
 )
 
 
@@ -69,3 +73,62 @@ def test_attach_quality_scores_and_histogram(tmp_path: Path) -> None:
     assert stale == []
     hist = histogram_from_rows(updated)
     assert hist.NumSamples == 1
+
+
+def test_score_to_percentile_needs_two_samples() -> None:
+    assert score_to_percentile(0.5, [0.5]) is None
+    assert score_to_percentile(0.5, []) is None
+
+
+def test_score_to_percentile_empirical_cdf() -> None:
+    scores = [0.1, 0.2, 0.3, 0.4]
+    assert score_to_percentile(0.1, scores) == pytest.approx(0.25)
+    assert score_to_percentile(0.4, scores) == pytest.approx(1.0)
+    assert score_to_percentile(0.25, scores) == pytest.approx(0.5)
+
+
+def test_percentile_to_rgb_mid_near_white() -> None:
+    r, g, b = percentile_to_rgb(0.5)
+    assert r == pytest.approx(0xE8 / 255.0, abs=0.05)
+    assert g == pytest.approx(0xE8 / 255.0, abs=0.05)
+    assert b == pytest.approx(0xE8 / 255.0, abs=0.05)
+
+
+def test_percentile_to_rgb_low_magenta_high_green() -> None:
+    low = percentile_to_rgb(0.0)
+    high = percentile_to_rgb(1.0)
+    # Magenta: R and B elevated vs G
+    assert low[0] > low[1]
+    assert low[2] > low[1]
+    # Green: G elevated vs R and B
+    assert high[1] > high[0]
+    assert high[1] > high[2]
+
+
+def test_quality_score_rgb_endpoints() -> None:
+    scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+    low = quality_score_rgb(0.1, scores)
+    mid = quality_score_rgb(0.3, scores)
+    high = quality_score_rgb(0.5, scores)
+    assert low is not None and mid is not None and high is not None
+    # Low is magenta-ward (R,B > G); high is green-ward (G dominant).
+    assert low[0] > low[1] and low[2] > low[1]
+    assert high[1] > high[0] and high[1] > high[2]
+    # Mid sits nearer soft white than the extremes.
+    white = (0xE8 / 255.0, 0xE8 / 255.0, 0xE8 / 255.0)
+
+    def dist(rgb: tuple[float, float, float]) -> float:
+        return sum((a - b) ** 2 for a, b in zip(rgb, white))
+
+    assert dist(mid) < dist(low)
+    assert dist(mid) < dist(high)
+    assert quality_score_rgb(0.5, [0.5]) is None
+
+
+def test_scores_from_rows() -> None:
+    rows = [
+        StosBrowserRow('a.stos', 'a', None).with_quality_score(0.2),
+        StosBrowserRow('b.stos', 'b', None).with_quality_score(None),
+        StosBrowserRow('c.stos', 'c', None).with_quality_score(0.8),
+    ]
+    assert scores_from_rows(rows) == [0.2, 0.8]
