@@ -210,6 +210,13 @@ class ImageTransformView(IImageTransformView):
         render_data = self._tile_render_data.get(grid_coords)
         return render_data is not None and render_data.mesh_populated
 
+    def _rbf_extrapolate_enabled(self) -> bool:
+        """False until TransformController finishes off-UI RBF weight precompute."""
+        tc = self._transform_controller
+        if tc is None:
+            return True
+        return tc.rbf_prewarm_ready
+
     def _build_tile_mesh(self, grid_coords: tuple[int, int]) -> None:
         """Build CPU and GL mesh data for one tile coordinate."""
         if self._image_viewmodel is None or self.transform is None:
@@ -222,7 +229,8 @@ class ImageTransformView(IImageTransformView):
             self._image_space,
             get_or_create_tile_globjects=self.get_or_create_tile_globjects,
             shared_cpu_entry=cpu_entry,
-            force_static_quads=self._use_static_tile_quads())
+            force_static_quads=self._use_static_tile_quads(),
+            extrapolate=self._rbf_extrapolate_enabled())
         if self._tile_mesh_is_ready(grid_coords):
             self._built_mesh_tiles.add(grid_coords)
 
@@ -306,16 +314,16 @@ class ImageTransformView(IImageTransformView):
             if hint == TileRefreshHint.NONE:
                 return
         uses_quads = self._use_static_tile_quads()
+        has_tiles = bool(self._tile_render_data)
+        tiles_are_rigid = has_tiles and all(
+            getattr(t, "is_rigid_quad", False) for t in self._tile_render_data.values())
         if uses_quads:
-            needs_rigid_init = not self._tile_render_data
-            if not needs_rigid_init:
-                for tile_data in self._tile_render_data.values():
-                    if not tile_data.is_rigid_quad:
-                        needs_rigid_init = True
-                        break
+            # Rebuild when empty or when leftover mesh tiles remain after rigid←mesh.
+            needs_rigid_init = (not has_tiles) or (not tiles_are_rigid)
             if needs_rigid_init:
                 self.update_all_tile_buffers()
             return
+        # Mesh path: drop stale rigid quads after rigid→mesh replace.
         self._invalidate_tile_meshes()
         if not self._uses_lazy_mesh_build():
             self.update_all_tile_buffers()
@@ -352,7 +360,8 @@ class ImageTransformView(IImageTransformView):
             self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
             self._image_space,
             cached_entry=render_data,
-            force_static_quads=want_static)
+            force_static_quads=want_static,
+            extrapolate=self._rbf_extrapolate_enabled())
         cache.put(vm_id, self._image_space, grid_coords, entry)
         return entry
 
@@ -389,7 +398,8 @@ class ImageTransformView(IImageTransformView):
                     self._image_space,
                     get_or_create_tile_globjects=self.get_or_create_tile_globjects,
                     shared_cpu_entry=None,
-                    force_static_quads=self._use_static_tile_quads())
+                    force_static_quads=self._use_static_tile_quads(),
+                    extrapolate=self._rbf_extrapolate_enabled())
 
     def update_all_tile_buffers(self, visible_rect: nornir_imageregistration.Rectangle | None = None):
         """Update the buffers for all tiles in the image viewmodel (or visible subset)."""
@@ -426,7 +436,8 @@ class ImageTransformView(IImageTransformView):
                                                  self._image_space,
                                                  get_or_create_tile_globjects=self.get_or_create_tile_globjects,
                                                  shared_cpu_entry=cpu_entry,
-                                                 force_static_quads=self._use_static_tile_quads())
+                                                 force_static_quads=self._use_static_tile_quads(),
+                                                 extrapolate=self._rbf_extrapolate_enabled())
                     self._built_mesh_tiles.add(grid_coords)
                     if grid_coords in unused_grid_coords:
                         unused_grid_coords.remove(grid_coords)

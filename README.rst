@@ -151,7 +151,7 @@ Navigation:
     * Page Up/Down: Change the magnification
 
 View Controls:
-    * M: Match the view on all windows to look at the same point as the current window (not functional for Source panel in some modes)
+    * M: Match Source, Target, and Composite to the focused window's view center and magnification
     * L: Show transform mesh lines
     * F: Flip the source (mapped) image
     * Tab: Toggle how the source image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.

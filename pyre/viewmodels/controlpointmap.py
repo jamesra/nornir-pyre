@@ -133,6 +133,10 @@ class ControlPointMap:
     def find_nearest_within(self, points: NDArray[np.floating], max_distance: float) -> set[int]:
         """Find the single nearest point within max_distance (avoids multi-select when zoomed out)."""
         query = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+        if query.size == 0 or not np.all(np.isfinite(query)):
+            # InverseTransform/Transform can yield NaN outside the mesh (e.g. right after
+            # delete while RBF prewarm forces extrapolate=False). Treat as no hit.
+            return set()
         if query.shape[0] != 1:
             results = self._kdtree.query_ball_point(query, r=max_distance, return_sorted=True)
             return {int(i) for sub in results for i in sub}

@@ -32,6 +32,11 @@ class TestControlPointPick(unittest.TestCase):
       hits = cmap.find_nearest_within(np.array([100.5, 200.5]), 5.0)
       self.assertEqual(hits, {0})
 
+  def test_find_nearest_within_rejects_non_finite_query(self) -> None:
+      cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
+      self.assertEqual(cmap.find_nearest_within(np.array([np.nan, 0.0]), 5.0), set())
+      self.assertEqual(cmap.find_nearest_within(np.array([np.inf, 1.0]), 5.0), set())
+
   def test_drag_translate_uses_existing_selection(self) -> None:
       event = SelectionEventData(
           camera=None,  # type: ignore[arg-type]

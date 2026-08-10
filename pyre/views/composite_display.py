@@ -155,12 +155,23 @@ def forward_for_composite_view(
 
 
 def _transform_single_point(
-        fn: Callable[[NDArray[np.floating]], NDArray[np.floating] | object],
-        yx: NDArray[np.floating] | object) -> NDArray[np.floating]:
+        fn: Callable[..., NDArray[np.floating] | object],
+        yx: NDArray[np.floating] | object,
+        **kwargs,
+) -> NDArray[np.floating]:
     """Apply a transform that accepts Nx2 points and return a (y, x) vector."""
     arr = _as_numpy_f64(yx).reshape(1, 2)
-    return np.squeeze(_as_numpy_f64(fn(arr)))
+    return np.squeeze(_as_numpy_f64(fn(arr, **kwargs)))
 
+
+def _ui_transform_point(
+        transform_controller: TransformController,
+        forward: bool,
+        yx: NDArray[np.floating] | object,
+) -> NDArray[np.floating]:
+    """Map one point for camera/mouse UI; always extrapolate so NaNs do not leak."""
+    fn = transform_controller.Transform if forward else transform_controller.InverseTransform
+    return _transform_single_point(fn, yx, extrapolate=True)
 
 def display_lookat_for_composite(
         camera: Camera,
@@ -174,7 +185,7 @@ def display_lookat_for_composite(
         view_forward = forward_for_composite_view(transform_controller, model)
         return apply_rigid_yx(view_forward, camera.lookat)
     lookat = np.asarray(camera.lookat, dtype=np.float64)
-    return _transform_single_point(transform_controller.Transform, lookat)
+    return _ui_transform_point(transform_controller, True, lookat)
 
 
 def lookat_from_display_position(
@@ -182,8 +193,7 @@ def lookat_from_display_position(
         display_yx: NDArray[np.floating],
 ) -> NDArray[np.floating]:
     """Map a composite display-space (y,x) position back to source-camera lookat."""
-    return _transform_single_point(transform_controller.InverseTransform, display_yx)
-
+    return _ui_transform_point(transform_controller, False, display_yx)
 
 def rebase_composite_camera_after_rigid_gesture(
         camera: Camera,
@@ -284,9 +294,12 @@ def world_point_pair_for_composite_mouse(
     display_pos = display_mouse_coords(camera, transform_controller, y, x)
     if display_pos is None:
         return None
-    source_pos = _transform_single_point(transform_controller.InverseTransform, display_pos)
+    display_yx = _as_numpy_f64(display_pos)
+    if not np.all(np.isfinite(display_yx)):
+        return None
+    source_pos = _ui_transform_point(transform_controller, False, display_yx)
     return PointPair(
-        target=_as_numpy_f64(display_pos),
+        target=display_yx,
         source=_as_numpy_f64(source_pos),
     )
 
@@ -316,3 +329,41 @@ def composite_uses_display_space(
         return False
     model = transform_controller.TransformModel
     return model is not None and not is_rigid_transform(model)
+
+
+def target_space_lookat_for_stos_view(
+        camera: Camera,
+        transform_controller: TransformController,
+        space: Space,
+        view_type: ViewType | None,
+) -> NDArray[np.floating]:
+    """Return the focused STOS view center in Target (control) space.
+
+    Used by the ``M`` match-view shortcut so Source, Target, and Composite share
+    the same on-screen center and magnification.
+    """
+    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+    if view_type == ViewType.Composite:
+        return np.asarray(
+            display_lookat_for_composite(camera, transform_controller),
+            dtype=np.float64,
+        ).ravel()[:2]
+    if space == Space.Source:
+        if transform_controller.TransformModel is None:
+            return lookat
+        return _ui_transform_point(transform_controller, True, lookat)
+    return lookat
+
+
+def camera_lookat_from_target_space(
+        transform_controller: TransformController | None,
+        target_yx: nornir_imageregistration.PointLike,
+        space: Space,
+) -> NDArray[np.floating]:
+    """Map a Target-space point into a panel camera's native lookat space."""
+    point = np.asarray(target_yx, dtype=np.float64).ravel()[:2]
+    if space != Space.Source:
+        return point
+    if transform_controller is None or transform_controller.TransformModel is None:
+        return point
+    return _ui_transform_point(transform_controller, False, point)

@@ -14,10 +14,12 @@ from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.views.composite_display import (
+    camera_lookat_from_target_space,
     composite_control_point_draw_rows,
     composite_tile_cull_rect,
     display_lookat_for_composite,
     lookat_from_display_position,
+    target_space_lookat_for_stos_view,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
 )
@@ -60,7 +62,8 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         self.camera.lookat = np.array([20.0, 30.0], dtype=np.float64)
 
     def test_display_lookat_is_forward_of_camera_lookat(self) -> None:
-        expected = np.squeeze(self.controller.Transform(self.camera.lookat.reshape(1, 2)))
+        expected = np.squeeze(
+            self.controller.Transform(self.camera.lookat.reshape(1, 2), extrapolate=True))
         actual = display_lookat_for_composite(self.camera, self.controller)
         np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
 
@@ -70,7 +73,9 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         pair = world_point_pair_for_composite_mouse(self.camera, self.controller, 100.0, 150.0)
         self.assertIsNotNone(pair)
         assert pair is not None
-        roundtrip = np.squeeze(self.controller.Transform(pair.source.reshape(1, 2)))
+        self.assertTrue(np.all(np.isfinite(pair.source)))
+        roundtrip = np.squeeze(
+            self.controller.Transform(pair.source.reshape(1, 2), extrapolate=True))
         np.testing.assert_allclose(roundtrip, pair.target, rtol=1e-4, atol=1e-3)
 
     def test_composite_controlpointmap_uses_display_source_positions(self) -> None:
@@ -179,6 +184,62 @@ class TestCompositeRigidGestureCameraRebase(unittest.TestCase):
         # Without rebase, live Transform(old lookat) would have jumped with the translate.
         unbased = _transform_without_rebase(controller, np.array([40.0, 50.0], dtype=np.float64))
         self.assertFalse(np.allclose(unbased, display_before, atol=1.0))
+
+
+class TestMatchViewLookatSync(unittest.TestCase):
+    """M-key helpers convert between panel camera space and Target sync space."""
+
+    def setUp(self) -> None:
+        # Rigid offset keeps forward/inverse exact without waiting on RBF prewarm.
+        self.controller = TransformController(
+            Rigid(target_offset=(5.0, 10.0), source_rotation_center=(0.0, 0.0), angle=0.0))
+        self.source_lookat = np.array([20.0, 30.0], dtype=np.float64)
+        self.target_lookat = np.squeeze(
+            self.controller.Transform(self.source_lookat.reshape(1, 2)))
+
+    def test_source_view_exports_target_space_lookat(self) -> None:
+        camera = _TestCamera(self.source_lookat)
+        actual = target_space_lookat_for_stos_view(
+            camera, self.controller, Space.Source, ViewType.Source)
+        np.testing.assert_allclose(actual, self.target_lookat, rtol=1e-5, atol=1e-5)
+
+    def test_target_view_exports_camera_lookat(self) -> None:
+        camera = _TestCamera(self.target_lookat)
+        actual = target_space_lookat_for_stos_view(
+            camera, self.controller, Space.Target, ViewType.Target)
+        np.testing.assert_allclose(actual, self.target_lookat, rtol=1e-5, atol=1e-5)
+
+    def test_composite_view_exports_display_lookat(self) -> None:
+        camera = _TestCamera(self.source_lookat)
+        actual = target_space_lookat_for_stos_view(
+            camera, self.controller, Space.Source, ViewType.Composite)
+        expected = display_lookat_for_composite(camera, self.controller)
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+    def test_camera_lookat_from_target_round_trips_source(self) -> None:
+        source = camera_lookat_from_target_space(
+            self.controller, self.target_lookat, Space.Source)
+        np.testing.assert_allclose(source, self.source_lookat, rtol=1e-4, atol=1e-3)
+        target = camera_lookat_from_target_space(
+            self.controller, self.target_lookat, Space.Target)
+        np.testing.assert_allclose(target, self.target_lookat, rtol=1e-5, atol=1e-5)
+
+    def test_match_from_source_aligns_all_panel_cameras(self) -> None:
+        """Simulate M on Source: all panels end at corresponding centers."""
+        sync = target_space_lookat_for_stos_view(
+            _TestCamera(self.source_lookat),
+            self.controller,
+            Space.Source,
+            ViewType.Source,
+        )
+        source_cam = camera_lookat_from_target_space(self.controller, sync, Space.Source)
+        target_cam = camera_lookat_from_target_space(self.controller, sync, Space.Target)
+        composite_cam = camera_lookat_from_target_space(self.controller, sync, Space.Source)
+        np.testing.assert_allclose(source_cam, self.source_lookat, rtol=1e-4, atol=1e-3)
+        np.testing.assert_allclose(target_cam, sync, rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(composite_cam, self.source_lookat, rtol=1e-4, atol=1e-3)
+        display = display_lookat_for_composite(_TestCamera(composite_cam), self.controller)
+        np.testing.assert_allclose(display, sync, rtol=1e-4, atol=1e-3)
 
 
 def _transform_without_rebase(

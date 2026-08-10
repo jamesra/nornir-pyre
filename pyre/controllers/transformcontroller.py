@@ -14,11 +14,12 @@ import numpy
 import numpy as np
 from numpy.typing import NDArray
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QTimer, QThread
 
 import nornir_imageregistration
 from nornir_imageregistration import ImagePermutationHelper
 from nornir_imageregistration.transforms.base import IControlPoints
+from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool
 import nornir_imageregistration.interactive_edit
 import nornir_pools as pools
 import pyre.qt_eventmanager
@@ -35,7 +36,7 @@ from pyre.controllers.transform_display import (
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
-
+from pyre.qt_eventmanager import qt_post_to_main
 
 def _to_numpy(arr: NDArray) -> NDArray:
     """Return a NumPy array, calling .get() when *arr* is a CuPy ndarray."""
@@ -118,11 +119,18 @@ class TransformController:
     _display_strategy: TransformDisplayStrategy
     _tile_mesh_cache: TileMeshCpuCache
     _full_refresh_needed: bool = False
+    _rbf_prewarm_generation: int = 0
+    _rbf_prewarm_ready: bool = True
 
     @property
     def interactive_edit_in_progress(self) -> bool:
         """True while a command is performing continuous transform edits (e.g. point drag)."""
         return self._interactive_edit_depth > 0
+
+    @property
+    def rbf_prewarm_ready(self) -> bool:
+        """False while mesh/grid RBF weights are still being precomputed off the UI thread."""
+        return self._rbf_prewarm_ready
 
     @property
     def tile_mesh_cache(self) -> TileMeshCpuCache:
@@ -239,7 +247,7 @@ class TransformController:
 
     def _run_post_interactive_refresh(self) -> None:
         if self.NumPoints > 25 and hasattr(self._TransformModel, 'InitializeDataStructures'):
-            self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
+            self._queue_rbf_prewarm()
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
 
@@ -338,8 +346,14 @@ class TransformController:
         if value is not None:
             value = normalize_rigid_transform_for_pyre_editing(value)
 
-        if self._TransformModel == value:
-            # No change
+        if self._TransformModel is value:
+            # Same object may have been mutated in place (e.g. RefineTransform
+            # returning the transform it was given). Still refresh views/caches.
+            if value is None:
+                return
+            self._tile_mesh_cache.clear()
+            self._queue_rbf_prewarm()
+            self.FireOnChangeEvent()
             return
 
         if self._TransformModel is not None:
@@ -355,13 +369,67 @@ class TransformController:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
             self._TransformModel.AddOnChangeEventListener(self.OnTransformChanged)  # type: ignore[union-attr]
 
+        self._queue_rbf_prewarm()
         self.FireOnTransformModelChangeEvent(old_transform, self._TransformModel)  # type: ignore[arg-type]
         self.FireOnChangeEvent()
 
+    def apply_external_transform(self, value: nornir_imageregistration.ITransform) -> None:
+        """Install a transform produced off the UI thread and force a full refresh.
+
+        Registration jobs (refine grid, rotate/translate, etc.) must use this so a
+        stuck coalesced-change flag or same-object return cannot leave views stale.
+        """
+        if value is None:
+            raise ValueError("apply_external_transform requires a transform")
+
+        # Clear coalesced-notification flags that may have been set from a
+        # worker-thread OnTransformChanged (QTimer from non-GUI threads is unsafe).
+        self._change_event_pending = False
+        self._point_moved_event_pending = False
+        self._interactive_repaint_pending = False
+        self._pending_moved_indices.clear()
+        self._full_refresh_needed = False
+
+        value = normalize_rigid_transform_for_pyre_editing(value)
+        old_transform = self._TransformModel
+
+        if old_transform is not None:
+            try:
+                old_transform.RemoveOnChangeEventListener(self.OnTransformChanged)  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+        # Always take the replace path even if refine returned the same instance.
+        self._TransformModel = value
+        self._rebind_display_strategy()
+        self._tile_mesh_cache.clear()
+
+        assert isinstance(value, nornir_imageregistration.ITransformChangeEvents)
+        value.AddOnChangeEventListener(self.OnTransformChanged)  # type: ignore[arg-type]
+
+        self._queue_rbf_prewarm()
+        # Pass a distinct old reference so listeners treat this as a real replace
+        # even when value is the object previously installed.
+        replaced_from = None if old_transform is value else old_transform
+        self.FireOnTransformModelChangeEvent(replaced_from, value)  # type: ignore[arg-type]
+        self.notify_views_now()
+
+    def notify_views_now(self) -> None:
+        """Deliver OnChange listeners immediately (GUI thread) or post to main."""
+        app = QApplication.instance()
+        if app is not None and QThread.currentThread() != app.thread():
+            qt_post_to_main(self.notify_views_now)
+            return
+        self._change_event_pending = False
+        self.__OnChangeEventListeners.invoke(self)
     def Transform(self, points: NDArray[np.floating], **kwargs):
+        if not self._rbf_prewarm_ready:
+            kwargs.setdefault('extrapolate', False)
         return self.TransformModel.Transform(points, **kwargs)
 
     def InverseTransform(self, points: NDArray[np.floating], **kwargs):
+        if not self._rbf_prewarm_ready:
+            kwargs.setdefault('extrapolate', False)
         return self.TransformModel.InverseTransform(points, **kwargs)
 
     def AddOnChangeEventListener(self, func: Callable):
@@ -399,7 +467,7 @@ class TransformController:
         if hint == TileRefreshHint.NONE and self.interactive_edit_in_progress:
             return
         if self.NumPoints > 25:
-            self._TransformModel.InitializeDataStructures()  # type: ignore[union-attr]
+            self._queue_rbf_prewarm()
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
 
@@ -438,9 +506,16 @@ class TransformController:
         turn rather than one expensive pass (tile-buffer rebuild + lazy RBF solve) per notch.
         """
 
-        # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
-        if QApplication.instance() is None:
+        app = QApplication.instance()
+        if app is None:
             self.__OnChangeEventListeners.invoke(self)
+            return
+
+        # Transform change events can originate on worker threads (e.g. TranslateFixed
+        # during refine). QTimer must be armed on the GUI thread or the pending flag
+        # sticks and all later UI refreshes are dropped.
+        if QThread.currentThread() != app.thread():
+            qt_post_to_main(self.FireOnChangeEvent)
             return
 
         if self._change_event_pending:
@@ -448,7 +523,6 @@ class TransformController:
 
         self._change_event_pending = True
         QTimer.singleShot(0, self._fire_pending_change_event)
-
     def _fire_pending_change_event(self):
         """Deliver the coalesced OnChange notification queued by FireOnChangeEvent."""
         # Reset first so a change triggered *by* a listener queues a fresh pass instead of
@@ -478,18 +552,12 @@ class TransformController:
                                         new: nornir_imageregistration.ITransform):
         """Calls every function registered to be notified when the transform changes."""
 
-        # Calls every listener when the transform has changed in a way that a point may be mapped to a new position in the fixed space
-        #        Pool = pools.GetGlobalThreadPool()
-        # tlist = list()
-        if QApplication.instance() is None:
+        app = QApplication.instance()
+        if app is None or QThread.currentThread() == app.thread():
             self.__OnTransformModelReplacedEventListeners.invoke(self, old, new)
-        else:
-            QTimer.singleShot(0, lambda: self.__OnTransformModelReplacedEventListeners.invoke(self, old, new))
-        #    tlist.append(Pool.add_task("OnTransformChanged calling " + str(func), func))
-
-        # for task in tlist:
-        # task.wait()
-
+            return
+        qt_post_to_main(
+            lambda: self.__OnTransformModelReplacedEventListeners.invoke(self, old, new))
     @property
     def Id(self) -> int:
         """Unique ID of this transform controller"""
@@ -516,11 +584,6 @@ class TransformController:
 
         self._display_strategy = display_strategy_for_model(None)
         self._tile_mesh_cache = TileMeshCpuCache()
-        self.TransformModel = TransformModel
-
-        if TransformModel is None:
-            self.TransformModel = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID)
-
         self.Debug = False
         self.ShowWarped = False
         self._change_event_pending = False
@@ -529,8 +592,61 @@ class TransformController:
         self._interactive_edit_space = None
         self._pending_moved_indices = set()
         self._full_refresh_needed = False
+        self._rbf_prewarm_generation = 0
+        self._rbf_prewarm_ready = True
+
+        self.TransformModel = TransformModel
+
+        if TransformModel is None:
+            self.TransformModel = CreateDefaultTransform(nornir_imageregistration.transforms.TransformType.RIGID)
 
         # print("Create transform controller %d" % self._id)
+
+    def _model_needs_rbf_prewarm(self, model: nornir_imageregistration.ITransform | None) -> bool:
+        """True when the model may lazily build RBF weights on Transform."""
+        if model is None or not hasattr(model, 'InitializeDataStructures'):
+            return False
+        return (
+            hasattr(model, 'ForwardRBFInstance')
+            or hasattr(model, '_ForwardRBFInstance')
+            or hasattr(model, '_continuous_transform')
+        )
+
+    def _queue_rbf_prewarm(self) -> None:
+        """Precompute mesh/grid RBF weights on a sticky background thread."""
+        model = self._TransformModel
+        if not self._model_needs_rbf_prewarm(model):
+            self._rbf_prewarm_ready = True
+            return
+
+        self._rbf_prewarm_generation += 1
+        generation = self._rbf_prewarm_generation
+        self._rbf_prewarm_ready = False
+        target_model = model
+
+        def _mark_ready() -> None:
+            if generation != self._rbf_prewarm_generation:
+                return
+            if self._TransformModel is not target_model:
+                return
+            self._rbf_prewarm_ready = True
+            # Tiles/cursor may have been built without RBF extrapolation; refresh.
+            self._tile_mesh_cache.clear()
+            self.FireOnChangeEvent()
+
+        def _prewarm() -> None:
+            try:
+                target_model.InitializeDataStructures()  # type: ignore[union-attr]
+            finally:
+                if QApplication.instance() is None:
+                    _mark_ready()
+                else:
+                    QTimer.singleShot(0, _mark_ready)
+
+        GetTransformPrewarmPool().add_task(
+            f"RBF prewarm gen={generation}",
+            _prewarm,
+        )
 
     def SetPoints(self, points: NDArray | nornir_imageregistration.IControlPoints):
         """Set transform points to the passed array"""

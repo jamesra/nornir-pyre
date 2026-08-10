@@ -165,6 +165,8 @@ class CompositeTransformView(IImageTransformView):
 
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
+        # Sub-views subscribe to TransformController OnChange themselves; also expose
+        # OnTransformChanged so model-replace handlers on the panel can force a rebuild.
         # self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
 
         # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
@@ -177,6 +179,12 @@ class CompositeTransformView(IImageTransformView):
             pyre.qt_eventmanager.qt_post_to_main(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
                                                  self._imageviewmodel_manager[
                                                      self._target_viewmodel_name])
+
+    def OnTransformChanged(self, transform_controller: TransformController | None = None) -> None:
+        """Forward model/replace refreshes to composite source and target sub-views."""
+        for sub_view in (self._source_image_view, self._target_image_view):
+            if sub_view is not None:
+                sub_view.OnTransformChanged(transform_controller)
 
     def __del__(self):
         try:

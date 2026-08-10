@@ -45,6 +45,7 @@ from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformC
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.transform_edit_policy import source_panel_hint_message, rigid_rotation_locked
 from pyre.views.composite_display import (
+    camera_lookat_from_target_space,
     composite_control_point_draw_rows,
     composite_legend_rich_text,
     resolve_composite_display_draw_params,
@@ -316,6 +317,16 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Called when the model in the transform controller changes.  This is not called when the
         transform is modified, only when the model is replaced"""
         self._update_fixed_layer_hint()
+        # Force tile/control-point redraw even if a coalesced OnChange was dropped.
+        image_view = self._image_transform_view
+        if image_view is not None:
+            on_changed = getattr(image_view, "OnTransformChanged", None)
+            if callable(on_changed):
+                on_changed(controller)
+        if self._transform_controller_view is not None:
+            self._transform_controller_view._sync_control_points_from_controller()
+        self._glpanel.update()
+
         # Cancel in-progress commands when the model is replaced externally.
         if self._command is None:
             return
@@ -323,7 +334,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         if self._command.status == pyre.CommandStatus.Completed:
             return
 
-        if old != new or (old is not None and old.type != new.type):
+        if old is not new or (old is not None and new is not None and old.type != new.type):
             self._command.cancel()
 
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):
@@ -538,11 +549,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self._image_transform_view.update_visible_tile_meshes(bounds, margin_tiles=1)  # type: ignore[union-attr]
 
     def lookatfixedpoint(self, point, scale):
-        """specify a point to look at in fixed space"""
-        if not self.FixedSpace:
-            if not self.ShowWarped:
-                if self.transform_controller is not None:
-                    point = self.transform_controller.InverseTransform([point]).flat  # type: ignore[arg-type]
+        """Look at a point specified in Target (control / fixed) space.
+
+        Source and Composite cameras store lookat in Source space, so the point
+        is InverseTransformed before applying. Target cameras use the point as-is.
+        """
+        point = camera_lookat_from_target_space(
+            self.transform_controller, point, self.space)
 
         super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)  # type: ignore[arg-type]
 

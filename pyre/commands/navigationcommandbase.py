@@ -39,6 +39,7 @@ from pyre.views.composite_display import (
     lookat_from_display_position,
     apply_composite_display_pan_delta,
     resolve_composite_display_draw_params,
+    target_space_lookat_for_stos_view,
 )
 from pyre.views.gltiles import is_rigid_transform
 
@@ -434,16 +435,17 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         # elif keycode == Qt.Key.Key_F1:
         #    self._image_transform_view.Debug = not self._image_transform_view.Debug
         elif symbol == 'm':
-            look_at = [self.camera.y, self.camera.x]
-
-            # if not self.FixedSpace and self.ShowWarped:
-            #    LookAt = self._transform_controller.transform([LookAt])
-            #    LookAt = LookAt[0]
-
+            # Match Source / Target / Composite to this window's center + scale.
+            # Canonical sync space is Target (control); each panel converts for its camera.
+            look_at = target_space_lookat_for_stos_view(
+                self.camera,
+                self._transform_controller,
+                self.space,
+                self._view_type(),
+            )
             config = pyre.state.get_current_stos_config()
             if config is not None:
                 config.WindowsLookAtFixedPoint(look_at, self.camera.scale)
-            # pyre.common.sync_stos_windows(look_at, self.camera.scale)
 
         elif symbol == 'z' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Undo()

@@ -29,7 +29,11 @@ _main_thread_dispatcher: _MainThreadDispatcher | None = None
 def _get_main_thread_dispatcher(app: QApplication) -> _MainThreadDispatcher:
     global _main_thread_dispatcher
     if _main_thread_dispatcher is None:
+        # Must live on the GUI thread even if first constructed from a worker.
         _main_thread_dispatcher = _MainThreadDispatcher(app)
+        app_thread = app.thread()
+        if _main_thread_dispatcher.thread() != app_thread:
+            _main_thread_dispatcher.moveToThread(app_thread)
     return _main_thread_dispatcher
 
 

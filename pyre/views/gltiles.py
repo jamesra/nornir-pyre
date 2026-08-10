@@ -134,7 +134,9 @@ def _point_pairs_to_numpy_f64(point_pairs: NDArray[np.floating]) -> NDArray[np.f
 
 def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
                                points: NDArray[np.floating],
-                               forward_transform: bool) -> NDArray[np.floating]:
+                               forward_transform: bool,
+                               *,
+                               extrapolate: bool = True) -> NDArray[np.floating]:
     """
     Map the points through the transform and return the results as a Nx4 array of matched fixed and warped points.
 
@@ -144,10 +146,12 @@ def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
     pts_for_transform = nornir_imageregistration.EnsurePointsAre2DArray(points)
     if forward_transform:
         fixed_points = _points_to_numpy_f32(points)
-        warped_points = _points_to_numpy_f32(transform.Transform(pts_for_transform))
+        warped_points = _points_to_numpy_f32(
+            transform.Transform(pts_for_transform, extrapolate=extrapolate))
     else:
         warped_points = _points_to_numpy_f32(points)
-        fixed_points = _points_to_numpy_f32(transform.InverseTransform(pts_for_transform))
+        fixed_points = _points_to_numpy_f32(
+            transform.InverseTransform(pts_for_transform, extrapolate=extrapolate))
 
     return np.hstack((warped_points, fixed_points))
 
@@ -565,12 +569,14 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                         texture_size: tuple[int, int],
                         image_space: Space,
                         cached_entry: TileGLObjects | None = None,
-                        force_static_quads: bool = False):
+                        force_static_quads: bool = False,
+                        extrapolate: bool = True):
     """Build CPU tile mesh (Delaunay CP mesh or static quad).
 
     :param force_static_quads: When True, emit identity tile quads even for mesh/grid
         transforms. Used for Target panels and standalone Source panels so moving
         TargetPoints cannot fold the displayed image.
+    :param extrapolate: When False, skip mesh RBF fallback (avoids UI-thread weight solve).
     """
     from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
 
@@ -580,13 +586,15 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
         return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
                                 point_count=4, is_rigid_quad=True)
 
-    vertarray, indices = _calculate_tile_render_data(transform, grid_coords, texture_size, image_space)
+    vertarray, indices = _calculate_tile_render_data(
+        transform, grid_coords, texture_size, image_space, extrapolate=extrapolate)
     simplices = None
     point_count = 0
     if cached_entry is not None and cached_entry.cached_simplices is not None:
         try:
             tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
-            all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
+            all_point_pairs = collect_verticies_within_bounding_box(
+                tile_bounding_rect, transform, image_space, extrapolate=extrapolate)
             point_count = all_point_pairs.shape[0]
             if _simplices_compatible_with_points(
                     cached_entry.cached_simplices, point_count, cached_entry.point_count):
@@ -600,7 +608,8 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
             pass
 
     tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
-    all_point_pairs = collect_verticies_within_bounding_box(tile_bounding_rect, transform, image_space)
+    all_point_pairs = collect_verticies_within_bounding_box(
+        tile_bounding_rect, transform, image_space, extrapolate=extrapolate)
     point_count = all_point_pairs.shape[0]
     point_pairs_np = _point_pairs_to_numpy_f64(all_point_pairs)
     fixed_points_yx, warped_points_yx = np.hsplit(point_pairs_np, 2)
@@ -646,11 +655,13 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
                          image_space: Space,
                          get_or_create_tile_globjects: Callable[[int, int], TileGLObjects | None],
                          shared_cpu_entry: 'TileMeshCpuEntry | None' = None,
-                         force_static_quads: bool = False):
+                         force_static_quads: bool = False,
+                         extrapolate: bool = True):
     """Create/Update the GL buffers for a given tile.
     :param get_or_create_tile_globjects: Function to get or create the TileGLObjects for a tile
     :param shared_cpu_entry: Optional precomputed CPU mesh from TileMeshCpuCache
     :param force_static_quads: Prefer identity quads when rebuilding without a shared entry
+    :param extrapolate: Forwarded to mesh transform mapping (False avoids UI-thread RBF solve)
     """
 
     ix, iy = grid_coords
@@ -665,14 +676,17 @@ def _update_tile_buffers(transform: nornir_imageregistration.ITransform,
 
         entry = build_tile_mesh_cpu(
             transform, grid_coords, texture_size, image_space,
-            cached_entry=render_data, force_static_quads=force_static_quads)
+            cached_entry=render_data, force_static_quads=force_static_quads,
+            extrapolate=extrapolate)
         apply_tile_mesh_cpu(render_data, entry)
 
 
 def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,
                                 grid_coords: tuple[int, int],
                                 texture_size: tuple[int, int],
-                                space: Space) -> tuple[NDArray[np.floating], NDArray[np.integer]]:
+                                space: Space,
+                                *,
+                                extrapolate: bool = True) -> tuple[NDArray[np.floating], NDArray[np.integer]]:
     """
     Given a grid coordinate, return the vertices and indices to render the tile.
     These are usually fed into a GLBuffer.
@@ -682,7 +696,8 @@ def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,
     all_point_pairs = collect_verticies_within_bounding_box(
         bounding_box=tile_bounding_rect,
         transform=transform,
-        image_space=space)
+        image_space=space,
+        extrapolate=extrapolate)
 
     vertarray, indicies = _render_data_for_transform_point_pairs(
         point_pairs=all_point_pairs,
@@ -695,7 +710,9 @@ def _calculate_tile_render_data(transform: nornir_imageregistration.ITransform,
 def collect_verticies_within_bounding_box(
         bounding_box: nornir_imageregistration.Rectangle,
         transform: nornir_imageregistration.ITransform,
-        image_space: Space) -> NDArray[np.floating]:
+        image_space: Space,
+        *,
+        extrapolate: bool = True) -> NDArray[np.floating]:
     """
     Given a bounding rectangle defined in the "space" parameter, return all vertices that we want to use for rendering.
     This should be the boundaries of the box, control points falling within the box, and
@@ -704,9 +721,11 @@ def collect_verticies_within_bounding_box(
     :return: A Nx4 array of source and target points, this is the position of each point in both source and target space
     """
     grid_points = _tile_grid_points(bounding_box, grid_size=(8, 8))
-    grid_point_pairs = _find_corresponding_points(transform,
-                                                  grid_points,
-                                                  forward_transform=False if image_space == Space.Target else True)
+    grid_point_pairs = _find_corresponding_points(
+        transform,
+        grid_points,
+        forward_transform=False if image_space == Space.Target else True,
+        extrapolate=extrapolate)
 
     if isinstance(transform, nornir_imageregistration.IControlPoints):
         if image_space == Space.Source:

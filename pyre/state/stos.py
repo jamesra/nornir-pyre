@@ -414,7 +414,7 @@ class StosState(StateEventsImpl):
             return nornir_imageregistration.ImagePermutationHelper(img.Image, mask.Image)
 
     def WindowsLookAtFixedPoint(self, fixed_point, scale):
-        """Force all open windows to look at this point"""
+        """Force all STOS windows to the same Target-space center and scale."""
 
         self.SourceWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
         self.TargetWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
