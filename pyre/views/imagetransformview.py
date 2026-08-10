@@ -643,6 +643,8 @@ class ImageTransformView(IImageTransformView):
                     continue
 
                 try:
+                    from pyre.image_contrast import contrast_for_space
+                    contrast = contrast_for_space(self._image_space)
                     shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween,  # type: ignore[union-attr]
                                                 use_rigid_path=use_rigid_path,
                                                 rigid_source_to_target=rigid_forward,
@@ -651,7 +653,10 @@ class ImageTransformView(IImageTransformView):
                                                 rigid_source_in_target_display=rigid_source_in_target_display,
                                                 rigid_interactive_native_shift=rigid_interactive_native_shift,
                                                 rigid_source_display_matrix=rigid_source_display_matrix,
-                                                rigid_target_display_matrix=rigid_target_display_matrix)
+                                                rigid_target_display_matrix=rigid_target_display_matrix,
+                                                contrast_min=float(contrast.min),
+                                                contrast_max=float(contrast.max),
+                                                contrast_gamma=float(contrast.gamma))
                 except ValueError as e:
                     if "Shaders have not been initialized" in str(e):
                         # Shaders not ready yet, skip this frame

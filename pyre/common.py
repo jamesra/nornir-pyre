@@ -6,6 +6,7 @@ Created on Oct 16, 2012
 import logging
 import tempfile
 import copy
+import threading
 from typing import Iterable, Sequence
 
 logger = logging.getLogger(__name__)
@@ -123,17 +124,13 @@ def stos_image_dims_from_stos_config(
     return control_dim, mapped_dim
 
 
-def _apply_lookat_to_window(window, lookat, scale: float):
-    """Set a window's camera to the given lookat point and scale."""
-    window.imagepanel.camera.x = lookat[0]
-    window.imagepanel.camera.y = lookat[1]
-    window.imagepanel.camera.scale = scale
-
-
 def SyncWindows(LookAt, scale: float, window_manager: IWindowManager) -> None:
-    """Make all windows look at the same spot with the same magnification; LookAt is in fixed space.
+    """Make all STOS windows look at the same spot with the same magnification.
 
-    ``window_manager`` must register ViewType Source, Target, and Composite (the STOS layout).
+    ``LookAt`` is in Target (control / fixed) space. Each window's
+    ``lookatfixedpoint`` converts into that panel's camera space.
+
+    ``window_manager`` must register ViewType Source, Target, and Composite.
     """
     if not (
         ViewType.Composite in window_manager
@@ -141,15 +138,8 @@ def SyncWindows(LookAt, scale: float, window_manager: IWindowManager) -> None:
         and ViewType.Target in window_manager
     ):
         raise ValueError("window_manager must register Source, Target, and Composite views")
-    composite_win = window_manager[ViewType.Composite]
-    source_win = window_manager[ViewType.Source]
-    target_win = window_manager[ViewType.Target]
-    for win in (composite_win, source_win, target_win):
-        _apply_lookat_to_window(win, LookAt, scale)
-    if target_win.isVisible():
-        config = pyre.state.get_current_stos_config()
-        if config is not None and config._TransformViewModel is not None:
-            config._TransformViewModel.InverseTransform([LookAt])
+    for vt in (ViewType.Composite, ViewType.Source, ViewType.Target):
+        window_manager[vt].lookatfixedpoint(LookAt, scale)
 
 
 def sync_stos_windows(LookAt, scale: float) -> None:
@@ -246,6 +236,8 @@ def RefineRigidTransformLocal(
         target_image_key: str = "Target",
         image_manager: IImageManager = Provide[IContainer.image_manager],
         app_settings: AppSettings = Provide[IContainer.settings],
+        cancel_event: threading.Event | None = None,
+        progress_callback=None,
 ) -> ITransform | None:
     """Local BruteForce rigid refine around the current angle (±5° at 1° steps).
 
@@ -278,6 +270,9 @@ def RefineRigidTransformLocal(
         settings_source_image_path=source_settings_path,
         settings_target_image_path=target_settings_path,
     )
+    from pyre.image_contrast import contrasted_permutation_helper
+    warped_image = contrasted_permutation_helper(warped_image, app_settings.ui.source_contrast)
+    fixed_image = contrasted_permutation_helper(fixed_image, app_settings.ui.target_contrast)
 
     center_deg = float(numpy.degrees(getattr(current_transform, "angle", 0.0)))
     angle_grid = build_refine_angle_grid_deg(center_deg)
@@ -297,6 +292,8 @@ def RefineRigidTransformLocal(
         settings=working_settings,
         SingleThread=True,
         Cluster=False,
+        cancel_event=cancel_event,
+        progress_callback=progress_callback,
     )
     logger.info("Local rigid refine alignment: %s", align_record)
     transform = align_record.ToImageTransform(
@@ -314,7 +311,9 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                LimitImageSize: bool = False,
                                method: SliceToSliceMethod | None = None,
                                image_manager: IImageManager = Provide[IContainer.image_manager],
-                               app_settings: AppSettings = Provide[IContainer.settings]) -> ITransform | None:
+                               app_settings: AppSettings = Provide[IContainer.settings],
+                               cancel_event: threading.Event | None = None,
+                               progress_callback=None) -> ITransform | None:
     """Run rigid (rotate+translate) alignment between source and target images; returns ITransform or None if images missing."""
     logger.debug(
         "RotateTranslateWarpedImage entry source=%s target=%s method=%s",
@@ -349,6 +348,9 @@ def RotateTranslateWarpedImage(source_image_key: str,
         settings_source_image_path=source_settings_path,
         settings_target_image_path=target_settings_path,
     )
+    from pyre.image_contrast import contrasted_permutation_helper
+    warped_image = contrasted_permutation_helper(warped_image, app_settings.ui.source_contrast)
+    fixed_image = contrasted_permutation_helper(fixed_image, app_settings.ui.target_contrast)
     working_settings = copy.copy(settings)
     if method is not None:
         working_settings.method = method
@@ -359,6 +361,8 @@ def RotateTranslateWarpedImage(source_image_key: str,
                                                                            settings=working_settings,
                                                                            SingleThread=True,
                                                                            Cluster=False,
+                                                                           cancel_event=cancel_event,
+                                                                           progress_callback=progress_callback,
                                                                            )
     # alignRecord = IrTools.alignment_record.AlignmentRecord((22.67, -4), 100, -132.5)
     logger.info("Alignment found: %s", alignRecord)
@@ -377,6 +381,24 @@ def RotateTranslateWarpedImage(source_image_key: str,
     # pyre.state.currentStosConfig._transform_controller.transform)
 
 
+def compute_grid_refine_transform(
+        transform: ITransform,
+        settings: GridRefinement,
+        cancel_event: threading.Event | None = None,
+        progress_callback=None) -> ITransform:
+    """Run grid refine for *transform* using *settings*; intended for background workers."""
+    with settings:
+        return nornir_imageregistration.RefineTransform(
+            transform,
+            settings=settings,
+            SaveImages=False,
+            SavePlots=True,
+            outputDir=tempfile.gettempdir(),
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+
+
 def GridRefineTransform(settings: GridRefinement | None):
     """Refine the current STOS transform using grid refinement. Updates TransformController.TransformModel in place."""
     if settings is None:
@@ -385,13 +407,9 @@ def GridRefineTransform(settings: GridRefinement | None):
     if config is None:
         return
     try:
-        updatedTransform = nornir_imageregistration.RefineTransform(
+        updatedTransform = compute_grid_refine_transform(
             config.TransformController.TransformModel,
-            settings=settings,
-            SaveImages=False,
-            SavePlots=True,
-            outputDir=tempfile.gettempdir())
-
+            settings)
         config.TransformController.TransformModel = updatedTransform
         # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,
     #                               pyre.state.currentStosConfig._transform_controller.points)
