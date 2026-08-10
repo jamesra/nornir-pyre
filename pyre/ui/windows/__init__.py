@@ -1,5 +1,6 @@
 from .stoswindow import StosWindow
 from .stosfilebrowser import StosFileBrowserWindow
+from .contrast_adjustment_window import ContrastAdjustmentWindow
 from . import mosaicwindow, pyrewindows, stoswindow
 from .filedrop import FileDrop
 from .textdrop import TextDrop

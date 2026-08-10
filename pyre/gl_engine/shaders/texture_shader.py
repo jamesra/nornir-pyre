@@ -79,13 +79,21 @@ _texture_vertex_shader_program = """
 _texture_fragment_shader_program = """
     #version 330
     uniform sampler2D texture_sampler;
+    uniform float contrast_min;
+    uniform float contrast_max;
+    uniform float contrast_gamma;
     in vec2 frag_texture_coordinate;
     out vec4 outputColor;
     void main() {
         vec4 texColor = texture(
                 texture_sampler, frag_texture_coordinate
             );
-        outputColor = texColor;
+        // Uploaded textures are uint8; sampler yields 0–1. Contrast uniforms are 0–255.
+        float intensity = texColor.r * 255.0;
+        float span = max(contrast_max - contrast_min, 1e-3);
+        float norm = clamp((intensity - contrast_min) / span, 0.0, 1.0);
+        float mapped = pow(norm, 1.0 / max(contrast_gamma, 1e-3));
+        outputColor = vec4(mapped, mapped, mapped, texColor.a);
     }
 """
 
@@ -110,6 +118,9 @@ class TextureShader(BaseShader):
     _rigid_interactive_native_shift_location = None
     _rigid_source_display_matrix_location = None
     _rigid_target_display_matrix_location = None
+    _contrast_min_location = None
+    _contrast_max_location = None
+    _contrast_gamma_location = None
     _attributes: Sequence[VertexAttribute] | None = None
 
     def __init__(self):
@@ -244,6 +255,27 @@ class TextureShader(BaseShader):
             raise_on_error("after glGetUniformLocation(rigid_target_display_matrix) in texture_shader")
         return self._rigid_target_display_matrix_location
 
+    @property
+    def contrast_min_location(self) -> int:
+        if self._contrast_min_location is None:
+            self._contrast_min_location = gl.glGetUniformLocation(self.program, "contrast_min")
+            raise_on_error("after glGetUniformLocation(contrast_min) in texture_shader")
+        return self._contrast_min_location
+
+    @property
+    def contrast_max_location(self) -> int:
+        if self._contrast_max_location is None:
+            self._contrast_max_location = gl.glGetUniformLocation(self.program, "contrast_max")
+            raise_on_error("after glGetUniformLocation(contrast_max) in texture_shader")
+        return self._contrast_max_location
+
+    @property
+    def contrast_gamma_location(self) -> int:
+        if self._contrast_gamma_location is None:
+            self._contrast_gamma_location = gl.glGetUniformLocation(self.program, "contrast_gamma")
+            raise_on_error("after glGetUniformLocation(contrast_gamma) in texture_shader")
+        return self._contrast_gamma_location
+
     @staticmethod
     def _as_numpy_mat3(matrix) -> NDArray[np.floating]:
         mat = matrix.get() if hasattr(matrix, 'get') else np.asarray(matrix)
@@ -275,7 +307,10 @@ class TextureShader(BaseShader):
              rigid_source_in_target_display: bool = False,
              rigid_interactive_native_shift: NDArray[np.floating] | None = None,
              rigid_source_display_matrix: NDArray[np.floating] | None = None,
-             rigid_target_display_matrix: NDArray[np.floating] | None = None):
+             rigid_target_display_matrix: NDArray[np.floating] | None = None,
+             contrast_min: float = 0.0,
+             contrast_max: float = 255.0,
+             contrast_gamma: float = 1.0):
         """Draws the texture using the vertex and index buffers."""
         try:
             gl.glUseProgram(self.program)
@@ -321,6 +356,12 @@ class TextureShader(BaseShader):
                 rigid_target_display_matrix = np.eye(3, dtype=np.float32)
             gl.glUniformMatrix3fv(self.rigid_target_display_matrix_location, 1, True,
                                   rigid_target_display_matrix.astype(np.float32, copy=False))
+            check_for_error()
+            gl.glUniform1f(self.contrast_min_location, float(contrast_min))
+            check_for_error()
+            gl.glUniform1f(self.contrast_max_location, float(contrast_max))
+            check_for_error()
+            gl.glUniform1f(self.contrast_gamma_location, float(contrast_gamma))
             check_for_error()
             gl.glUniform1i(self.texture_location, 0)
             check_for_error()

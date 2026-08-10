@@ -109,6 +109,14 @@ class WindowGeometry(BaseModel):
     visible: bool = True
 
 
+class ImageDisplayContrast(BaseModel):
+    """Per-image display/registration levels (texture units 0–255)."""
+
+    min: float = 0.0
+    max: float = 255.0
+    gamma: float = 1.0
+
+
 class UISettings(BaseModel):
     zoom_limits: FloatRange = FloatRange(min=0.00390625, max=16)  # Maximum and minimum zoom levels
     control_point_search_radius: float = 10.0  # Radius in pixels to search for control points
@@ -117,6 +125,8 @@ class UISettings(BaseModel):
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files
     stos_browser_folder: str | None = None  # Last folder opened in the Stos File Browser
     window_geometry: dict[str, WindowGeometry] = {}
+    source_contrast: ImageDisplayContrast = ImageDisplayContrast()
+    target_contrast: ImageDisplayContrast = ImageDisplayContrast()
 
 
 class AppSettings(BaseModel):

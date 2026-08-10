@@ -1,3 +1,4 @@
+import copy
 import os
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -18,10 +19,12 @@ import pyre
 from pyre.common import (
     SaveRegisteredWarpedImage,
     build_stos_object_for_save,
+    compute_grid_refine_transform,
     save_stos_object,
     stos_image_dims_from_stos_config,
 )
 from pyre.qt_eventmanager import qt_post_to_main
+from pyre.registration_job import get_registration_job_runner
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
@@ -88,6 +91,9 @@ class StosWindow(PyreWindowBase):
     _action_refine_rigid_angle_scale: QAction
     _action_refine_rigid_separator: QAction
     _action_refine_grid: QAction
+    _action_rotate_log_polar: QAction
+    _action_rotate_brute: QAction
+    _registration_actions: list[QAction]
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -178,6 +184,7 @@ class StosWindow(PyreWindowBase):
         self._transform_controller.AddOnModelReplacedEventListener(self._update_refinement_menu_state)
         self._update_workarounds_menu_state()
         self._update_refinement_menu_state()
+        get_registration_job_runner().add_busy_changed_listener(self._on_registration_busy_changed)
 
         # Add drag and drop support
         self.file_drop = FileDrop(self)
@@ -228,6 +235,13 @@ class StosWindow(PyreWindowBase):
         menu = QMenu("&Settings", self)
         menuTransforms = menu.addAction("&Transforms\u2026")
         menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
+        menu.addSeparator()
+        menuSourceContrast = menu.addAction("&Source Contrast\u2026")
+        menuSourceContrast.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onContrastAdjustment(Space.Source))
+        menuTargetContrast = menu.addAction("&Target Contrast\u2026")
+        menuTargetContrast.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onContrastAdjustment(Space.Target))
         return menu
 
     def __createWindowsMenu(self):
@@ -317,11 +331,13 @@ class StosWindow(PyreWindowBase):
 
         rotateTranslateSubmenu = menu.addMenu("&Rotate translate estimate")
         assert rotateTranslateSubmenu is not None
-        menuLogPolar = rotateTranslateSubmenu.addAction("Log Polar (Fast)")
-        menuLogPolar.triggered.connect(  # type: ignore[union-attr]
+        self._action_rotate_log_polar = rotateTranslateSubmenu.addAction("Log Polar (Fast)")
+        assert self._action_rotate_log_polar is not None
+        self._action_rotate_log_polar.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.LogPolar))
-        menuBruteForce = rotateTranslateSubmenu.addAction("Brute Force (Slow)")
-        menuBruteForce.triggered.connect(  # type: ignore[union-attr]
+        self._action_rotate_brute = rotateTranslateSubmenu.addAction("Brute Force (Slow)")
+        assert self._action_rotate_brute is not None
+        self._action_rotate_brute.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.BruteForce))
 
         self._menu_refinement = menu.addMenu("&Refinement")
@@ -340,6 +356,14 @@ class StosWindow(PyreWindowBase):
         self._action_refine_grid = self._menu_refinement.addAction("Refine w/ &Grid")
         assert self._action_refine_grid is not None
         self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
+
+        self._registration_actions = [
+            self._action_rotate_log_polar,
+            self._action_rotate_brute,
+            self._action_refine_rigid_angle,
+            self._action_refine_rigid_angle_scale,
+            self._action_refine_grid,
+        ]
 
         menu.addSeparator()
 
@@ -556,33 +580,27 @@ class StosWindow(PyreWindowBase):
         from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
         TransformsSettingsDialog.edit_settings(self._settings, parent=self)
 
-    def onResetTransform(self):
-        """Reset the transform. Rigid transforms return to zero offset and angle."""
-        config = pyre.state.get_current_stos_config()
-        if config is None:
-            return
-        transform_type = config.TransformType or nornir_imageregistration.transforms.TransformType.RIGID
-        if transform_type == nornir_imageregistration.transforms.TransformType.RIGID:
-            self.transform_controller.reset_rigid_transform()
-            self.imagepanel._glpanel.update()
-            return
+    def onContrastAdjustment(self, space: Space | None = None) -> None:
+        """Open the non-modal contrast window for Source or Target."""
+        from pyre.ui.windows.contrast_adjustment_window import ContrastAdjustmentWindow
+        if space is None:
+            if self._view_type == ViewType.Target:
+                space = Space.Target
+            else:
+                space = Space.Source
+        ContrastAdjustmentWindow.show_for_space(
+            space, parent=None, settings=self._settings)
 
-        source_key = ViewType.Source.value
-        target_key = ViewType.Target.value
-        manager = self._imageviewmodel_manager
-        if source_key not in manager or target_key not in manager:
-            QMessageBox.warning(
-                self,
-                "Reset Transform",
-                "Load fixed and warped images before resetting a mesh transform.",
-            )
+    def onResetTransform(self):
+        """Reset to an identity Rigid transform (zero offset, angle, and scale)."""
+        if pyre.state.get_current_stos_config() is None:
             return
-        source_image_view = manager[source_key]
-        target_image_view = manager[target_key]
-        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(  # type: ignore[attr-defined]
-            transform_type,
-            source_image_view.Image.shape,
-            target_image_view.Image.shape)
+        model = self.transform_controller.TransformModel
+        if isinstance(model, nornir_imageregistration.IRigidTransform):
+            self.transform_controller.reset_rigid_transform()
+        else:
+            self.transform_controller.TransformModel = (
+                pyre.controllers.transformcontroller.CreateDefaultRigidTransform())
         self.imagepanel._glpanel.update()
 
     def onClearAllPoints(self):
@@ -637,6 +655,52 @@ class StosWindow(PyreWindowBase):
         self._action_refine_rigid_angle_scale.setVisible(is_rigid)
         self._action_refine_rigid_separator.setVisible(is_rigid)
 
+    def _on_registration_busy_changed(self, busy: bool) -> None:
+        """Enable/disable long registration menu actions while a job runs."""
+        for action in getattr(self, "_registration_actions", []):
+            action.setEnabled(not busy)
+        if not busy:
+            self._update_refinement_menu_state()
+
+    def _submit_registration_job(
+            self,
+            *,
+            title: str,
+            worker,
+            on_success,
+            error_title: str,
+    ) -> None:
+        """Submit a background registration job or warn if one is already running."""
+        runner = get_registration_job_runner()
+        if runner.busy:
+            QMessageBox.information(
+                self,
+                title,
+                "Another registration job is already running. Cancel it or wait for it to finish.",
+            )
+            return
+
+        def _on_error(exc: BaseException) -> None:
+            logger.exception("%s failed", title)
+            QMessageBox.warning(self, error_title, str(exc))
+
+        def _on_cancelled() -> None:
+            logger.info("%s cancelled", title)
+
+        started = runner.submit(
+            worker,
+            title=title,
+            on_success=on_success,
+            on_error=_on_error,
+            on_cancelled=_on_cancelled,
+        )
+        if not started:
+            QMessageBox.information(
+                self,
+                title,
+                "Another registration job is already running. Cancel it or wait for it to finish.",
+            )
+
     def onRefineRigidAngle(self) -> None:
         """Local BruteForce refine of angle (±5°) keeping current scale."""
         self._run_local_rigid_refine(refine_scale=False)
@@ -655,19 +719,145 @@ class StosWindow(PyreWindowBase):
                 "Local angle/scale refinement requires a rigid transform.",
             )
             return
-        try:
-            resulting_transform = pyre.common.RefineRigidTransformLocal(
+
+        title = "Refine angle and scale" if refine_scale else "Refine angle"
+
+        def _worker(cancel_event, progress_callback):
+            return pyre.common.RefineRigidTransformLocal(
                 current_transform=current_transform,
                 refine_scale=refine_scale,
                 source_image_key=Space.Source,  # type: ignore[arg-type]
                 target_image_key=Space.Target,  # type: ignore[arg-type]
+                cancel_event=cancel_event,
+                progress_callback=progress_callback,
             )
-        except Exception as e:
-            logger.exception("Local rigid refine failed refine_scale=%s", refine_scale)
-            QMessageBox.warning(self, "Refine rigid transform", str(e))
-            return
-        if resulting_transform is not None:
-            self._transform_controller.TransformModel = resulting_transform
+
+        def _on_success(resulting_transform) -> None:
+            if resulting_transform is not None:
+                self._transform_controller.apply_external_transform(resulting_transform)
+                from pyre.common import repaint_peer_stos_gl_panels
+                repaint_peer_stos_gl_panels(self._window_manager)
+
+        self._submit_registration_job(
+            title=title,
+            worker=_worker,
+            on_success=_on_success,
+            error_title="Refine rigid transform",
+        )
+
+    def onRotateTranslate(self, method: SliceToSliceMethod = SliceToSliceMethod.LogPolar):
+        """Run rotate-translate estimate using the selected registration method."""
+        logger.debug("Rotate translate estimate triggered method=%s", method.name)
+        settings = self._settings.stos.brute_registration
+        title = (
+            "Brute-force rotate/translate"
+            if method == SliceToSliceMethod.BruteForce
+            else "Log-polar rotate/translate"
+        )
+
+        def _worker(cancel_event, progress_callback):
+            return pyre.common.RotateTranslateWarpedImage(
+                source_image_key=Space.Source,  # type: ignore[arg-type]
+                target_image_key=Space.Target,  # type: ignore[arg-type]
+                settings=settings,
+                LimitImageSize=True,
+                method=method,
+                cancel_event=cancel_event,
+                progress_callback=progress_callback,
+            )
+
+        def _on_success(resulting_transform) -> None:
+            logger.debug(
+                "Rotate translate estimate result_is_none=%s method=%s",
+                resulting_transform is None,
+                method.name,
+            )
+            if resulting_transform is not None:
+                self._transform_controller.apply_external_transform(resulting_transform)
+                from pyre.common import repaint_peer_stos_gl_panels
+                repaint_peer_stos_gl_panels(self._window_manager)
+
+        self._submit_registration_job(
+            title=title,
+            worker=_worker,
+            on_success=_on_success,
+            error_title="Rotate translate estimate",
+        )
+
+    def onRefineGrid(self):
+        """Handle Refine Grid action"""
+        if self._settings.stos.source_image is None or \
+                self._settings.stos.target_image is None:
+            print("Need both images loaded with a transform to run refine grid")
+            return None
+
+        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(
+            self, app_settings=self._settings)
+        if user_settings is None:
+            return None
+
+        from pyre.image_contrast import contrasted_permutation_helper
+        source_for_refine = contrasted_permutation_helper(
+            self._image_manager[ViewType.Source],
+            self._settings.ui.source_contrast,
+        )
+        target_for_refine = contrasted_permutation_helper(
+            self._image_manager[ViewType.Target],
+            self._settings.ui.target_contrast,
+        )
+        grid_refinement_settings = (
+            nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
+                source_img_data=source_for_refine,
+                target_img_data=target_for_refine,
+                num_iterations=user_settings.num_iterations,
+                grid_spacing=user_settings.grid_spacing,
+                cell_size=user_settings.cell_size,
+                angles_to_search=user_settings.angle_range))
+        # Clone so the worker never mutates the live UI model. RefineTransform often
+        # returns the same object it was given; assigning that back was a no-op in
+        # TransformController and left the views on the pre-refine transform.
+        transform_snapshot = copy.deepcopy(self._transform_controller.TransformModel)
+
+        def _worker(cancel_event, progress_callback):
+            return compute_grid_refine_transform(
+                transform_snapshot,
+                grid_refinement_settings,
+                cancel_event=cancel_event,
+                progress_callback=progress_callback,
+            )
+
+        def _on_success(updated_transform) -> None:
+            if updated_transform is None:
+                logger.warning("Refine w/ Grid finished without a transform result")
+                return
+            n_pts = getattr(updated_transform, "points", None)
+            n = 0 if n_pts is None else int(np.asarray(n_pts).shape[0])
+            logger.info(
+                "Refine w/ Grid applying result type=%s points=%s",
+                type(updated_transform).__name__,
+                n,
+            )
+            self._transform_controller.apply_external_transform(updated_transform)
+            from pyre.common import repaint_peer_stos_gl_panels
+            repaint_peer_stos_gl_panels(self._window_manager)
+
+        runner = get_registration_job_runner()
+        if runner.busy:
+            with grid_refinement_settings:
+                pass
+            QMessageBox.information(
+                self,
+                "Refine w/ Grid",
+                "Another registration job is already running. Cancel it or wait for it to finish.",
+            )
+            return None
+
+        self._submit_registration_job(
+            title="Refine w/ Grid",
+            worker=_worker,
+            on_success=_on_success,
+            error_title="Refine w/ Grid",
+        )
 
     def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):
         """Convert the current transform model to the requested transform type."""
@@ -729,52 +919,6 @@ class StosWindow(PyreWindowBase):
     def onConvertToRbf(self):
         """Convert the current transform to an RBF transform."""
         self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RBF)
-
-    def onRotateTranslate(self, method: SliceToSliceMethod = SliceToSliceMethod.LogPolar):
-        """Run rotate-translate estimate using the selected registration method."""
-        logger.debug("Rotate translate estimate triggered method=%s", method.name)
-        settings = self._settings.stos.brute_registration
-        current_transform = self._transform_controller.TransformModel
-        try:
-            resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
-                                                                         target_image_key=Space.Target,  # type: ignore[arg-type]
-                                                                         settings=settings,
-                                                                         LimitImageSize=True,
-                                                                         method=method,
-                                                                         )
-        except Exception as e:
-            logger.exception("Rotate translate estimate failed method=%s", method.name)
-            QMessageBox.warning(self, "Rotate translate estimate", str(e))
-            return
-
-        logger.debug(
-            "Rotate translate estimate result_is_none=%s equals_current=%s method=%s",
-            resulting_transform is None,
-            resulting_transform == current_transform if resulting_transform is not None else None,
-            method.name,
-        )
-
-        if resulting_transform is not None:
-            self._transform_controller.TransformModel = resulting_transform
-
-    def onRefineGrid(self):
-        """Handle Refine Grid action"""
-        if self._settings.stos.source_image is None or \
-                self._settings.stos.target_image is None:
-            print("Need both images loaded with a transform to run refine grid")
-            return None
-
-        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(
-            self, app_settings=self._settings)
-        if user_settings is not None:
-            with nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
-                    source_img_data=self._image_manager[ViewType.Source],
-                    target_img_data=self._image_manager[ViewType.Target],
-                    num_iterations=user_settings.num_iterations,
-                    grid_spacing=user_settings.grid_spacing,
-                    cell_size=user_settings.cell_size,
-                    angles_to_search=user_settings.angle_range) as grid_refinement_settings:
-                pyre.common.GridRefineTransform(grid_refinement_settings)
 
     def onOpenSourceImage(self):
         """Handle Open Source Image action."""
