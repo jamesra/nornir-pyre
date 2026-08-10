@@ -28,12 +28,13 @@
 from __future__ import annotations
 
 import os
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from dependency_injector.wiring import inject, Provide
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTableWidget, QTableWidgetItem, QFileDialog,
     QMessageBox, QMenu, QHeaderView, QAbstractItemView,
 )
@@ -47,7 +48,7 @@ from nornir_imageregistration.stos_quality import (
     score_stos_into_cache,
 )
 from pyre.container import IContainer
-from pyre.qt_eventmanager import qt_post_to_main
+from pyre.qt_eventmanager import init_main_thread_dispatcher, qt_post_to_main
 from pyre.settings import AppSettings
 from pyre.stos_manual_paths import (
     BrowseMode,
@@ -146,6 +147,10 @@ class StosFileBrowserWindow(QMainWindow):
     _quality_histogram: StosQualityHistogramWidget
     _quality_cache: QualityCache
     _score_generation: int
+    _scan_generation: int
+    _last_completed_scan_generation: int
+    _pending_rescan_basename: str | None
+    _scan_future: Future | None
     _manual_override_color = QColor("#c9a227")
     _manual_only_color = QColor("#8b6914")
     _load_generation: int
@@ -181,9 +186,13 @@ class StosFileBrowserWindow(QMainWindow):
         self._list_delete_filter = None
         self._load_generation = 0
         self._score_generation = 0
+        self._scan_generation = 0
+        self._last_completed_scan_generation = 0
+        self._pending_rescan_basename = None
+        self._scan_future = None
         self._quality_cache = QualityCache()
         self._pending_load = None
-        self._load_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stos-nav-load")
+        self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-load")
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.timeout.connect(self._execute_pending_load)
@@ -315,20 +324,7 @@ class StosFileBrowserWindow(QMainWindow):
         previous_basename: str | None = None
         if 0 <= self._current_index < len(self._rows):
             previous_basename = self._rows[self._current_index].basename
-        self._rows = scan_stos_browser_rows(self._folder, self._browse_mode)
-        self._populate_list()
-        if previous_basename is not None:
-            for index, row in enumerate(self._rows):
-                if row.basename == previous_basename:
-                    self._current_index = index
-                    self._set_current_row(index)
-                    return
-            if self._rows:
-                self._current_index = min(self._current_index, len(self._rows) - 1)
-                self._current_index = max(0, self._current_index)
-                self._set_current_row(self._current_index)
-            else:
-                self._current_index = -1
+        self._queue_folder_scan(preserve_basename=previous_basename)
 
     def open_folder(self) -> None:
         """Show a folder chooser and populate the list with discovered transforms."""
@@ -427,13 +423,15 @@ class StosFileBrowserWindow(QMainWindow):
         self._browse_mode = mode
         if persist:
             self._settings.ui.stos_browser_folder = folder
-        self._folder_label.setText(folder)
+        self._folder_label.setText(f"Scanning\u2026 {folder}")
         self._refresh_btn.setEnabled(True)
         self._file_source_selector.set_flat_manual_mode(mode == BrowseMode.flat_manual)
-        self._rows = scan_stos_browser_rows(folder, self._browse_mode)
+        self._rows = []
         self._current_index = -1
-        self._populate_list()
+        self._list_widget.setRowCount(0)
+        self._quality_histogram.set_histogram(histogram_from_rows([]), selected_score=None)
         self._update_source_selector_for_current_row()
+        self._queue_folder_scan(preserve_basename=None)
 
     # ------------------------------------------------------------------
     # List population and loading
@@ -458,50 +456,202 @@ class StosFileBrowserWindow(QMainWindow):
         self._list_widget.setCurrentCell(index, 0)
 
     def _populate_list(self) -> None:
-        if self._folder:
-            self._rows, self._quality_cache, stale = attach_quality_scores(
-                self._folder,
-                self._rows,
-                self._source_for_load(),
-                cache=load_quality_cache(self._folder),
-            )
-        else:
-            stale = []
+        """Fill the table from ``_rows`` (names and any scores already on the rows)."""
+        self._populate_list_from_rows(self._rows, scores_ready=True)
 
+    def _populate_list_from_rows(
+            self,
+            rows: list[StosBrowserRow],
+            *,
+            scores_ready: bool,
+    ) -> None:
+        """Build the transform table from *rows* (names always; scores or em dash)."""
         self._list_widget.setRowCount(0)
-        self._list_widget.setRowCount(len(self._rows))
-        scored_values = scores_from_rows(self._rows)
-        for index, row in enumerate(self._rows):
+        self._list_widget.setRowCount(len(rows))
+        scored_values = scores_from_rows(rows) if scores_ready else []
+        for index, row in enumerate(rows):
             label = row.basename
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
                 label = f"{row.basename} [Manual]"
             name_item = QTableWidgetItem(label)
             name_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            name_item.setToolTip(self._row_tooltip(row, scored_values))
+            name_item.setToolTip(self._row_tooltip(row, scored_values if scores_ready else None))
             color = self._row_list_color(row)
             if color is not None:
                 name_item.setForeground(color)
-            score_item = QTableWidgetItem(format_quality_score(row.quality_score))
+            display_score = row.quality_score if scores_ready else None
+            score_item = QTableWidgetItem(format_quality_score(display_score))
             score_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
             score_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-            score_item.setToolTip(self._row_tooltip(row, scored_values))
+            score_item.setToolTip(self._row_tooltip(row, scored_values if scores_ready else None))
+            if color is not None:
+                score_item.setForeground(color)
+            elif display_score is not None:
+                rgb = quality_score_rgb(float(display_score), scored_values)
+                if rgb is not None:
+                    score_item.setForeground(QColor.fromRgbF(rgb[0], rgb[1], rgb[2]))
+            self._list_widget.setItem(index, 0, name_item)
+            self._list_widget.setItem(index, 1, score_item)
+
+        if 0 <= self._current_index < len(rows):
+            self._set_current_row(self._current_index)
+        self._update_source_selector_for_current_row()
+        if scores_ready:
+            self._refresh_quality_histogram()
+
+    def _refresh_score_column_and_histogram(self) -> None:
+        """Update ZNCC cells and histogram from ``_rows`` without rebuilding names."""
+        scored_values = scores_from_rows(self._rows)
+        for index, row in enumerate(self._rows):
+            score_item = self._list_widget.item(index, 1)
+            name_item = self._list_widget.item(index, 0)
+            if score_item is None:
+                continue
+            score_item.setText(format_quality_score(row.quality_score))
+            tip = self._row_tooltip(row, scored_values)
+            score_item.setToolTip(tip)
+            if name_item is not None:
+                name_item.setToolTip(tip)
+            color = self._row_list_color(row)
             if color is not None:
                 score_item.setForeground(color)
             elif row.quality_score is not None:
                 rgb = quality_score_rgb(float(row.quality_score), scored_values)
                 if rgb is not None:
                     score_item.setForeground(QColor.fromRgbF(rgb[0], rgb[1], rgb[2]))
-            self._list_widget.setItem(index, 0, name_item)
-            self._list_widget.setItem(index, 1, score_item)
+            else:
+                score_item.setForeground(self._list_widget.palette().color(
+                    self._list_widget.foregroundRole()))
+        self._refresh_quality_histogram()
 
-        if 0 <= self._current_index < len(self._rows):
+    def _queue_folder_scan(self, *, preserve_basename: str | None) -> None:
+        """Scan the current folder and attach quality scores off the UI thread."""
+        if not self._folder:
+            return
+        init_main_thread_dispatcher()
+        self._scan_generation += 1
+        self._score_generation += 1  # cancel in-flight ZNCC for a prior folder/scan
+        generation = self._scan_generation
+        self._pending_rescan_basename = preserve_basename
+        folder = self._folder
+        mode = self._browse_mode
+        source = self._source_for_load()
+
+        def _worker() -> None:
+            if generation != self._scan_generation:
+                return
+            rows = scan_stos_browser_rows(folder, mode)
+            if generation != self._scan_generation:
+                return
+            qt_post_to_main(
+                lambda f=folder, r=rows, g=generation: self._on_scan_rows_ready(f, r, g))
+            cache = load_quality_cache(folder)
+            rows2, cache, stale = attach_quality_scores(folder, rows, source, cache=cache)
+            if generation != self._scan_generation:
+                return
+            qt_post_to_main(
+                lambda f=folder, r=rows2, c=cache, s=stale, g=generation:
+                self._on_quality_attach_ready(f, r, c, s, g))
+
+        self._scan_future = self._load_executor.submit(_worker)
+
+    def _queue_quality_attach_only(self) -> None:
+        """Re-attach cached scores for the current rows (e.g. Auto/Manual source change)."""
+        if not self._folder or not self._rows:
+            return
+        init_main_thread_dispatcher()
+        self._scan_generation += 1
+        self._score_generation += 1
+        generation = self._scan_generation
+        folder = self._folder
+        source = self._source_for_load()
+        rows_snapshot = list(self._rows)
+
+        def _worker() -> None:
+            if generation != self._scan_generation:
+                return
+            cache = load_quality_cache(folder)
+            rows2, cache, stale = attach_quality_scores(
+                folder, rows_snapshot, source, cache=cache)
+            if generation != self._scan_generation:
+                return
+            qt_post_to_main(
+                lambda f=folder, r=rows2, c=cache, s=stale, g=generation:
+                self._on_quality_attach_ready(f, r, c, s, g))
+
+        self._scan_future = self._load_executor.submit(_worker)
+
+    def _on_scan_rows_ready(
+            self,
+            folder: str,
+            rows: list[StosBrowserRow],
+            generation: int,
+    ) -> None:
+        """Apply basename rows after a background directory scan."""
+        if generation != self._scan_generation or self._folder != folder:
+            return
+        self._rows = rows
+        self._folder_label.setText(folder)
+        self._populate_list_from_rows(rows, scores_ready=False)
+        basename = self._pending_rescan_basename
+        if basename is not None:
+            for index, row in enumerate(rows):
+                if row.basename == basename:
+                    self._current_index = index
+                    self._set_current_row(index)
+                    break
+            else:
+                if rows:
+                    self._current_index = min(max(0, self._current_index), len(rows) - 1)
+                    self._set_current_row(self._current_index)
+                else:
+                    self._current_index = -1
+            self._pending_rescan_basename = None
+        self._update_source_selector_for_current_row()
+
+    def _on_quality_attach_ready(
+            self,
+            folder: str,
+            rows: list[StosBrowserRow],
+            cache: QualityCache,
+            stale: list[str],
+            generation: int,
+    ) -> None:
+        """Apply attached scores after background cache/checksum work."""
+        if generation != self._scan_generation or self._folder != folder:
+            return
+        self._rows = rows
+        self._quality_cache = cache
+        self._last_completed_scan_generation = generation
+        if self._list_widget.rowCount() == len(rows):
+            self._refresh_score_column_and_histogram()
+        else:
+            self._populate_list_from_rows(rows, scores_ready=True)
+        if 0 <= self._current_index < len(rows):
             self._set_current_row(self._current_index)
         self._update_source_selector_for_current_row()
-        self._refresh_quality_histogram()
-        if self._folder and stale:
+        if stale:
             self._queue_quality_scores(stale)
+
+    def wait_for_scan_idle(self, timeout_s: float = 5.0) -> None:
+        """Block until the outstanding folder scan/attach finishes (for tests)."""
+        init_main_thread_dispatcher()
+        future = self._scan_future
+        if future is not None:
+            future.result(timeout=timeout_s)
+        app = QApplication.instance()
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if app is not None:
+                app.processEvents()
+            if self._last_completed_scan_generation == self._scan_generation:
+                if app is not None:
+                    app.processEvents()
+                return
+            time.sleep(0.01)
+        raise TimeoutError("Stos Browser folder scan/attach did not complete")
 
     def _refresh_quality_histogram(self) -> None:
         selected = None
@@ -521,8 +671,10 @@ class StosFileBrowserWindow(QMainWindow):
         self._score_generation += 1
         generation = self._score_generation
         unique_paths = list(dict.fromkeys(paths))
+        source = self._source_for_load()
+        rows_snapshot = [row.with_quality_score(None) for row in self._rows]
 
-        def _worker() -> QualityCache:
+        def _worker() -> tuple[QualityCache, list[StosBrowserRow]]:
             cache = load_quality_cache(folder)
             for path in unique_paths:
                 if generation != self._score_generation:
@@ -535,29 +687,23 @@ class StosFileBrowserWindow(QMainWindow):
                 except Exception as exc:
                     print(f"STOS quality score failed for {path}: {exc}")
             save_quality_cache(folder, cache)
-            return cache
+            rows2, cache, _stale = attach_quality_scores(
+                folder, rows_snapshot, source, cache=cache)
+            return cache, rows2
 
         def _on_done(future: Future) -> None:
+            try:
+                cache, rows2 = future.result()
+            except Exception as exc:
+                print(f"STOS quality score worker failed: {exc}")
+                return
+
             def _apply() -> None:
                 if generation != self._score_generation or self._folder != folder:
                     return
-                try:
-                    cache = future.result()
-                except Exception as exc:
-                    print(f"STOS quality score worker failed: {exc}")
-                    return
                 self._quality_cache = cache
-                self._rows, self._quality_cache, _stale = attach_quality_scores(
-                    folder,
-                    [row.with_quality_score(None) for row in self._rows],
-                    self._source_for_load(),
-                    cache=cache,
-                )
-                for index, row in enumerate(self._rows):
-                    score_item = self._list_widget.item(index, 1)
-                    if score_item is not None:
-                        score_item.setText(format_quality_score(row.quality_score))
-                self._refresh_quality_histogram()
+                self._rows = rows2
+                self._refresh_score_column_and_histogram()
 
             qt_post_to_main(_apply)
 
@@ -615,8 +761,8 @@ class StosFileBrowserWindow(QMainWindow):
     def _on_file_source_changed(self, source: StosFileSource) -> None:
         self._settings.stos.stos_file_source = source.value
         if self._folder:
-            # Re-attach scores for the newly preferred Auto/Manual path.
-            self._populate_list()
+            # Re-attach scores for the newly preferred Auto/Manual path off-thread.
+            self._queue_quality_attach_only()
         if self._current_index >= 0:
             self._load_stos_at_index(self._current_index)
 
@@ -835,17 +981,8 @@ class StosFileBrowserWindow(QMainWindow):
                 f"Could not delete automatic STOS file:\n\n{exc}",
             )
             return
-        self.rescan()
-        for new_index, new_row in enumerate(self._rows):
-            if new_row.basename == basename:
-                self._current_index = new_index
-                self._set_current_row(new_index)
-                return
-        if self._rows:
-            self._current_index = min(index, len(self._rows) - 1)
-            self._set_current_row(self._current_index)
-        else:
-            self._current_index = -1
+        # Rescan off-thread; selection is restored by basename when names land.
+        self._queue_folder_scan(preserve_basename=basename)
 
     # ------------------------------------------------------------------
     # Keyboard handling

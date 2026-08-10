@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
+from pyre.qt_eventmanager import init_main_thread_dispatcher
 from pyre.settings.app import AppSettings
 from pyre.stos_manual_paths import BrowseMode, StosBrowserRow, StosFileSource, scan_stos_browser_rows
 from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
@@ -27,6 +28,7 @@ class TestStosFileBrowserDelete(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
+        init_main_thread_dispatcher()
 
     def _browser_for_folder(self, folder: str) -> StosFileBrowserWindow:
         browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
@@ -65,6 +67,7 @@ class TestStosFileBrowserDelete(unittest.TestCase):
 
             browser._delete_automatic_at_index(0)
 
+            browser.wait_for_scan_idle()
             self.assertFalse(os.path.isfile(auto))
             self.assertTrue(os.path.isfile(manual))
             self.assertEqual(len(browser._rows), 1)

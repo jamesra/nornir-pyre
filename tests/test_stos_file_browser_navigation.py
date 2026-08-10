@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QApplication
 
+from pyre.qt_eventmanager import init_main_thread_dispatcher
 from pyre.settings.app import AppSettings
 from pyre.stos_manual_paths import BrowseMode, StosBrowserRow
 from pyre.ui.windows.stosfilebrowser import (
@@ -40,6 +41,7 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
+        init_main_thread_dispatcher()
 
     def _browser_with_rows(self, count: int, current_index: int) -> StosFileBrowserWindow:
         browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
@@ -125,6 +127,7 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _touch(os.path.join(tmp, "a.stos"))
             browser._apply_folder(tmp, persist=False, confirm_manual=False)
+            browser.wait_for_scan_idle()
             self.assertTrue(browser._refresh_btn.isEnabled())
 
     def test_rescan_picks_up_new_files_and_keeps_selection(self) -> None:
@@ -134,12 +137,14 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
             _touch(first)
             browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
             browser._apply_folder(tmp, persist=False, confirm_manual=False)
+            browser.wait_for_scan_idle()
             self.assertEqual(len(browser._rows), 1)
             browser._current_index = 0
             browser._set_current_row(0)
 
             _touch(second)
             browser.rescan()
+            browser.wait_for_scan_idle()
 
             self.assertEqual(len(browser._rows), 2)
             self.assertEqual(browser._rows[browser._current_index].basename, "a.stos")
