@@ -398,7 +398,9 @@ class CompositeTransformView(IImageTransformView):
 
         elif self._source_image_view is not None:
             self._source_image_view.draw(view_proj, space, client_size, bounding_box,
-                                         show_mesh_lines=show_mesh_lines)
+                                         show_mesh_lines=show_mesh_lines,
+                                         view_type=view_type)
         elif self._target_image_view is not None:
             self._target_image_view.draw(view_proj, space, client_size, bounding_box,
-                                         show_mesh_lines=show_mesh_lines)
+                                         show_mesh_lines=show_mesh_lines,
+                                         view_type=view_type)

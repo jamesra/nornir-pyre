@@ -302,6 +302,8 @@ class ImageTransformView(IImageTransformView):
                 self.height, self.width,
                 self._image_viewmodel.TextureSize,  # type: ignore[arg-type]
                 expanded)
+            if visible is None:
+                visible = set(self._image_viewmodel.generate_grid_indicies())
         self._ensure_visible_tile_meshes(visible, max_tiles=max_tiles)
 
     def OnTransformChanged(self, transform_controller: TransformController | None = None):
@@ -629,6 +631,8 @@ class ImageTransformView(IImageTransformView):
                     image_viewmodel.TextureSize,
                     prefetch_rect)
             else:
+                prefetch_coords = None
+            if prefetch_coords is None:
                 # Full grid, budgeted across frames (composite / unreliable cull).
                 prefetch_coords = set(image_viewmodel.generate_grid_indicies())
             self._ensure_visible_tile_meshes(prefetch_coords)

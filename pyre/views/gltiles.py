@@ -494,6 +494,8 @@ def tile_coords_for_control_points(image_height: int,
     n_points = min(target_pts.shape[0], source_pts.shape[0])
 
     def _add_tiles_for_yx(y: float, x: float) -> None:
+        if not (np.isfinite(x) and np.isfinite(y)):
+            return
         ix = int(x // tile_w)
         iy = int(y // tile_h)
         for dx in range(-halo, halo + 1):
@@ -511,20 +513,55 @@ def tile_coords_for_control_points(image_height: int,
     return coords
 
 
+def _tile_height_width(texture_size: tuple[int, int]) -> tuple[int, int] | None:
+    """Return (tile_h, tile_w) or None when the texture grid size is unusable."""
+    try:
+        tile_h = int(texture_size[0])
+        tile_w = int(texture_size[1])
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if tile_h <= 0 or tile_w <= 0:
+        return None
+    return tile_h, tile_w
+
+
+def _finite_rect_edges(
+        visible_rect: nornir_imageregistration.Rectangle,
+) -> tuple[float, float, float, float] | None:
+    """Return (y0, x0, y1, x1) when every edge is finite; otherwise None."""
+    with np.errstate(invalid='ignore', over='ignore', divide='ignore'):
+        y0, x0 = visible_rect.BottomLeft
+        height = float(visible_rect.Height)
+        width = float(visible_rect.Width)
+        y0_f = float(y0)
+        x0_f = float(x0)
+        if not all(np.isfinite(v) for v in (y0_f, x0_f, height, width)):
+            return None
+        return y0_f, x0_f, y0_f + height, x0_f + width
+
+
 def tile_coords_for_visible_bounds(image_height: int,
                                    image_width: int,
                                    texture_size: tuple[int, int],
                                    visible_rect: nornir_imageregistration.Rectangle | None
                                    ) -> set[tuple[int, int]] | None:
-    """Return tile coordinates intersecting visible_rect, or None to mean all tiles."""
+    """Return tile coordinates intersecting visible_rect, or None to mean all tiles.
+
+    None is also returned when *visible_rect* or tile size is non-finite or empty so
+    callers skip culling instead of raising during paint.
+    """
     if visible_rect is None:
         return None
-    tile_h, tile_w = int(texture_size[0]), int(texture_size[1])
+    tile_hw = _tile_height_width(texture_size)
+    if tile_hw is None:
+        return None
+    tile_h, tile_w = tile_hw
+    edges = _finite_rect_edges(visible_rect)
+    if edges is None:
+        return None
+    y0, x0, y1, x1 = edges
     num_cols = int(np.ceil(image_width / float(tile_w)))
     num_rows = int(np.ceil(image_height / float(tile_h)))
-    y0, x0 = visible_rect.BottomLeft
-    y1 = y0 + visible_rect.Height
-    x1 = x0 + visible_rect.Width
     ix0 = max(0, int(np.floor(x0 / float(tile_w))))
     ix1 = min(num_cols - 1, int(np.floor(max(x0, x1 - 1) / float(tile_w))))
     iy0 = max(0, int(np.floor(y0 / float(tile_h))))
@@ -544,7 +581,10 @@ def expand_visible_rectangle_by_tiles(
     """Expand a visible rectangle by whole texture tiles on each side for prefetch."""
     if margin_tiles <= 0:
         return visible_rect
-    tile_h, tile_w = int(texture_size[0]), int(texture_size[1])
+    tile_hw = _tile_height_width(texture_size)
+    if tile_hw is None:
+        return visible_rect
+    tile_h, tile_w = tile_hw
     margin_y = float(margin_tiles * tile_h)
     margin_x = float(margin_tiles * tile_w)
     y0, x0 = visible_rect.BottomLeft

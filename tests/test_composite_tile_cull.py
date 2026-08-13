@@ -40,6 +40,19 @@ class TestCompositeTileCull(unittest.TestCase):
         view.get_or_create_tile_globjects = MagicMock(return_value=MagicMock(mesh_populated=True))
         return view
 
+    def _draw_imageviewmodel(self, view: ImageTransformView, **kwargs) -> None:
+        mesh_transform = MagicMock()
+        contrast = MagicMock(min=0.0, max=255.0, gamma=1.0)
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: mesh_transform)):
+            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
+                with patch("pyre.views.imagetransformview.shaders.texture_shader.draw"):
+                    with patch("pyre.image_contrast.contrast_for_space", return_value=contrast):
+                        view._draw_imageviewmodel(
+                            view_proj=np.eye(4, dtype=np.float32),
+                            image_viewmodel=view._image_viewmodel,
+                            **kwargs,
+                        )
+
     def test_composite_draw_uses_no_tile_cull_rect(self) -> None:
         view = self._make_view()
         display_bounds = nornir_imageregistration.Rectangle.CreateFromBounds(
@@ -49,18 +62,33 @@ class TestCompositeTileCull(unittest.TestCase):
         def _fake_ensure(visible_coords, *, max_tiles=None) -> None:
             captured["visible_coords"] = visible_coords
 
-        mesh_transform = MagicMock()
-        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: mesh_transform)):
-            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
-                with patch.object(view, "_ensure_visible_tile_meshes", side_effect=_fake_ensure):
-                    with patch("pyre.views.imagetransformview.shaders.texture_shader.draw"):
-                        view._draw_imageviewmodel(
-                            view_proj=np.eye(4, dtype=np.float32),
-                            image_viewmodel=view._image_viewmodel,
-                            space=Space.Target,
-                            bounding_box=display_bounds,
-                            view_type=ViewType.Composite,
-                        )
+        with patch.object(view, "_ensure_visible_tile_meshes", side_effect=_fake_ensure):
+            self._draw_imageviewmodel(
+                view,
+                space=Space.Target,
+                bounding_box=display_bounds,
+                view_type=ViewType.Composite,
+            )
+        coords = captured.get("visible_coords")
+        self.assertIsInstance(coords, set)
+        self.assertEqual(len(coords), 16)  # type: ignore[arg-type]
+
+    def test_nan_bounding_box_does_not_raise(self) -> None:
+        view = self._make_view()
+        nan_bounds = nornir_imageregistration.Rectangle.CreateFromBounds(
+            np.array([np.nan, np.nan, np.nan, np.nan], dtype=np.float64))
+        captured: dict[str, object] = {}
+
+        def _fake_ensure(visible_coords, *, max_tiles=None) -> None:
+            captured["visible_coords"] = visible_coords
+
+        with patch.object(view, "_ensure_visible_tile_meshes", side_effect=_fake_ensure):
+            self._draw_imageviewmodel(
+                view,
+                space=Space.Source,
+                bounding_box=nan_bounds,
+                view_type=ViewType.Source,
+            )
         coords = captured.get("visible_coords")
         self.assertIsInstance(coords, set)
         self.assertEqual(len(coords), 16)  # type: ignore[arg-type]

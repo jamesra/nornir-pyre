@@ -12,6 +12,7 @@ import math
 import nornir_imageregistration
 import pyre
 from pyre import Space
+from pyre.image_contrast import contrasted_permutation_helper
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IImageManager
@@ -30,6 +31,7 @@ class RegisterControlPointCommand(InstantCommandBase):
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _source_image: str
     _target_image: str
+    _app_settings: AppSettings
     _settings: PointRegistrationSettings
 
     @property
@@ -70,6 +72,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._source_image = source_image
         self._target_image = target_image
         self._selected_points = selected_points
+        self._app_settings = settings
         self._settings = settings.stos.point_registration
 
         if register_all:
@@ -94,8 +97,14 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
-        source = self._image_manager[self._source_image]
-        target = self._image_manager[self._target_image]
+        source = contrasted_permutation_helper(
+            self._image_manager[self._source_image],
+            self._app_settings.ui.source_contrast,
+        )
+        target = contrasted_permutation_helper(
+            self._image_manager[self._target_image],
+            self._app_settings.ui.target_contrast,
+        )
 
         indicies_to_register = list(self._selected_points)
         # self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.indicies_to_register)

@@ -71,6 +71,29 @@ class TestApplyContrastArray(unittest.TestCase):
         self.assertAlmostEqual(float(stretched[0, 1]), 255.0, places=3)
         self.assertAlmostEqual(float(stretched[0, 2]), 255.0, places=3)
 
+    def test_unit_interval_uses_display_levels_and_keeps_01_range(self) -> None:
+        """0–1 mosaics must not be zeroed by 0–255 contrast windows."""
+        image = np.array([[0.0, 0.5, 1.0]], dtype=np.float32)
+        out = apply_contrast_array(
+            image, ImageDisplayContrast(min=60.4, max=204.0, gamma=1.0))
+        self.assertGreater(float(out.max()), 0.1)
+        self.assertLessEqual(float(out.max()), 1.0 + 1e-5)
+        self.assertAlmostEqual(float(out[0, 0]), 0.0, places=4)
+        expected_mid = (0.5 * 255.0 - 60.4) / (204.0 - 60.4)
+        self.assertAlmostEqual(float(out[0, 1]), expected_mid, places=3)
+
+    def test_histogram_spreads_unit_interval_into_display_bins(self) -> None:
+        from pyre.image_contrast import approximate_image_histogram
+
+        rng = np.random.default_rng(0)
+        image = rng.random((64, 64), dtype=np.float32)
+        hist = approximate_image_histogram(image)
+        self.assertIsNotNone(hist)
+        assert hist is not None
+        self.assertGreater(hist.NumSamples, 0)
+        occupied = sum(1 for count in hist.Bins if count > 0)
+        self.assertGreater(occupied, 5)
+
     def test_gamma_mid_gray(self) -> None:
         # After normalize to [0,1], mid gray 0.5 with gamma=2 → pow(0.5, 0.5) ≈ 0.707 → ~180.3
         image = np.array([[127.5]], dtype=np.float32)

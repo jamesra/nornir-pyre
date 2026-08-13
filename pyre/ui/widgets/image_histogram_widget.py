@@ -5,6 +5,7 @@ from __future__ import annotations
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from nornir_shared.histogram import Histogram
@@ -74,11 +75,11 @@ class ImageHistogramWidget(QWidget):
         self._min_line = None
         self._max_line = None
         hist = self._histogram
+        y_max = 1.0
         if hist is None or hist.NumBins <= 0 or hist.NumSamples <= 0:
             self._axes.text(0.5, 0.5, 'No image', transform=self._axes.transAxes,
                             ha='center', va='center', fontsize=9, color='#666666')
             self._axes.set_xlim(0, 255)
-            self._axes.set_ylim(0, 1)
         else:
             bin_edges = [
                 float(hist.MinValue) + float(i) * float(hist.BinWidth)
@@ -87,9 +88,12 @@ class ImageHistogramWidget(QWidget):
             widths = [float(hist.BinWidth)] * hist.NumBins
             self._axes.bar(bin_edges, hist.Bins, width=widths, align='edge',
                            color='#5b8def', edgecolor='none')
-            y_max = max(hist.Bins) if hist.Bins else 1
+            y_max = max((float(count) for count in hist.Bins), default=1.0)
+            if y_max <= 0:
+                y_max = 1.0
             self._axes.set_xlim(float(hist.MinValue), float(hist.MaxValue))
-            self._axes.set_ylim(0, max(1, y_max) * 1.15)
+            self._axes.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+            self._axes.ticklabel_format(axis='y', style='plain', useOffset=False)
         self._axes.set_xlabel('Intensity')
         self._axes.set_ylabel('Count')
         self._axes.set_title('Histogram')
@@ -100,4 +104,6 @@ class ImageHistogramWidget(QWidget):
         self._max_line = self._axes.axvline(max_x, color='#c0392b', linewidth=1.4)
         self._min_line.set_visible(self._min_marker is not None)
         self._max_line.set_visible(self._max_marker is not None)
+        self._axes.set_ylim(0, y_max)
+        self._axes.margins(y=0)
         self._canvas.draw_idle()

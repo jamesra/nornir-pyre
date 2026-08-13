@@ -30,6 +30,24 @@ class TestGltilesVisibleExpand(unittest.TestCase):
         coords = gltiles.tile_coords_for_visible_bounds(512, 512, (128, 128), rect)
         self.assertEqual(coords, {(0, 0)})
 
+    def test_tile_coords_for_visible_bounds_nan_returns_none(self) -> None:
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds(
+            np.array((np.nan, 0.0, 64.0, 64.0)))
+        coords = gltiles.tile_coords_for_visible_bounds(512, 512, (128, 128), rect)
+        self.assertIsNone(coords)
+
+    def test_tile_coords_for_visible_bounds_inf_returns_none(self) -> None:
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds(
+            np.array((0.0, np.inf, 64.0, 64.0)))
+        coords = gltiles.tile_coords_for_visible_bounds(512, 512, (128, 128), rect)
+        self.assertIsNone(coords)
+
+    def test_tile_coords_for_visible_bounds_zero_tile_size_returns_none(self) -> None:
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds(
+            np.array((0.0, 0.0, 64.0, 64.0)))
+        coords = gltiles.tile_coords_for_visible_bounds(512, 512, (0, 128), rect)
+        self.assertIsNone(coords)
+
 
 class TestBuildTileMeshStaticQuads(unittest.TestCase):
     """force_static_quads keeps mesh/grid Target panels on identity quads."""

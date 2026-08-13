@@ -24,9 +24,38 @@ LEVEL_MAX: float = 255.0
 GAMMA_MIN: float = 0.01
 GAMMA_MAX: float = 10.0
 _MIN_SPAN: float = 1e-3
+# Float mosaics from ImagePermutationHelper are ~[0, 1]; contrast UI/shader use 0–255.
+_UNIT_INTERVAL_MAX: float = 1.5
 
 # Re-export for contrast UI callers.
 histogram_sample_stride = even_histogram_stride
+
+
+def _xp_for_image(image: NDArray):
+    """Return the array module for *image* (CuPy or NumPy)."""
+    try:
+        import cupy as cp
+        return cp.get_array_module(image)
+    except Exception:
+        return np
+
+
+def image_is_unit_interval(image: NDArray) -> bool:
+    """True when intensities are normalized ~[0, 1] rather than 0–255 display units."""
+    if getattr(image, "size", 0) == 0:
+        return False
+    if np.issubdtype(np.dtype(getattr(image, "dtype", np.float32)), np.integer):
+        return False
+    xp = _xp_for_image(image)
+    return float(xp.max(image)) <= _UNIT_INTERVAL_MAX
+
+
+def intensities_in_display_units(image: NDArray) -> NDArray:
+    """Return a host copy of *image* scaled to 0–255 contrast/histogram units."""
+    host = image.get() if hasattr(image, "get") else np.asarray(image)
+    if image_is_unit_interval(image):
+        return host.astype(np.float32, copy=False) * float(LEVEL_MAX)
+    return host
 
 
 def approximate_image_histogram(
@@ -40,7 +69,7 @@ def approximate_image_histogram(
     """Build an intensity histogram from an even spatial subsample of *image*."""
     try:
         return ApproximateHistogramOfArray(
-            image,
+            intensities_in_display_units(image),
             sample_fraction=sample_fraction,
             bpp=8,
             num_bins=num_bins,
@@ -92,8 +121,9 @@ def apply_contrast_array(
 ) -> NDArray:
     """Apply min/max/gamma remap matching TextureShader fragment math.
 
-    ``out = pow(clamp((x - min) / (max - min), 0, 1), 1/gamma) * 255``
-    so registration arrays stay in the same 0–255-ish units as display textures.
+    Contrast min/max/gamma are 0–255 display units (same as the GL shader).
+    Registration mosaics are often float ~[0, 1]; those are scaled into display
+    units for the remap, then scaled back so output stays in the input range.
     """
     c = normalize_contrast(contrast)
     if is_identity_contrast(c):
@@ -101,17 +131,15 @@ def apply_contrast_array(
             return np.asarray(image).copy() if not hasattr(image, 'get') else image.copy()
         return image
 
-    try:
-        import cupy as cp
-        xp = cp.get_array_module(image)
-    except Exception:
-        xp = np
-
+    xp = _xp_for_image(image)
     arr = xp.asarray(image, dtype=xp.float32)
+    unit_interval = image_is_unit_interval(image)
+    intensity = arr * float(LEVEL_MAX) if unit_interval else arr
     span = max(float(c.max) - float(c.min), _MIN_SPAN)
-    norm = xp.clip((arr - float(c.min)) / span, 0.0, 1.0)
+    norm = xp.clip((intensity - float(c.min)) / span, 0.0, 1.0)
     inv_gamma = 1.0 / float(c.gamma)
-    out = xp.power(norm, inv_gamma) * float(LEVEL_MAX)
+    mapped = xp.power(norm, inv_gamma)
+    out = mapped if unit_interval else mapped * float(LEVEL_MAX)
     return out.astype(arr.dtype, copy=False)
 
 
@@ -151,6 +179,7 @@ class ContrastedImagePermutationHelper:
     _inner: nornir_imageregistration.ImagePermutationHelper
     _contrast: ImageDisplayContrast
     _cached: NDArray | None
+    _stats: object | None
 
     def __init__(
             self,
@@ -160,6 +189,7 @@ class ContrastedImagePermutationHelper:
         self._inner = inner
         self._contrast = normalize_contrast(contrast)
         self._cached = None
+        self._stats = None
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -179,7 +209,14 @@ class ContrastedImagePermutationHelper:
 
     @property
     def Stats(self):
-        return self._inner.Stats
+        if self._stats is None:
+            contrasted = self.ImageWithMaskAsNoise
+            mask = self._inner.BlendedMask
+            if mask is not None:
+                self._stats = nornir_imageregistration.ImageStats.Create(contrasted[mask])
+            else:
+                self._stats = nornir_imageregistration.ImageStats.Create(contrasted)
+        return self._stats
 
     @property
     def ImageWithMaskAsNoise(self) -> NDArray:
