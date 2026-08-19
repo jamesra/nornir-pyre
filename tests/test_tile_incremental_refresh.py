@@ -1,13 +1,44 @@
 """Tests for incremental tile refresh during control-point drag."""
 
 import unittest
+from unittest.mock import MagicMock, patch
 
 import numpy as np
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
+import nornir_imageregistration
+from nornir_imageregistration.grid_subdivision import ITKGridDivision
+from nornir_imageregistration.transforms import Rigid
+from nornir_imageregistration.transforms.gridtransform import GridTransform
+from nornir_imageregistration.transforms.gridwithrbffallback import GridWithRBFFallback
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache, TileMeshCpuEntry
 from pyre.space import Space
 from pyre.views import gltiles
+
+
+def _identity_grid() -> GridTransform:
+    grid = ITKGridDivision(source_shape=(32, 32), cell_size=(16, 16))
+    grid.PopulateTargetPoints(
+        Rigid(target_offset=(0.0, 0.0), source_rotation_center=(16.0, 16.0), angle=0.0))
+    return GridTransform(grid)
+
+
+def _identity_grid_with_rbf() -> GridWithRBFFallback:
+    grid = ITKGridDivision(source_shape=(32, 32), cell_size=(16, 16))
+    grid.PopulateTargetPoints(
+        Rigid(target_offset=(0.0, 0.0), source_rotation_center=(16.0, 16.0), angle=0.0))
+    return GridWithRBFFallback(grid)
+
+
+def _pack_tile_vertices(target_yx: np.ndarray, source_yx: np.ndarray) -> np.ndarray:
+    verts = np.zeros((target_yx.shape[0], 8), dtype=np.float32)
+    verts[:, 0] = target_yx[:, 1]
+    verts[:, 1] = target_yx[:, 0]
+    verts[:, 3] = source_yx[:, 1]
+    verts[:, 4] = source_yx[:, 0]
+    return verts
 
 
 class TestSimplicesCompatibility(unittest.TestCase):
@@ -132,6 +163,123 @@ class TestRejectCachedRigidQuadWhenWarpRequired(unittest.TestCase):
         build.assert_called_once()
         self.assertFalse(entry.is_rigid_quad)
         self.assertIs(cache.get(1, Space.Source, (0, 0)), rebuilt)
+
+
+class TestRegularGridSimplices(unittest.TestCase):
+    """Grid tile meshes use a regular lattice triangulation, not Qhull."""
+
+    def test_cell_count_matches_lattice(self) -> None:
+        simplices = gltiles._regular_grid_cell_simplices(5, 4)
+        self.assertEqual(simplices.shape, ((5 - 1) * (4 - 1) * 2, 3))
+        self.assertEqual(int(simplices.max()), 5 * 4 - 1)
+
+    def test_identity_grid_tile_mesh_skips_delaunay(self) -> None:
+        transform = _identity_grid()
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds(np.array((0.0, 0.0, 32.0, 32.0)))
+        mesh = gltiles._grid_tile_mesh_point_pairs(transform, rect)
+        self.assertIsNotNone(mesh)
+        assert mesh is not None
+        pairs, simplices = mesh
+        self.assertGreater(simplices.shape[0], 0)
+        self.assertEqual(pairs.shape[1], 4)
+
+
+class TestInteractiveControlPointVertexPatch(unittest.TestCase):
+    """CP drag must map live TargetPoints onto existing vertices without Transform()."""
+
+    def test_grid_mapper_matches_target_points_at_nodes(self) -> None:
+        transform = _identity_grid()
+        mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+        self.assertIsNotNone(mapper)
+        assert mapper is not None
+        mapped = mapper(transform.SourcePoints)
+        np.testing.assert_allclose(mapped, transform.TargetPoints, rtol=1e-6, atol=1e-6)
+
+    def test_grid_mapper_does_not_call_transform(self) -> None:
+        transform = _identity_grid_with_rbf()
+        with patch.object(transform, "Transform", side_effect=AssertionError("Transform()")):
+            mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+            self.assertIsNotNone(mapper)
+            assert mapper is not None
+            mapped = mapper(transform.SourcePoints)
+        np.testing.assert_allclose(mapped, transform.TargetPoints, rtol=1e-6, atol=1e-6)
+
+    @given(
+        dy=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+        dx=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+    )
+    @example(dy=0.0, dx=0.0)
+    @example(dy=5.0, dx=-3.0)
+    @settings(max_examples=20, deadline=None)
+    def test_grid_mapper_follows_moved_control_point(self, dy: float, dx: float) -> None:
+        transform = _identity_grid()
+        source = np.array(transform.SourcePoints, copy=True)
+        new_target = transform.TargetPoints[0] + np.array((dy, dx), dtype=np.float64)
+        transform.UpdateTargetPointsByIndex(0, new_target)
+        mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+        self.assertIsNotNone(mapper)
+        assert mapper is not None
+        mapped = mapper(source)
+        np.testing.assert_allclose(mapped[0], new_target, rtol=1e-6, atol=1e-5)
+        np.testing.assert_allclose(mapped[1:], transform.TargetPoints[1:], rtol=1e-6, atol=1e-5)
+
+    def test_patch_updates_target_xy_from_live_control_points(self) -> None:
+        transform = _identity_grid()
+        source = np.array(transform.SourcePoints, copy=True)
+        verts = _pack_tile_vertices(transform.TargetPoints, source)
+        transform.UpdateTargetPointsByIndex(0, transform.TargetPoints[0] + np.array((4.0, -2.0)))
+        mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+        self.assertIsNotNone(mapper)
+        assert mapper is not None
+        patched = gltiles.patch_tile_vertices_from_control_points(verts, mapper)
+        self.assertIsNotNone(patched)
+        assert patched is not None
+        np.testing.assert_allclose(patched[:, 3:5], verts[:, 3:5])
+        np.testing.assert_allclose(
+            np.column_stack((patched[:, 1], patched[:, 0])),
+            transform.TargetPoints,
+            rtol=1e-6,
+            atol=1e-5,
+        )
+
+    def test_interactive_update_skips_remesh_when_patch_succeeds(self) -> None:
+        from pyre.views.imagetransformview import ImageTransformView
+
+        transform = _identity_grid()
+        view = ImageTransformView.__new__(ImageTransformView)
+        view._transform_controller = MagicMock()
+        view._transform_controller.interactive_edit_in_progress = True
+        view._transform_controller.tile_mesh_cache = TileMeshCpuCache()
+        view._image_space = Space.Source
+        view._warp_into_target_display = True
+        view._image_viewmodel = MagicMock()
+        view._image_viewmodel.TextureSize = np.array([64, 64], dtype=np.int32)
+        view._image_viewmodel.width = 32
+        view._image_viewmodel.height = 32
+        view._activate_context = MagicMock()
+        render_data = MagicMock()
+        render_data.is_rigid_quad = False
+        render_data.mesh_populated = True
+        render_data.vertex_buffer.data = _pack_tile_vertices(
+            transform.TargetPoints, transform.SourcePoints)
+        view._tile_render_data = {(0, 0): render_data}
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: transform)):
+            with patch("pyre.views.gltiles._update_tile_buffers") as remesh:
+                view.update_tiles_for_point_indices(np.array([0], dtype=np.intp))
+        remesh.assert_not_called()
+        patched = np.asarray(render_data.vertex_buffer.data)
+        self.assertEqual(patched.shape[1], 8)
+
+    def test_interactive_point_move_marks_post_drag_remesh(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        controller = TransformController(_identity_grid())
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            controller.MovePoint(0, 1.0, 2.0, space=Space.Target)
+            self.assertTrue(controller._full_refresh_needed)
+        finally:
+            controller.end_interactive_edit()
 
 
 if __name__ == "__main__":

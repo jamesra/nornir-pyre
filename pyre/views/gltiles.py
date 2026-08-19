@@ -10,7 +10,7 @@ import scipy.spatial
 import scipy.spatial.distance
 
 import nornir_imageregistration
-from nornir_imageregistration.transforms.base import IRigidTransform
+from nornir_imageregistration.transforms.base import IControlPoints, IGridTransform, IRigidTransform
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
 from pyre.space import Space
 from pyre.perf_debug import timed
@@ -455,13 +455,14 @@ def _render_data_with_cached_simplices(point_pairs: NDArray[np.floating],
                                        tile_bounding_rect: nornir_imageregistration.Rectangle,
                                        space: Space,
                                        simplices: NDArray[np.integer],
-                                       z: float | None = None) -> NDArray[np.floating]:
+                                       z: float | None = None,
+                                       require_valid_topology: bool = True) -> NDArray[np.floating]:
     point_pairs = _point_pairs_to_numpy_f64(point_pairs)
     fixed_points_yx, warped_points_yx = np.hsplit(point_pairs, 2)
     texture_points = _texture_coordinates(
         warped_points_yx if space == Space.Source else fixed_points_yx,
         bounding_rect=tile_bounding_rect)
-    if not _topology_still_valid(texture_points, simplices):
+    if require_valid_topology and not _topology_still_valid(texture_points, simplices):
         raise ValueError('topology invalid')
     if z is not None:
         z_array = np.ones((fixed_points_yx.shape[0], 1)) * z
@@ -476,6 +477,215 @@ def _render_data_with_cached_simplices(point_pairs: NDArray[np.floating],
                          texture_points[:, 0],
                          texture_points[:, 1])).T.astype(np.float32)
     return verts3d
+
+
+def _regular_grid_cell_simplices(ny: int, nx: int) -> NDArray[np.intp]:
+    """Two triangles per cell of a row-major (ny, nx) lattice."""
+    if ny < 2 or nx < 2:
+        return np.empty((0, 3), dtype=np.intp)
+    i, j = np.mgrid[0:ny - 1, 0:nx - 1]
+    a = i * nx + j
+    b = a + 1
+    c = a + nx
+    d = c + 1
+    return np.concatenate(
+        (
+            np.stack((a, c, b), axis=-1).reshape(-1, 3),
+            np.stack((b, c, d), axis=-1).reshape(-1, 3),
+        ),
+        axis=0).astype(np.intp)
+
+
+def _grid_tile_mesh_point_pairs(
+        transform: IGridTransform,
+        tile_rect: nornir_imageregistration.Rectangle,
+) -> tuple[NDArray[np.floating], NDArray[np.intp]] | None:
+    """Control-point pairs and regular-grid triangles covering one texture tile."""
+    dims = getattr(transform, 'grid_dims', None)
+    if dims is None:
+        dims = transform.grid.grid_dims
+    ny, nx = int(dims[0]), int(dims[1])
+    source = nornir_imageregistration.EnsureNumpyArray(transform.SourcePoints)
+    target = nornir_imageregistration.EnsureNumpyArray(transform.TargetPoints)
+    if source.shape[0] != ny * nx or target.shape[0] != ny * nx:
+        return None
+    source_g = source.reshape(ny, nx, 2)
+    target_g = target.reshape(ny, nx, 2)
+    y0, x0 = tile_rect.BottomLeft
+    y1 = float(y0) + float(tile_rect.Height)
+    x1 = float(x0) + float(tile_rect.Width)
+    axis_y = np.asarray(source_g[:, 0, 0], dtype=np.float64)
+    axis_x = np.asarray(source_g[0, :, 1], dtype=np.float64)
+    r0 = int(np.clip(np.searchsorted(axis_y, y0, side='right') - 1, 0, ny - 1))
+    r1 = int(np.clip(np.searchsorted(axis_y, y1, side='left'), 0, ny - 1))
+    c0 = int(np.clip(np.searchsorted(axis_x, x0, side='right') - 1, 0, nx - 1))
+    c1 = int(np.clip(np.searchsorted(axis_x, x1, side='left'), 0, nx - 1))
+    r0 = max(r0 - 1, 0)
+    r1 = min(r1 + 1, ny - 1)
+    c0 = max(c0 - 1, 0)
+    c1 = min(c1 + 1, nx - 1)
+    if r1 - r0 < 1 or c1 - c0 < 1:
+        return None
+    sub_ny = r1 - r0 + 1
+    sub_nx = c1 - c0 + 1
+    src = source_g[r0:r1 + 1, c0:c1 + 1].reshape(-1, 2)
+    tgt = target_g[r0:r1 + 1, c0:c1 + 1].reshape(-1, 2)
+    pairs = np.hstack((tgt, src))
+    simplices = _regular_grid_cell_simplices(sub_ny, sub_nx)
+    if simplices.shape[0] == 0:
+        return None
+    return pairs, simplices
+
+
+def _bilinear_sample_grid(
+        query_yx: NDArray[np.floating],
+        axis_y: NDArray[np.floating],
+        axis_x: NDArray[np.floating],
+        values: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Bilinear sample of a regular (Y, X) value grid, clamping to the lattice bounds."""
+    y = np.asarray(query_yx[:, 0], dtype=np.float64)
+    x = np.asarray(query_yx[:, 1], dtype=np.float64)
+    axis_y = np.asarray(axis_y, dtype=np.float64)
+    axis_x = np.asarray(axis_x, dtype=np.float64)
+    ny = int(axis_y.shape[0])
+    nx = int(axis_x.shape[0])
+    if ny < 1 or nx < 1:
+        return np.full((query_yx.shape[0], values.shape[-1]), np.nan, dtype=np.float64)
+    if ny == 1 and nx == 1:
+        return np.broadcast_to(values[0, 0], (query_yx.shape[0], values.shape[-1])).copy()
+    iy1 = np.clip(np.searchsorted(axis_y, y, side='right'), 1, max(ny - 1, 1))
+    ix1 = np.clip(np.searchsorted(axis_x, x, side='right'), 1, max(nx - 1, 1))
+    iy0 = np.clip(iy1 - 1, 0, ny - 1)
+    ix0 = np.clip(ix1 - 1, 0, nx - 1)
+    y0 = axis_y[iy0]
+    y1 = axis_y[iy1]
+    x0 = axis_x[ix0]
+    x1 = axis_x[ix1]
+    dy = y1 - y0
+    dx = x1 - x0
+    ty = np.where(dy > 0.0, (y - y0) / dy, 0.0)
+    tx = np.where(dx > 0.0, (x - x0) / dx, 0.0)
+    np.clip(ty, 0.0, 1.0, out=ty)
+    np.clip(tx, 0.0, 1.0, out=tx)
+    v00 = values[iy0, ix0]
+    v01 = values[iy0, ix1]
+    v10 = values[iy1, ix0]
+    v11 = values[iy1, ix1]
+    ty = ty[:, np.newaxis]
+    tx = tx[:, np.newaxis]
+    return (v00 * (1.0 - ty) * (1.0 - tx)
+            + v01 * (1.0 - ty) * tx
+            + v10 * ty * (1.0 - tx)
+            + v11 * ty * tx)
+
+
+def _barycentric_sample_delaunay(
+        query_yx: NDArray[np.floating],
+        delaunay: scipy.spatial.Delaunay,
+        values: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Piecewise-linear interpolate ``values`` at ``query_yx`` using a source-space Delaunay."""
+    queries = np.asarray(query_yx, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    out = np.empty((queries.shape[0], values.shape[1]), dtype=np.float64)
+    simplex = delaunay.find_simplex(queries)
+    inside = simplex >= 0
+    ndim = int(queries.shape[1])
+    if np.any(inside):
+        s = simplex[inside]
+        transform = delaunay.transform[s]
+        offset = queries[inside] - transform[:, ndim]
+        bary = np.einsum('ijk,ik->ij', transform[:, :ndim], offset)
+        bary_coords = np.concatenate([bary, 1.0 - bary.sum(axis=1, keepdims=True)], axis=1)
+        out[inside] = np.einsum('ij,ijk->ik', bary_coords, values[delaunay.simplices[s]])
+    outside = ~inside
+    if np.any(outside):
+        points = np.asarray(delaunay.points, dtype=np.float64)
+        delta = queries[outside][:, np.newaxis, :] - points[np.newaxis, :, :]
+        nearest = np.argmin(np.sum(delta * delta, axis=2), axis=1)
+        out[outside] = values[nearest]
+    return out
+
+
+def source_to_target_mapper_for_interactive_drag(
+        transform: nornir_imageregistration.ITransform,
+) -> Callable[[NDArray[np.floating]], NDArray[np.floating]] | None:
+    """Return a Source→Target mapper that does not rebuild interpolators or call Transform().
+
+    Grid transforms use bilinear sampling of the live TargetPoints lattice. Other
+    control-point transforms use the source-space Delaunay of the control points.
+    """
+    if not isinstance(transform, IControlPoints):
+        return None
+    target_points = nornir_imageregistration.EnsureNumpyArray(transform.TargetPoints)
+    source_points = nornir_imageregistration.EnsureNumpyArray(transform.SourcePoints)
+    if target_points.size == 0 or source_points.size == 0:
+        return None
+    if isinstance(transform, IGridTransform):
+        dims = getattr(transform, 'grid_dims', None)
+        if dims is None:
+            dims = transform.grid.grid_dims
+        ny, nx = int(dims[0]), int(dims[1])
+        if ny * nx != target_points.shape[0]:
+            return None
+        source_grid = source_points.reshape(ny, nx, 2)
+        target_grid = target_points.reshape(ny, nx, 2)
+        axis_y = source_grid[:, 0, 0]
+        axis_x = source_grid[0, :, 1]
+
+        def _map_grid(query_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+            return _bilinear_sample_grid(query_yx, axis_y, axis_x, target_grid)
+
+        return _map_grid
+
+    if source_points.shape[0] < 3:
+        return None
+    delaunay = scipy.spatial.Delaunay(source_points)
+
+    def _map_mesh(query_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+        return _barycentric_sample_delaunay(query_yx, delaunay, target_points)
+
+    return _map_mesh
+
+
+def patch_tile_vertices_from_control_points(
+        vertices: NDArray[np.floating],
+        mapper: Callable[[NDArray[np.floating]], NDArray[np.floating]],
+) -> NDArray[np.floating] | None:
+    """Update vertex Target XY from live control points; keep Source XY, Z, and UVs."""
+    verts = np.array(vertices, dtype=np.float32, copy=True)
+    if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
+        return None
+    source_yx = np.column_stack((verts[:, 4], verts[:, 3])).astype(np.float64)
+    target_yx = mapper(source_yx)
+    if target_yx is None or target_yx.shape != source_yx.shape:
+        return None
+    if not np.all(np.isfinite(target_yx)):
+        return None
+    verts[:, 0] = target_yx[:, 1]
+    verts[:, 1] = target_yx[:, 0]
+    return verts
+
+
+def try_patch_tile_vertices_from_control_points(
+        render_data: TileGLObjects,
+        mapper: Callable[[NDArray[np.floating]], NDArray[np.floating]],
+) -> bool:
+    """Patch an existing deformable tile mesh in place. Returns False to request remesh."""
+    if render_data.is_rigid_quad or not render_data.mesh_populated:
+        return False
+    data = render_data.vertex_buffer.data
+    if data is None:
+        return False
+    verts = np.asarray(data)
+    if verts.ndim == 1:
+        if verts.size % 8 != 0:
+            return False
+        verts = verts.reshape((-1, 8))
+    patched = patch_tile_vertices_from_control_points(verts, mapper)
+    if patched is None:
+        return False
+    render_data.vertex_buffer.data = patched
+    return True
 
 
 def tile_coords_for_control_points(image_height: int,
@@ -626,28 +836,18 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
         return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
                                 point_count=4, is_rigid_quad=True)
 
-    vertarray, indices = _calculate_tile_render_data(
-        transform, grid_coords, texture_size, image_space, extrapolate=extrapolate)
-    simplices = None
-    point_count = 0
-    if cached_entry is not None and cached_entry.cached_simplices is not None:
-        try:
-            tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
-            all_point_pairs = collect_verticies_within_bounding_box(
-                tile_bounding_rect, transform, image_space, extrapolate=extrapolate)
-            point_count = all_point_pairs.shape[0]
-            if _simplices_compatible_with_points(
-                    cached_entry.cached_simplices, point_count, cached_entry.point_count):
-                simplices = cached_entry.cached_simplices
-                vertarray = _render_data_with_cached_simplices(
-                    all_point_pairs, tile_bounding_rect, image_space, simplices)
-                indices = simplices.flatten().astype(np.uint16)
-                return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
-                                        point_count=point_count, is_rigid_quad=False)
-        except ValueError:
-            pass
-
     tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
+    if isinstance(transform, IGridTransform):
+        grid_mesh = _grid_tile_mesh_point_pairs(transform, tile_bounding_rect)
+        if grid_mesh is not None:
+            pairs, simplices = grid_mesh
+            vertarray = _render_data_with_cached_simplices(
+                pairs, tile_bounding_rect, image_space, simplices,
+                require_valid_topology=False)
+            indices = simplices.flatten().astype(np.uint16)
+            return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
+                                    point_count=int(pairs.shape[0]), is_rigid_quad=False)
+
     all_point_pairs = collect_verticies_within_bounding_box(
         tile_bounding_rect, transform, image_space, extrapolate=extrapolate)
     point_count = all_point_pairs.shape[0]
@@ -660,16 +860,24 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
     if cached_entry is not None and cached_entry.cached_simplices is not None:
         if _simplices_compatible_with_points(
                 cached_entry.cached_simplices, point_count, cached_entry.point_count):
-            repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
-            if repaired is not None:
-                try:
-                    vertarray = _render_data_with_cached_simplices(
-                        all_point_pairs, tile_bounding_rect, image_space, repaired)
-                    indices = repaired.flatten().astype(np.uint16)
-                    return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
-                                            point_count=point_count, is_rigid_quad=False)
-                except ValueError:
-                    pass
+            try:
+                vertarray = _render_data_with_cached_simplices(
+                    all_point_pairs, tile_bounding_rect, image_space, cached_entry.cached_simplices)
+                indices = cached_entry.cached_simplices.flatten().astype(np.uint16)
+                return TileMeshCpuEntry(vertices=vertarray, indices=indices,
+                                        simplices=cached_entry.cached_simplices,
+                                        point_count=point_count, is_rigid_quad=False)
+            except ValueError:
+                repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
+                if repaired is not None:
+                    try:
+                        vertarray = _render_data_with_cached_simplices(
+                            all_point_pairs, tile_bounding_rect, image_space, repaired)
+                        indices = repaired.flatten().astype(np.uint16)
+                        return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
+                                                point_count=point_count, is_rigid_quad=False)
+                    except ValueError:
+                        pass
 
     tri = scipy.spatial.Delaunay(texture_points)
     simplices = tri.simplices.copy()

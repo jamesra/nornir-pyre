@@ -121,6 +121,11 @@ class TransformController:
     _full_refresh_needed: bool = False
     _rbf_prewarm_generation: int = 0
     _rbf_prewarm_ready: bool = True
+    _interactive_gesture: TransformGesture = TransformGesture.NONE
+    _cached_composite_display_lookat: NDArray[np.floating] | None = None
+    _cached_composite_display_bounds: nornir_imageregistration.Rectangle | None = None
+    _cached_composite_lookat_src: tuple[float, float] | None = None
+    _cached_composite_bounds_src: tuple[float, float, float, float] | None = None
 
     @property
     def interactive_edit_in_progress(self) -> bool:
@@ -135,6 +140,20 @@ class TransformController:
     @property
     def tile_mesh_cache(self) -> TileMeshCpuCache:
         return self._tile_mesh_cache
+
+    def freeze_composite_display_during_point_drag(self) -> bool:
+        """True when composite camera/bounds should stay put while a control point moves."""
+        return (
+            self.interactive_edit_in_progress
+            and self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
+        )
+
+    def _clear_composite_display_cache(self) -> None:
+        """Drop cached composite lookat/bounds so the next paint remaps through Transform()."""
+        self._cached_composite_display_lookat = None
+        self._cached_composite_display_bounds = None
+        self._cached_composite_lookat_src = None
+        self._cached_composite_bounds_src = None
 
     @property
     def interactive_edit_space(self) -> Space | None:
@@ -226,6 +245,7 @@ class TransformController:
             self._interactive_edit_space = space
             resolved = gesture if gesture is not None else gesture_for_interactive_edit(
                 space, view_type, self.type)
+            self._interactive_gesture = resolved
             self.begin_gesture(resolved, space, view_type)
         self._interactive_edit_depth += 1
         nornir_imageregistration.interactive_edit.begin()
@@ -238,6 +258,8 @@ class TransformController:
         nornir_imageregistration.interactive_edit.end()
         if self._interactive_edit_depth == 0:
             self._interactive_edit_space = None
+            self._interactive_gesture = TransformGesture.NONE
+            self._clear_composite_display_cache()
             self.end_gesture()
             if self._full_refresh_needed:
                 self._full_refresh_needed = False
@@ -246,7 +268,7 @@ class TransformController:
                 self.FireOnChangeEvent()
 
     def _run_post_interactive_refresh(self) -> None:
-        if self.NumPoints > 25 and hasattr(self._TransformModel, 'InitializeDataStructures'):
+        if self._model_needs_rbf_prewarm(self._TransformModel):
             self._queue_rbf_prewarm()
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
@@ -466,7 +488,7 @@ class TransformController:
             return
         if hint == TileRefreshHint.NONE and self.interactive_edit_in_progress:
             return
-        if self.NumPoints > 25:
+        if self._model_needs_rbf_prewarm(self._TransformModel):
             self._queue_rbf_prewarm()
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
@@ -477,11 +499,15 @@ class TransformController:
             self._pending_moved_indices.add(int(index))
         else:
             self._pending_moved_indices.update(int(i) for i in np.atleast_1d(index).tolist())
+        if self.interactive_edit_in_progress and not self._display_strategy.uses_static_tile_quads():
+            # Vertex buffers are patched during drag; remesh 8x8 samples on mouse-up.
+            self._full_refresh_needed = True
         self.FireOnPointMovedEvent()
 
     def FireOnPointMovedEvent(self):
-        """Coalesced notification for incremental display updates during drag."""
-        if QApplication.instance() is None:
+        """Notification for incremental display updates during drag."""
+        if self.interactive_edit_in_progress or QApplication.instance() is None:
+            self._point_moved_event_pending = False
             self._fire_pending_point_moved_event()
             return
         if self._point_moved_event_pending:
@@ -528,6 +554,8 @@ class TransformController:
         # Reset first so a change triggered *by* a listener queues a fresh pass instead of
         # being dropped, and so an exception in a listener cannot leave the flag stuck.
         self._change_event_pending = False
+        if not self.freeze_composite_display_during_point_drag():
+            self._clear_composite_display_cache()
         self.__OnChangeEventListeners.invoke(self)
 
     def notify_interactive_rigid_repaint(self) -> None:
@@ -554,6 +582,7 @@ class TransformController:
 
         app = QApplication.instance()
         if app is None or QThread.currentThread() == app.thread():
+            self._clear_composite_display_cache()
             self.__OnTransformModelReplacedEventListeners.invoke(self, old, new)
             return
         qt_post_to_main(
@@ -594,6 +623,11 @@ class TransformController:
         self._full_refresh_needed = False
         self._rbf_prewarm_generation = 0
         self._rbf_prewarm_ready = True
+        self._interactive_gesture = TransformGesture.NONE
+        self._cached_composite_display_lookat = None
+        self._cached_composite_display_bounds = None
+        self._cached_composite_lookat_src = None
+        self._cached_composite_bounds_src = None
 
         self.TransformModel = TransformModel
 
@@ -613,7 +647,7 @@ class TransformController:
         )
 
     def _queue_rbf_prewarm(self) -> None:
-        """Precompute mesh/grid RBF weights on a sticky background thread."""
+        """Build a replacement RBF fallback on the single prewarm thread, then install it."""
         model = self._TransformModel
         if not self._model_needs_rbf_prewarm(model):
             self._rbf_prewarm_ready = True
@@ -623,25 +657,32 @@ class TransformController:
         generation = self._rbf_prewarm_generation
         self._rbf_prewarm_ready = False
         target_model = model
+        builder = getattr(target_model, "build_refreshed_continuous", None)
 
-        def _mark_ready() -> None:
+        def _install(new_continuous: object | None) -> None:
             if generation != self._rbf_prewarm_generation:
                 return
             if self._TransformModel is not target_model:
                 return
+            if new_continuous is not None:
+                target_model._continuous_transform = new_continuous  # type: ignore[attr-defined]
+                target_model._continuous_stale = False  # type: ignore[attr-defined]
             self._rbf_prewarm_ready = True
-            # Tiles/cursor may have been built without RBF extrapolation; refresh.
             self._tile_mesh_cache.clear()
             self.FireOnChangeEvent()
 
         def _prewarm() -> None:
+            built: object | None = None
             try:
-                target_model.InitializeDataStructures()  # type: ignore[union-attr]
+                if callable(builder):
+                    built = builder()
+                else:
+                    target_model.InitializeDataStructures()  # type: ignore[union-attr]
             finally:
                 if QApplication.instance() is None:
-                    _mark_ready()
+                    _install(built)
                 else:
-                    QTimer.singleShot(0, _mark_ready)
+                    QTimer.singleShot(0, lambda cont=built: _install(cont))
 
         GetTransformPrewarmPool().add_task(
             f"RBF prewarm gen={generation}",

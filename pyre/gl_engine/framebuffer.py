@@ -11,6 +11,7 @@ class FrameBuffer:
     _fbo_texture: int | None  # Frame buffer object's texture
     _fbo: int | None  # Frame buffer object
     _gl_funcs: QOpenGLFunctions  # OpenGL functions
+    _color_valid: bool = False
 
     @property
     def gl_funcs(self) -> QOpenGLFunctions:
@@ -31,11 +32,13 @@ class FrameBuffer:
         self._fbo = None
         self._fbo_texture = None
         self._gl_funcs = gl_funcs
+        self._color_valid = False
 
     def get_or_create_fbo(self, client_size: tuple[int, int]) -> int:
         """Create a frame buffer if the size has changed.  Otherwise use the existing frame buffer"""
         if client_size != self.size or self._fbo is None:
             self.free_fbo()
+            self._color_valid = False
 
             self.size = client_size
 
@@ -83,6 +86,7 @@ class FrameBuffer:
             gl.glDeleteFramebuffers(1, [self._fbo])
             check_for_error("after glDeleteFramebuffers in free_fbo")
             self._fbo = None
+        self._color_valid = False
 
     def _create_frame_buffer_texture(self, size: tuple[int, int]) -> int:
         """Create a texture the size of our window that we can render onto"""
@@ -106,6 +110,32 @@ class FrameBuffer:
         raise_on_error("after glTexParameteri(MIN_FILTER) in _create_frame_buffer_texture")
         return source_fbo_texture
 
+    @property
+    def color_valid(self) -> bool:
+        """True when this FBO has been filled with a complete image layer."""
+        return self._color_valid and self._fbo is not None
+
+    def mark_color_valid(self) -> None:
+        """Record that the current FBO contents are ready to reuse."""
+        self._color_valid = self._fbo is not None
+
+    def invalidate_color(self) -> None:
+        """Mark retained color stale so the next draw refills this FBO."""
+        self._color_valid = False
+
     def __del__(self):
         """Free our gl resources if we are deleted"""
         self.free_fbo()
+
+
+def blit_framebuffer_color(src_fbo: int, dest_fbo: int, width: int, height: int) -> None:
+    """Copy color from one framebuffer to another at matching pixel size."""
+    gl.glBindFramebuffer(gl.GL_READ_FRAMEBUFFER, int(src_fbo))
+    raise_on_error("after glBindFramebuffer(READ) in blit_framebuffer_color")
+    gl.glBindFramebuffer(gl.GL_DRAW_FRAMEBUFFER, int(dest_fbo))
+    raise_on_error("after glBindFramebuffer(DRAW) in blit_framebuffer_color")
+    gl.glBlitFramebuffer(0, 0, int(width), int(height), 0, 0, int(width), int(height),
+                         gl.GL_COLOR_BUFFER_BIT, gl.GL_NEAREST)
+    raise_on_error("after glBlitFramebuffer in blit_framebuffer_color")
+    gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(dest_fbo))
+    raise_on_error("after glBindFramebuffer(restore) in blit_framebuffer_color")

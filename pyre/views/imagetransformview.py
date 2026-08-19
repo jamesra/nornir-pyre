@@ -340,6 +340,8 @@ class ImageTransformView(IImageTransformView):
         if hint != TileRefreshHint.INCREMENTAL:
             return
         self.update_tiles_for_point_indices(indices)
+        if self._repaint_callback is not None:
+            self._repaint_callback()
 
     def _view_model_cache_id(self) -> int:
         return id(self._image_viewmodel)
@@ -369,7 +371,11 @@ class ImageTransformView(IImageTransformView):
 
     def update_tiles_for_point_indices(self, indices: NDArray[np.integer],
                                        visible_rect: nornir_imageregistration.Rectangle | None = None):
-        """Update only tiles affected by moved control points."""
+        """Update only tiles affected by moved control points.
+
+        During interactive drag, existing deformable meshes are patched in place
+        from live control points instead of remeshing via Transform().
+        """
         if self._image_viewmodel is None or self.transform is None or self._transform_controller is None:
             return
         self._activate_context()
@@ -388,6 +394,25 @@ class ImageTransformView(IImageTransformView):
             visible_rect)
         if visible is not None:
             tile_coords &= visible
+
+        if self._transform_controller.interactive_edit_in_progress and tile_coords:
+            mapper = gltiles.source_to_target_mapper_for_interactive_drag(self.transform)
+            if mapper is not None:
+                remesh_coords: set[tuple[int, int]] = set()
+                n_present = 0
+                n_patched = 0
+                for grid_coords in tile_coords:
+                    render_data = self._tile_render_data.get(grid_coords)
+                    if render_data is None:
+                        continue
+                    n_present += 1
+                    if not gltiles.try_patch_tile_vertices_from_control_points(render_data, mapper):
+                        remesh_coords.add(grid_coords)
+                    else:
+                        n_patched += 1
+                if not remesh_coords:
+                    return
+                tile_coords = remesh_coords
 
         self._transform_controller.tile_mesh_cache.invalidate_tiles(tile_coords)
 

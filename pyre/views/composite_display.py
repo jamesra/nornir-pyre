@@ -83,15 +83,25 @@ def transform_visible_rectangle_mesh(
         transform_controller: TransformController,
 ) -> nornir_imageregistration.Rectangle:
     """Return axis-aligned bounds of a rectangle after mesh/grid forward transform."""
+    bounds = np.asarray(rect.BoundingBox, dtype=np.float64).ravel()
+    src_key = (float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3]))
+    cached = transform_controller._cached_composite_display_bounds
+    if cached is not None and transform_controller._cached_composite_bounds_src == src_key:
+        return cached
+    if transform_controller.freeze_composite_display_during_point_drag() and cached is not None:
+        return cached
     corners = np.asarray(rect.Corners, dtype=np.float64)
     mapped = _as_numpy_f64(transform_controller.Transform(corners))
-    return nornir_imageregistration.Rectangle.CreateFromBounds(
+    result = nornir_imageregistration.Rectangle.CreateFromBounds(
         np.array([
             float(np.min(mapped[:, 0])),
             float(np.min(mapped[:, 1])),
             float(np.max(mapped[:, 0])),
             float(np.max(mapped[:, 1])),
         ]))
+    transform_controller._cached_composite_display_bounds = result
+    transform_controller._cached_composite_bounds_src = src_key
+    return result
 
 
 def inverse_transform_visible_rectangle_mesh(
@@ -184,8 +194,17 @@ def display_lookat_for_composite(
     if is_rigid_transform(model):
         view_forward = forward_for_composite_view(transform_controller, model)
         return apply_rigid_yx(view_forward, camera.lookat)
-    lookat = np.asarray(camera.lookat, dtype=np.float64)
-    return _ui_transform_point(transform_controller, True, lookat)
+    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+    src_key = (float(lookat[0]), float(lookat[1]))
+    cached = transform_controller._cached_composite_display_lookat
+    if cached is not None and transform_controller._cached_composite_lookat_src == src_key:
+        return cached
+    if transform_controller.freeze_composite_display_during_point_drag() and cached is not None:
+        return cached
+    result = _ui_transform_point(transform_controller, True, lookat)
+    transform_controller._cached_composite_display_lookat = result
+    transform_controller._cached_composite_lookat_src = src_key
+    return result
 
 
 def lookat_from_display_position(
@@ -297,7 +316,10 @@ def world_point_pair_for_composite_mouse(
     display_yx = _as_numpy_f64(display_pos)
     if not np.all(np.isfinite(display_yx)):
         return None
-    source_pos = _ui_transform_point(transform_controller, False, display_yx)
+    if transform_controller.freeze_composite_display_during_point_drag():
+        source_pos = display_yx
+    else:
+        source_pos = _ui_transform_point(transform_controller, False, display_yx)
     return PointPair(
         target=display_yx,
         source=_as_numpy_f64(source_pos),
@@ -315,8 +337,8 @@ def composite_control_point_draw_rows(
     if space != Space.Source:
         return None
     rows = _as_numpy_f64(transform_controller.points).copy()
-    source_yx = rows[:, 2:4]
-    rows[:, 2:4] = _as_numpy_f64(transform_controller.Transform(source_yx))
+    # Interpolators pass through control points: display position is TargetPoints.
+    rows[:, 2:4] = rows[:, 0:2]
     return rows
 
 

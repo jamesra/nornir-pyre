@@ -256,7 +256,11 @@ class ContrastAdjustmentWindow(QWidget):
             win = self._window_manager[vt]
             if not isinstance(win, StosWindow) or not win.isVisible():
                 continue
-            win.imagepanel.glcanvas.update()
+            panel = win.imagepanel
+            mark_dirty = getattr(panel, "mark_image_layer_dirty", None)
+            if callable(mark_dirty):
+                mark_dirty()
+            panel.glcanvas.update()
 
     def _on_layer_changed(self, _index: int) -> None:
         if self._updating:

@@ -102,31 +102,37 @@ class ControlPointMap:
                 and not isinstance(model, nornir_imageregistration.IRigidTransform)
         ):
             if tween == Space.Source:
-                source_pts = transform_controller.SourcePoints
-                return _as_numpy_f64(transform_controller.Transform(source_pts))
+                # Interpolators pass through control points: Transform(SourcePoints) == TargetPoints.
+                target_pts = _as_numpy_f64(transform_controller.TargetPoints)
+                return target_pts
             if tween == Space.Target:
-                return transform_controller.TargetPoints
+                return _as_numpy_f64(transform_controller.TargetPoints)
         if tween == Space.Source:
-            return transform_controller.SourcePoints
+            return _as_numpy_f64(transform_controller.SourcePoints)
         elif tween == Space.Target:
-            return transform_controller.TargetPoints
-        return (transform_controller.SourcePoints * (1.0 - tween) +
-                transform_controller.TargetPoints * tween)
+            return _as_numpy_f64(transform_controller.TargetPoints)
+        return _as_numpy_f64(
+            transform_controller.SourcePoints * (1.0 - tween) +
+            transform_controller.TargetPoints * tween)
 
     def create_kdtree(self):
-        """Create a KDTree from the current control points, if they have changed"""
-        new_points = self.tweened_points(self._transformcontroller, self.tween, self._view_type)
-        if self._cached_points is not None and \
-                self._cached_points.shape == new_points.shape and \
-                np.allclose(self._cached_points, new_points):
-            """If there is no change, do not rebuild expensive KDTree"""
+        """Create a KDTree from the current control points, if they have changed.
+
+        Cache a snapshot, not a view of the live TargetPoints/SourcePoints arrays.
+        In-place edits would otherwise compare the cache to itself and skip rebuilds,
+        leaving Target-view picking on stale coordinates.
+        """
+        new_points = _as_numpy_f64(
+            self.tweened_points(self._transformcontroller, self.tween, self._view_type))
+        if (self._cached_points is not None and
+                self._cached_points.shape == new_points.shape and
+                np.allclose(self._cached_points, new_points)):
             return
 
         self._kdtree = scipy.spatial.KDTree(new_points,
                                             copy_data=True,
-                                            # Copy data.  If the transform changes we need to notice so we can regenerate
                                             balanced_tree=True)
-        self._cached_points = new_points
+        self._cached_points = np.array(new_points, dtype=np.float64, copy=True)
 
         # print('KDTree created')
 
@@ -145,3 +151,78 @@ class ControlPointMap:
         if distance <= max_distance:
             return {int(index)}
         return set()
+
+    def find_in_rect(
+            self,
+            corner_a: NDArray[np.floating] | object,
+            corner_b: NDArray[np.floating] | object,
+    ) -> set[int]:
+        """Return indices of control points inside an axis-aligned rectangle (inclusive)."""
+        a = np.asarray(corner_a, dtype=np.float64).reshape(-1)
+        b = np.asarray(corner_b, dtype=np.float64).reshape(-1)
+        if a.size < 2 or b.size < 2 or not np.all(np.isfinite(a[:2])) or not np.all(np.isfinite(b[:2])):
+            return set()
+        pts = np.asarray(self.points, dtype=np.float64)
+        if pts.size == 0:
+            return set()
+        y0, x0 = np.minimum(a[:2], b[:2])
+        y1, x1 = np.maximum(a[:2], b[:2])
+        finite = np.isfinite(pts).all(axis=1)
+        inside = finite & (pts[:, 0] >= y0) & (pts[:, 0] <= y1) & (pts[:, 1] >= x0) & (pts[:, 1] <= x1)
+        return {int(i) for i in np.nonzero(inside)[0]}
+
+    def find_in_polygon(self, vertices: NDArray[np.floating] | object) -> set[int]:
+        """Return indices of control points inside a polygon, including the boundary."""
+        verts = np.asarray(vertices, dtype=np.float64).reshape(-1, 2)
+        finite_v = verts[np.isfinite(verts).all(axis=1)]
+        if finite_v.shape[0] < 3:
+            return set()
+        pts = np.asarray(self.points, dtype=np.float64)
+        if pts.size == 0:
+            return set()
+        finite = np.isfinite(pts).all(axis=1)
+        inside = np.zeros(pts.shape[0], dtype=bool)
+        inside[finite] = _even_odd_contains(pts[finite], finite_v) | _points_on_polygon_boundary(
+            pts[finite], finite_v)
+        return {int(i) for i in np.nonzero(inside)[0]}
+
+
+def _even_odd_contains(points: NDArray[np.floating], vertices: NDArray[np.floating]) -> NDArray[np.bool_]:
+    """Even-odd fill test. ``points`` and ``vertices`` are (y, x)."""
+    if not np.allclose(vertices[0], vertices[-1]):
+        ring = np.vstack([vertices, vertices[0:1]])
+    else:
+        ring = vertices
+    y = points[:, 0][:, None]
+    x = points[:, 1][:, None]
+    y0 = ring[:-1, 0]
+    x0 = ring[:-1, 1]
+    y1 = ring[1:, 0]
+    x1 = ring[1:, 1]
+    crosses = ((y0 <= y) & (y1 > y)) | ((y1 <= y) & (y0 > y))
+    dy = y1 - y0
+    x_int = x0 + (y - y0) * (x1 - x0) / np.where(dy == 0.0, 1.0, dy)
+    return (np.sum(crosses & (x < x_int), axis=1) % 2) == 1
+
+
+def _points_on_polygon_boundary(
+        points: NDArray[np.floating],
+        vertices: NDArray[np.floating],
+        epsilon: float = 1e-9,
+) -> NDArray[np.bool_]:
+    """True when a point lies on any polygon edge."""
+    if not np.allclose(vertices[0], vertices[-1]):
+        ring = np.vstack([vertices, vertices[0:1]])
+    else:
+        ring = vertices
+    p = points[:, None, :]
+    a = ring[:-1][None, :, :]
+    b = ring[1:][None, :, :]
+    ab = b - a
+    ap = p - a
+    ab_len2 = np.sum(ab * ab, axis=2)
+    ab_len2 = np.where(ab_len2 == 0.0, 1.0, ab_len2)
+    t = np.clip(np.sum(ap * ab, axis=2) / ab_len2, 0.0, 1.0)
+    closest = a + t[:, :, None] * ab
+    dist2 = np.sum((p - closest) ** 2, axis=2)
+    return np.any(dist2 <= epsilon * epsilon, axis=1)

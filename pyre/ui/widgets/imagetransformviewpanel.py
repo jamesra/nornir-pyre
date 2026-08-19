@@ -35,6 +35,8 @@ from pyre.state.managers.command_queue import CommandQueue
 
 from pyre.ui.widgets import imagetransformpanelbase
 from pyre.controllers.transformcontroller import TransformController
+from pyre.gl_engine import FrameBuffer
+from pyre.gl_engine.framebuffer import blit_framebuffer_color
 from pyre.views import (ClearDrawTextureState, CompositeTransformView, PointView, ImageTransformView,
                         SetDrawTextureState)
 from pyre.views.interfaces import IImageTransformView
@@ -73,6 +75,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _space: pyre.Space
     _image_transform_view: IImageTransformView | None = None  # The transformed image
     _show_lines: bool = False
+    _image_layer_dirty: bool = True
+    _retained_image_buffer: FrameBuffer | None = None
     _config: ImageTransformPanelConfig
 
     _command: ICommand | None
@@ -116,7 +120,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @show_lines.setter
     def show_lines(self, value: bool):
+        if self._show_lines == value:
+            return
         self._show_lines = value
+        self.mark_image_layer_dirty()
 
     @property
     def space(self) -> pyre.Space:
@@ -197,6 +204,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.LastDrawnBoundingBox = None
 
         self._image_transform_view = None
+        self._image_layer_dirty = True
+        self._retained_image_buffer = None
 
         self.DebugTickCounter = 0
         # Use singleShot timer that reschedules itself instead of repeating timer
@@ -271,14 +280,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self._update_layer_policy_hints()
 
     def _position_composite_legend(self) -> None:
-        """Anchor the composite source/target legend in the bottom-left corner."""
+        """Anchor the composite source/target legend in the top-right corner."""
         if self._composite_legend is None:
             return
         self._composite_legend.adjustSize()
         margin = 8
         self._composite_legend.move(
+            max(margin, self.width() - self._composite_legend.width() - margin),
             margin,
-            max(margin, self.height() - self._composite_legend.height() - margin),
         )
 
     def on_resize(self, event: QResizeEvent) -> None:
@@ -306,8 +315,50 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         except ValueError:
             pass
 
+    def mark_image_layer_dirty(self) -> None:
+        """Request a full texture-layer redraw on the next paint."""
+        self._image_layer_dirty = True
+
+    def _ensure_retained_image_buffer(self) -> FrameBuffer:
+        """Return the Source/Target panel background FBO, creating it on first use."""
+        if self._retained_image_buffer is None:
+            self._retained_image_buffer = FrameBuffer(self._glpanel.gl_funcs)
+        return self._retained_image_buffer
+
+    def _draw_retained_image_layer(
+            self,
+            view_proj: np.ndarray,
+            draw_kwargs: dict[str, object],
+            default_fbo: int,
+            ov_w: int,
+            ov_h: int,
+            refill: bool) -> None:
+        """Draw or blit the retained Source/Target image background."""
+        if self._image_transform_view is None:
+            return
+        fbo_size = (ov_h, ov_w)
+        buffer = self._ensure_retained_image_buffer()
+        layer_fbo = buffer.get_or_create_fbo(fbo_size)
+        if refill or not buffer.color_valid:
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(layer_fbo))
+            gl.glViewport(0, 0, ov_w, ov_h)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+            self._image_transform_view.draw(view_proj, **draw_kwargs)
+            buffer.mark_color_valid()
+        blit_framebuffer_color(int(layer_fbo), int(default_fbo), ov_w, ov_h)
+        gl.glViewport(0, 0, ov_w, ov_h)
+
+    def _image_layer_dirty_for_transform(self, _controller: TransformController) -> bool:
+        """True when a transform change alters visible image pixels in this panel."""
+        if self.view_type == ViewType.Composite:
+            return True
+        return self.show_lines
+
     def _on_transform_controller_changed(self, controller: TransformController) -> None:
         """Repaint when registration or display overlays change in another STOS view."""
+        if self._image_layer_dirty_for_transform(controller):
+            self.mark_image_layer_dirty()
         self._glpanel.update()
 
     def _on_transform_model_changed(self,
@@ -325,6 +376,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 on_changed(controller)
         if self._transform_controller_view is not None:
             self._transform_controller_view._sync_control_points_from_controller()
+        self.mark_image_layer_dirty()
         self._glpanel.update()
 
         # Cancel in-progress commands when the model is replaced externally.
@@ -396,7 +448,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 QTimer.singleShot(50, self._glpanel.update)
                 QTimer.singleShot(150, self._glpanel.update)
             else:
-                # Second add (Target) - request repaint so overlay draws once both views are set
+                # Second add (Target) - drop the source-only retained overlay and redraw.
+                self.mark_image_layer_dirty()
                 self._glpanel.update()
         else:
             print(f'\tAdding ImageTransformView {name} in space {self.space.value}')
@@ -406,6 +459,9 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                             transform_controller=self.transform_controller,
                                                             gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
             self._wire_tile_mesh_repaint(self._image_transform_view)
+            self.mark_image_layer_dirty()
+            if self._retained_image_buffer is not None:
+                self._retained_image_buffer.invalidate_color()
             print(f'Added image view model {name} to {self.view_type.value} view')
 
         # Use QTimer to call center_camera after the widget is fully initialized
@@ -440,6 +496,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Timer callback that reschedules itself - workaround for repeating timer issues"""
         try:
             self.DebugTickCounter += 1
+            # Blink only control-point glyphs; reuse the retained texture background.
             self.glcanvas.update()
             # Reschedule the timer
             QTimer.singleShot(100, self.on_timer_singleshot)
@@ -484,6 +541,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.image_transform_view.image_view_model = imageviewmodel  # type: ignore[attr-defined, union-attr]
 
         self.center_camera()
+        self.mark_image_layer_dirty()
         self.glcanvas.update()
 
     def onTransformChanged(self):
@@ -497,6 +555,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def onCameraChanged(self):
         """Handle camera changes and prefetch visible tile meshes."""
+        self.mark_image_layer_dirty()
         super().onCameraChanged()
         # Composite FBO meshes are not view-dependent (full grid); skip on pan/zoom.
         if isinstance(self._image_transform_view, CompositeTransformView):
@@ -571,6 +630,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self._glpanel.activate_context()
 
+        composite_view_proj = None
         if self._image_transform_view is not None:
             gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
             bounding_box = self.camera.VisibleImageBoundingBox
@@ -586,6 +646,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     self.transform_controller,
                     (gl_h, gl_w),
                 )
+                composite_view_proj = view_proj
                 draw_space = Space.Target
 
             SetDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
@@ -594,6 +655,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
             # Pass physical viewport size so composite overlay fills the widget after resize/hi-DPI (resizeGL uses physical pixels).
             default_fbo = self._glpanel.defaultFramebufferObject()
+            ov_w, ov_h = overlay_viewport_size
             draw_kwargs: dict[str, object] = {
                 "space": draw_space,
                 "client_size": (gl_h, gl_w),
@@ -603,7 +665,24 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 "show_mesh_lines": self.show_lines,
                 "view_type": self.view_type,
             }
-            self._image_transform_view.draw(view_proj, **draw_kwargs)
+            refill_source = self._image_layer_dirty
+            refill_target = self._image_layer_dirty
+            if (
+                    self.view_type == ViewType.Composite
+                    and self.transform_controller is not None
+                    and self.transform_controller.freeze_composite_display_during_point_drag()
+            ):
+                refill_source = True
+                refill_target = False
+            if isinstance(self._image_transform_view, CompositeTransformView):
+                draw_kwargs["refill_source_layer"] = refill_source
+                draw_kwargs["refill_target_layer"] = refill_target
+                self._image_transform_view.draw(view_proj, **draw_kwargs)
+                self._image_layer_dirty = False
+            else:
+                self._draw_retained_image_layer(
+                    view_proj, draw_kwargs, default_fbo, ov_w, ov_h, refill_source)
+                self._image_layer_dirty = False
 
             ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
@@ -611,12 +690,15 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             point_scale = (1 / self.camera.scale) * self.control_point_scale
             cp_view_proj = self.camera.view_proj
             if self.view_type == ViewType.Composite and self.transform_controller is not None:
-                gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
-                cp_view_proj, _ = resolve_composite_display_draw_params(
-                    self.camera,
-                    self.transform_controller,
-                    (gl_h, gl_w),
-                )
+                if composite_view_proj is not None:
+                    cp_view_proj = composite_view_proj
+                else:
+                    gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+                    cp_view_proj, _ = resolve_composite_display_draw_params(
+                        self.camera,
+                        self.transform_controller,
+                        (gl_h, gl_w),
+                    )
             self._transform_controller_view.draw(
                 cp_view_proj,
                 tween=ControlPointMap.draw_tween_for_pyre_space(self.space),

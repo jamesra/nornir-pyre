@@ -12,7 +12,7 @@ from dependency_injector.wiring import Provide, inject
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import *
-from pyre.gl_engine import FrameBuffer, raise_on_error  
+from pyre.gl_engine import FrameBuffer, raise_on_error
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import IImageViewModelManager
 from pyre.interfaces.viewtype import ViewType
@@ -232,8 +232,10 @@ class CompositeTransformView(IImageTransformView):
 
         if space_mapping == Space.Source:
             self._source_image_view = view
+            self._source_frame_buffer.invalidate_color()
         elif space_mapping == Space.Target:
             self._target_image_view = view
+            self._target_frame_buffer.invalidate_color()
 
         if self._source_image_view is not None and self._target_image_view is not None:
             if self._repaint_callback is not None:
@@ -255,6 +257,42 @@ class CompositeTransformView(IImageTransformView):
             if sub_view is not None:
                 sub_view.create_objects()  # type: ignore[attr-defined]
 
+    def _fill_composite_layer_fbo(
+            self,
+            frame_buffer: FrameBuffer,
+            sub_view: IImageTransformView,
+            view_proj: NDArray[np.floating],
+            space: Space,
+            fbo_size: tuple[int, int],
+            ov_w: int,
+            ov_h: int,
+            bounding_box: nornir_imageregistration.Rectangle | None,
+            show_mesh_lines: bool,
+            rigid_composite_source_align: bool) -> None:
+        """Rasterize one composite image layer into its retained FBO."""
+        layer_fbo = frame_buffer.get_or_create_fbo(fbo_size)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(layer_fbo))
+        raise_on_error("after glBindFramebuffer(layer) in compositetransformview._fill_composite_layer_fbo")
+        gl.glViewport(0, 0, ov_w, ov_h)
+        raise_on_error("after glViewport(layer) in compositetransformview._fill_composite_layer_fbo")
+        gl.glDisable(gl.GL_DEPTH_TEST)
+        gl.glDepthMask(gl.GL_FALSE)
+        try:
+            gl.glClearColor(0, 0.1, 0, 1)
+            raise_on_error("after glClearColor(layer) in compositetransformview._fill_composite_layer_fbo")
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
+            raise_on_error("after glClear(layer) in compositetransformview._fill_composite_layer_fbo")
+            sub_view.draw(view_proj, space, fbo_size, bounding_box,
+                          show_mesh_lines=show_mesh_lines,
+                          rigid_composite_source_align=rigid_composite_source_align,
+                          view_type=ViewType.Composite)
+        finally:
+            gl.glDepthMask(gl.GL_TRUE)
+            gl.glEnable(gl.GL_DEPTH_TEST)
+        image_vm = getattr(sub_view, "image_view_model", None)
+        if image_vm is not None and bool(getattr(image_vm, "_ImageArray", None)):
+            frame_buffer.mark_color_valid()
+
     def draw(self,
              view_proj: NDArray[np.floating],
              space: Space,
@@ -264,12 +302,17 @@ class CompositeTransformView(IImageTransformView):
              overlay_viewport_size: tuple[int, int] | None = None,
              show_mesh_lines: bool = False,
              rigid_composite_source_align: bool = False,
-             view_type: ViewType | None = None):
+             view_type: ViewType | None = None,
+             refill_source_layer: bool = True,
+             refill_target_layer: bool = True):
         """Draw the image in either source (fixed) or target (warped) space
         :param view_proj: View projection matrix
         :param client_size: Size of the client area in pixels. (height, width) logical.
         :param default_fbo: Widget's default framebuffer; must use this instead of 0 so overlay draws to QOpenGLWidget's internal FBO (Qt does not use FBO 0 for the widget).
-        :param overlay_viewport_size: (width, height) in physical pixels for the overlay viewport; must match resizeGL so the composite fills the widget after resize/hi-DPI."""
+        :param overlay_viewport_size: (width, height) in physical pixels for the overlay viewport; must match resizeGL so the composite fills the widget after resize/hi-DPI.
+        :param refill_source_layer: When False, reuse the retained source FBO if it is still valid.
+        :param refill_target_layer: When False, reuse the retained target FBO if it is still valid.
+        """
         # Rough idea:
         # 1. Render each image to a FrameBufferObject
         # 2. Render both FrameBufferObjects to the screen, blending the results according to the overlay type
@@ -284,64 +327,47 @@ class CompositeTransformView(IImageTransformView):
                 ov_w, ov_h = overlay_viewport_size if overlay_viewport_size else (width, height)
                 fbo_size = (ov_h, ov_w)
 
-                for sub_view in (self._source_image_view, self._target_image_view):
+                for sub_view, frame_buffer in (
+                        (self._source_image_view, self._source_frame_buffer),
+                        (self._target_image_view, self._target_frame_buffer),
+                ):
                     if sub_view is None:
                         continue
                     image_vm = sub_view.image_view_model  # type: ignore[attr-defined]
-                    if image_vm is not None:
-                        _ = image_vm.ImageArray
+                    if image_vm is None:
+                        continue
+                    had_textures = bool(getattr(image_vm, "_ImageArray", None))
+                    _ = image_vm.ImageArray
+                    if bool(getattr(image_vm, "_ImageArray", None)) and not had_textures:
+                        frame_buffer.invalidate_color()
 
-                source_fbo = self._source_frame_buffer.get_or_create_fbo(fbo_size)
-                # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
-                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(source_fbo))
-                raise_on_error("after glBindFramebuffer(source) in compositetransformview.draw")
-            
-                # Set viewport to match framebuffer size
-                gl.glViewport(0, 0, ov_w, ov_h)
-                raise_on_error("after glViewport(source) in compositetransformview.draw")
+                self._source_frame_buffer.get_or_create_fbo(fbo_size)
+                if refill_source_layer or not self._source_frame_buffer.color_valid:
+                    self._fill_composite_layer_fbo(
+                        self._source_frame_buffer,
+                        self._source_image_view,
+                        view_proj,
+                        Space.Source,
+                        fbo_size,
+                        ov_w,
+                        ov_h,
+                        bounding_box,
+                        show_mesh_lines,
+                        True)
 
-                gl.glDisable(gl.GL_DEPTH_TEST)
-                gl.glDepthMask(gl.GL_FALSE)
-                try:
-                    gl.glClearColor(0, 0.1, 0, 1)
-                    raise_on_error("after glClearColor(source) in compositetransformview.draw")
-                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
-                    raise_on_error("after glClear(source) in compositetransformview.draw")
-
-                    # Source FBO: deformable mesh built in Space.Source (UVs at SourcePoints);
-                    # tween=0 selects TargetPoints so the mapped image lands in target display space.
-                    self._source_image_view.draw(view_proj, Space.Source, fbo_size, bounding_box,
-                                                 show_mesh_lines=show_mesh_lines,
-                                                 rigid_composite_source_align=True,
-                                                 view_type=ViewType.Composite)
-                finally:
-                    gl.glDepthMask(gl.GL_TRUE)
-                    gl.glEnable(gl.GL_DEPTH_TEST)
-
-                target_fbo = self._target_frame_buffer.get_or_create_fbo(fbo_size)
-                # Use raw OpenGL for framebuffer binding (Qt wrapper may not accept numpy.uintc)
-                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(target_fbo))
-                raise_on_error("after glBindFramebuffer(target) in compositetransformview.draw")
-            
-                # Set viewport to match framebuffer size
-                gl.glViewport(0, 0, ov_w, ov_h)
-                raise_on_error("after glViewport(target) in compositetransformview.draw")
-
-                gl.glDisable(gl.GL_DEPTH_TEST)
-                gl.glDepthMask(gl.GL_FALSE)
-                try:
-                    gl.glClearColor(0, 0.1, 0, 1)
-                    raise_on_error("after glClearColor(target) in compositetransformview.draw")
-                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)  # type: ignore[operator]
-                    raise_on_error("after glClear(target) in compositetransformview.draw")
-
-                    # Target FBO: static native quads in target space (not a CP warp mesh).
-                    self._target_image_view.draw(view_proj, Space.Target, fbo_size, bounding_box,
-                                                 show_mesh_lines=show_mesh_lines,
-                                                 view_type=ViewType.Composite)
-                finally:
-                    gl.glDepthMask(gl.GL_TRUE)
-                    gl.glEnable(gl.GL_DEPTH_TEST)
+                self._target_frame_buffer.get_or_create_fbo(fbo_size)
+                if refill_target_layer or not self._target_frame_buffer.color_valid:
+                    self._fill_composite_layer_fbo(
+                        self._target_frame_buffer,
+                        self._target_image_view,
+                        view_proj,
+                        Space.Target,
+                        fbo_size,
+                        ov_w,
+                        ov_h,
+                        bounding_box,
+                        show_mesh_lines,
+                        False)
 
                 # Unbind our FBO and bind the widget's drawable. QOpenGLWidget does not use FBO 0;
                 # it uses an internal FBO, so we must bind default_fbo (widget.defaultFramebufferObject()).
