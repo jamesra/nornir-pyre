@@ -10,7 +10,13 @@ import scipy.spatial
 import scipy.spatial.distance
 
 import nornir_imageregistration
-from nornir_imageregistration.transforms.base import IControlPoints, IGridTransform, IRigidTransform
+from nornir_imageregistration.transforms.base import (
+    IControlPoints,
+    IGridTransform,
+    IRigidTransform,
+    ITriangulatedSourceSpace,
+)
+from nornir_imageregistration.transforms.triangulation import barycentric_sample_delaunay
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
 from pyre.space import Space
 from pyre.perf_debug import timed
@@ -579,31 +585,21 @@ def _bilinear_sample_grid(
             + v11 * ty * tx)
 
 
-def _barycentric_sample_delaunay(
-        query_yx: NDArray[np.floating],
-        delaunay: scipy.spatial.Delaunay,
-        values: NDArray[np.floating]) -> NDArray[np.floating]:
-    """Piecewise-linear interpolate ``values`` at ``query_yx`` using a source-space Delaunay."""
-    queries = np.asarray(query_yx, dtype=np.float64)
-    values = np.asarray(values, dtype=np.float64)
-    out = np.empty((queries.shape[0], values.shape[1]), dtype=np.float64)
-    simplex = delaunay.find_simplex(queries)
-    inside = simplex >= 0
-    ndim = int(queries.shape[1])
-    if np.any(inside):
-        s = simplex[inside]
-        transform = delaunay.transform[s]
-        offset = queries[inside] - transform[:, ndim]
-        bary = np.einsum('ijk,ik->ij', transform[:, :ndim], offset)
-        bary_coords = np.concatenate([bary, 1.0 - bary.sum(axis=1, keepdims=True)], axis=1)
-        out[inside] = np.einsum('ij,ijk->ik', bary_coords, values[delaunay.simplices[s]])
-    outside = ~inside
-    if np.any(outside):
-        points = np.asarray(delaunay.points, dtype=np.float64)
-        delta = queries[outside][:, np.newaxis, :] - points[np.newaxis, :, :]
-        nearest = np.argmin(np.sum(delta * delta, axis=2), axis=1)
-        out[outside] = values[nearest]
-    return out
+def _source_space_delaunay(
+        transform: IControlPoints,
+        source_points: NDArray[np.floating],
+) -> scipy.spatial.Delaunay | None:
+    """Return source-space Delaunay, reusing the transform cache when present."""
+    if isinstance(transform, ITriangulatedSourceSpace):
+        try:
+            tri = transform.source_space_trianglulation
+        except Exception:
+            tri = None
+        if tri is not None and hasattr(tri, "find_simplex"):
+            return tri
+    if source_points.shape[0] < 3:
+        return None
+    return scipy.spatial.Delaunay(np.asarray(source_points, dtype=np.float64))
 
 
 def source_to_target_mapper_for_interactive_drag(
@@ -612,7 +608,7 @@ def source_to_target_mapper_for_interactive_drag(
     """Return a Source→Target mapper that does not rebuild interpolators or call Transform().
 
     Grid transforms use bilinear sampling of the live TargetPoints lattice. Other
-    control-point transforms use the source-space Delaunay of the control points.
+    control-point transforms use the cached source-space Delaunay when available.
     """
     if not isinstance(transform, IControlPoints):
         return None
@@ -637,12 +633,12 @@ def source_to_target_mapper_for_interactive_drag(
 
         return _map_grid
 
-    if source_points.shape[0] < 3:
+    delaunay = _source_space_delaunay(transform, source_points)
+    if delaunay is None:
         return None
-    delaunay = scipy.spatial.Delaunay(source_points)
 
     def _map_mesh(query_yx: NDArray[np.floating]) -> NDArray[np.floating]:
-        return _barycentric_sample_delaunay(query_yx, delaunay, target_points)
+        return barycentric_sample_delaunay(query_yx, delaunay, target_points)
 
     return _map_mesh
 

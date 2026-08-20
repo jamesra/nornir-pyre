@@ -315,6 +315,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         except ValueError:
             pass
 
+    def _composite_deferred_redraw(self) -> None:
+        """Refill composite overlay FBOs after sub-view GL objects catch up."""
+        self.mark_image_layer_dirty()
+        self._glpanel.update()
+
     def mark_image_layer_dirty(self) -> None:
         """Request a full texture-layer redraw on the next paint."""
         self._image_layer_dirty = True
@@ -444,9 +449,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                     transform_controller=self.transform_controller,
                                                                     gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
                 self._wire_tile_mesh_repaint(self._image_transform_view)
-                # Force repaint after view's async setup (posted callbacks set source/target views)
-                QTimer.singleShot(50, self._glpanel.update)
-                QTimer.singleShot(150, self._glpanel.update)
+                # First paintGL can run before sub-view GL meshes exist; dirty so
+                # deferred updates refill both overlay FBOs instead of reusing empty ones.
+                QTimer.singleShot(50, self._composite_deferred_redraw)
+                QTimer.singleShot(150, self._composite_deferred_redraw)
             else:
                 # Second add (Target) - drop the source-only retained overlay and redraw.
                 self.mark_image_layer_dirty()

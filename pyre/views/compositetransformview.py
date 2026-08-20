@@ -25,12 +25,21 @@ from pyre.views.composite_display import (
 )
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
-import pyre.qt_eventmanager
 from pyre.gl_engine import shaders
-from pyre.gl_engine.shaders.overlay_shader import OverlayType
-
-
+import pyre
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+
+
+def composite_layer_ready_to_cache(sub_view: object) -> bool:
+    """True when a composite FBO fill rasterized tiles and can be reused.
+
+    Image textures can exist before the sub-view's GL meshes are created.
+    Caching that empty fill hides the overlay until a later camera-driven refill.
+    """
+    if not getattr(sub_view, "_gl_initialized", False):
+        return False
+    image_vm = getattr(sub_view, "image_view_model", None)
+    return image_vm is not None and bool(getattr(image_vm, "_ImageArray", None))
 
 
 class CompositeTransformView(IImageTransformView):
@@ -172,13 +181,14 @@ class CompositeTransformView(IImageTransformView):
         # self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
         if self._imageviewmodel_manager.__contains__(self._source_viewmodel_name):
-            pyre.qt_eventmanager.qt_post_to_main(self._handle_add_imageviewmodel_event, self._source_viewmodel_name,
-                                                 self._imageviewmodel_manager[self._source_viewmodel_name])
+            self._handle_add_imageviewmodel_event(
+                self._source_viewmodel_name,
+                self._imageviewmodel_manager[self._source_viewmodel_name])
 
         if self._imageviewmodel_manager.__contains__(self._target_viewmodel_name):
-            pyre.qt_eventmanager.qt_post_to_main(self._handle_add_imageviewmodel_event, self._target_viewmodel_name,
-                                                 self._imageviewmodel_manager[
-                                                     self._target_viewmodel_name])
+            self._handle_add_imageviewmodel_event(
+                self._target_viewmodel_name,
+                self._imageviewmodel_manager[self._target_viewmodel_name])
 
     def OnTransformChanged(self, transform_controller: TransformController | None = None) -> None:
         """Forward model/replace refreshes to composite source and target sub-views."""
@@ -270,6 +280,9 @@ class CompositeTransformView(IImageTransformView):
             show_mesh_lines: bool,
             rigid_composite_source_align: bool) -> None:
         """Rasterize one composite image layer into its retained FBO."""
+        create_objects = getattr(sub_view, "create_objects", None)
+        if callable(create_objects) and not getattr(sub_view, "_gl_initialized", False):
+            create_objects()
         layer_fbo = frame_buffer.get_or_create_fbo(fbo_size)
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(layer_fbo))
         raise_on_error("after glBindFramebuffer(layer) in compositetransformview._fill_composite_layer_fbo")
@@ -289,8 +302,7 @@ class CompositeTransformView(IImageTransformView):
         finally:
             gl.glDepthMask(gl.GL_TRUE)
             gl.glEnable(gl.GL_DEPTH_TEST)
-        image_vm = getattr(sub_view, "image_view_model", None)
-        if image_vm is not None and bool(getattr(image_vm, "_ImageArray", None)):
+        if composite_layer_ready_to_cache(sub_view):
             frame_buffer.mark_color_valid()
 
     def draw(self,

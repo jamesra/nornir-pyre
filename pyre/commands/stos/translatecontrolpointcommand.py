@@ -222,11 +222,13 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def subscribe_to_parent(self):
         self._bind_mouse_events()
-        # Do not chain prior mouse handlers while translating points.
+        # Do not chain prior mouse/wheel handlers while translating points.
         # Chained handlers can process the same drag and effectively double-apply deltas.
+        # Chained wheel would still run NavigationCommandBase (camera zoom or Shift+ScaleWarped).
         self._saved_mousePressEvent = None
         self._saved_mouseMoveEvent = None
         self._saved_mouseReleaseEvent = None
+        self._saved_wheelEvent = None
         self._bind_key_events()
 
     def unsubscribe_to_parent(self):

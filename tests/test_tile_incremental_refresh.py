@@ -32,6 +32,19 @@ def _identity_grid_with_rbf() -> GridWithRBFFallback:
     return GridWithRBFFallback(grid)
 
 
+def _identity_mesh() -> MeshWithRBFFallback:
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 32.0, 0.0, 32.0],
+            [32.0, 0.0, 32.0, 0.0],
+            [32.0, 32.0, 32.0, 32.0],
+        ],
+        dtype=np.float64,
+    )
+    return MeshWithRBFFallback(points)
+
+
 def _pack_tile_vertices(target_yx: np.ndarray, source_yx: np.ndarray) -> np.ndarray:
     verts = np.zeros((target_yx.shape[0], 8), dtype=np.float32)
     verts[:, 0] = target_yx[:, 1]
@@ -270,6 +283,105 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         patched = np.asarray(render_data.vertex_buffer.data)
         self.assertEqual(patched.shape[1], 8)
 
+    def test_mesh_mapper_matches_target_points_at_nodes(self) -> None:
+        transform = _identity_mesh()
+        mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+        self.assertIsNotNone(mapper)
+        assert mapper is not None
+        mapped = mapper(np.asarray(transform.SourcePoints))
+        np.testing.assert_allclose(mapped, np.asarray(transform.TargetPoints), rtol=1e-6, atol=1e-5)
+
+    def test_mesh_mapper_does_not_call_transform(self) -> None:
+        transform = _identity_mesh()
+        with patch.object(transform, "Transform", side_effect=AssertionError("Transform()")):
+            mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+            self.assertIsNotNone(mapper)
+            assert mapper is not None
+            mapped = mapper(np.asarray(transform.SourcePoints))
+        np.testing.assert_allclose(mapped, np.asarray(transform.TargetPoints), rtol=1e-6, atol=1e-5)
+
+    def test_mesh_mapper_reuses_cached_source_delaunay(self) -> None:
+        transform = _identity_mesh()
+        _ = transform.source_space_trianglulation
+        with patch("pyre.views.gltiles.scipy.spatial.Delaunay", side_effect=AssertionError("Qhull")):
+            mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+            self.assertIsNotNone(mapper)
+            assert mapper is not None
+            mapped = mapper(np.asarray(transform.SourcePoints))
+        np.testing.assert_allclose(mapped, np.asarray(transform.TargetPoints), rtol=1e-6, atol=1e-5)
+
+    @example(dy=0.0, dx=0.0)
+    @example(dy=5.0, dx=-3.0)
+    @given(
+        dy=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+        dx=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+    )
+    @settings(max_examples=20, deadline=None)
+    def test_mesh_mapper_follows_moved_control_point(self, dy: float, dx: float) -> None:
+        transform = _identity_mesh()
+        source = np.asarray(transform.SourcePoints, dtype=np.float64)
+        new_target = np.asarray(transform.TargetPoints[0], dtype=np.float64) + np.array((dy, dx), dtype=np.float64)
+        transform.UpdateTargetPointsByIndex(0, new_target)
+        mapper = gltiles.source_to_target_mapper_for_interactive_drag(transform)
+        self.assertIsNotNone(mapper)
+        assert mapper is not None
+        mapped = mapper(source)
+        np.testing.assert_allclose(mapped[0], new_target, rtol=1e-6, atol=1e-5)
+        np.testing.assert_allclose(
+            mapped[1:], np.asarray(transform.TargetPoints[1:]), rtol=1e-6, atol=1e-5)
+
+    def test_interactive_mesh_update_skips_remesh_when_patch_succeeds(self) -> None:
+        from pyre.views.imagetransformview import ImageTransformView
+
+        transform = _identity_mesh()
+        view = ImageTransformView.__new__(ImageTransformView)
+        view._transform_controller = MagicMock()
+        view._transform_controller.interactive_edit_in_progress = True
+        view._transform_controller.tile_mesh_cache = TileMeshCpuCache()
+        view._image_space = Space.Source
+        view._warp_into_target_display = True
+        view._image_viewmodel = MagicMock()
+        view._image_viewmodel.TextureSize = np.array([64, 64], dtype=np.int32)
+        view._image_viewmodel.width = 32
+        view._image_viewmodel.height = 32
+        view._activate_context = MagicMock()
+        render_data = MagicMock()
+        render_data.is_rigid_quad = False
+        render_data.mesh_populated = True
+        render_data.vertex_buffer.data = _pack_tile_vertices(
+            np.asarray(transform.TargetPoints), np.asarray(transform.SourcePoints))
+        view._tile_render_data = {(0, 0): render_data}
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: transform)):
+            with patch("pyre.views.gltiles._update_tile_buffers") as remesh:
+                view.update_tiles_for_point_indices(np.array([0], dtype=np.intp))
+        remesh.assert_not_called()
+
+    def test_interactive_mesh_update_skips_remesh_when_patch_fails(self) -> None:
+        from pyre.views.imagetransformview import ImageTransformView
+
+        transform = _identity_mesh()
+        view = ImageTransformView.__new__(ImageTransformView)
+        view._transform_controller = MagicMock()
+        view._transform_controller.interactive_edit_in_progress = True
+        view._transform_controller.rbf_prewarm_ready = True
+        view._transform_controller.tile_mesh_cache = TileMeshCpuCache()
+        view._image_space = Space.Source
+        view._warp_into_target_display = True
+        view._image_viewmodel = MagicMock()
+        view._image_viewmodel.TextureSize = np.array([64, 64], dtype=np.int32)
+        view._image_viewmodel.width = 32
+        view._image_viewmodel.height = 32
+        view._activate_context = MagicMock()
+        render_data = MagicMock()
+        render_data.is_rigid_quad = False
+        render_data.mesh_populated = False
+        view._tile_render_data = {(0, 0): render_data}
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: transform)):
+            with patch("pyre.views.gltiles._update_tile_buffers") as remesh:
+                view.update_tiles_for_point_indices(np.array([0], dtype=np.intp))
+        remesh.assert_not_called()
+        self.assertIsNone(transform._ForwardRBFInstance)
+
     def test_interactive_point_move_marks_post_drag_remesh(self) -> None:
         from pyre.controllers.transformcontroller import TransformController
 
@@ -280,6 +392,65 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
             self.assertTrue(controller._full_refresh_needed)
         finally:
             controller.end_interactive_edit()
+
+    def test_mesh_mouse_up_defers_remesh_until_prewarm_install(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        controller = TransformController(_identity_mesh())
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            controller.MovePoint(0, 1.0, 2.0, space=Space.Target)
+            with patch.object(controller, "_queue_rbf_prewarm") as queue:
+                with patch.object(controller, "FireOnChangeEvent") as fire:
+                    controller.end_interactive_edit()
+            queue.assert_called_once()
+            fire.assert_not_called()
+            self.assertTrue(controller._hold_composite_display_until_prewarm)
+        finally:
+            if controller.interactive_edit_in_progress:
+                controller.end_interactive_edit()
+
+    def test_begin_interactive_edit_bumps_prewarm_generation(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        controller = TransformController(_identity_mesh())
+        gen_before = controller._rbf_prewarm_generation
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            self.assertGreater(controller._rbf_prewarm_generation, gen_before)
+        finally:
+            controller.end_interactive_edit()
+
+    def test_stale_mesh_prewarm_install_is_discarded(self) -> None:
+        from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool
+        from pyre.controllers.transformcontroller import TransformController
+
+        mesh = _identity_mesh()
+        controller = TransformController(mesh)
+        GetTransformPrewarmPool().wait_completion()
+        captured: list = []
+
+        def _capture_task(name, func, *args, **kwargs):
+            captured.append(func)
+            return MagicMock()
+
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            mesh.UpdateTargetPointsByIndex(
+                0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((3.0, 1.0)))
+            self.assertIsNone(mesh._ForwardRBFInstance)
+            with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool") as get_pool:
+                pool = MagicMock()
+                pool.add_task.side_effect = _capture_task
+                get_pool.return_value = pool
+                controller._queue_rbf_prewarm()
+            self.assertTrue(captured)
+            controller._rbf_prewarm_generation += 1
+            captured[-1]()
+            self.assertIsNone(mesh._ForwardRBFInstance)
+        finally:
+            with patch.object(controller, "_queue_rbf_prewarm"):
+                controller.end_interactive_edit()
 
 
 if __name__ == "__main__":

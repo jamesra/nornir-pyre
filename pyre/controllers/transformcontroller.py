@@ -121,6 +121,7 @@ class TransformController:
     _full_refresh_needed: bool = False
     _rbf_prewarm_generation: int = 0
     _rbf_prewarm_ready: bool = True
+    _hold_composite_display_until_prewarm: bool = False
     _interactive_gesture: TransformGesture = TransformGesture.NONE
     _cached_composite_display_lookat: NDArray[np.floating] | None = None
     _cached_composite_display_bounds: nornir_imageregistration.Rectangle | None = None
@@ -144,8 +145,11 @@ class TransformController:
     def freeze_composite_display_during_point_drag(self) -> bool:
         """True when composite camera/bounds should stay put while a control point moves."""
         return (
-            self.interactive_edit_in_progress
-            and self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
+            (
+                self.interactive_edit_in_progress
+                and self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
+            )
+            or self._hold_composite_display_until_prewarm
         )
 
     def _clear_composite_display_cache(self) -> None:
@@ -242,6 +246,8 @@ class TransformController:
             gesture: TransformGesture | None = None) -> None:
         """Mark the start of a continuous edit. Heavy display refresh is deferred until end."""
         if self._interactive_edit_depth == 0:
+            self._rbf_prewarm_generation += 1
+            self._hold_composite_display_until_prewarm = False
             self._interactive_edit_space = space
             resolved = gesture if gesture is not None else gesture_for_interactive_edit(
                 space, view_type, self.type)
@@ -257,9 +263,18 @@ class TransformController:
             self._interactive_edit_depth -= 1
         nornir_imageregistration.interactive_edit.end()
         if self._interactive_edit_depth == 0:
+            was_cp_drag = self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
             self._interactive_edit_space = None
             self._interactive_gesture = TransformGesture.NONE
-            self._clear_composite_display_cache()
+            defer_lookat = (
+                was_cp_drag
+                and self._full_refresh_needed
+                and self._model_defers_post_drag_remesh(self._TransformModel)
+            )
+            if defer_lookat:
+                self._hold_composite_display_until_prewarm = True
+            else:
+                self._clear_composite_display_cache()
             self.end_gesture()
             if self._full_refresh_needed:
                 self._full_refresh_needed = False
@@ -270,6 +285,8 @@ class TransformController:
     def _run_post_interactive_refresh(self) -> None:
         if self._model_needs_rbf_prewarm(self._TransformModel):
             self._queue_rbf_prewarm()
+        if self._model_defers_post_drag_remesh(self._TransformModel):
+            return
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
 
@@ -445,12 +462,12 @@ class TransformController:
         self._change_event_pending = False
         self.__OnChangeEventListeners.invoke(self)
     def Transform(self, points: NDArray[np.floating], **kwargs):
-        if not self._rbf_prewarm_ready:
+        if not self._rbf_prewarm_ready or self.interactive_edit_in_progress:
             kwargs.setdefault('extrapolate', False)
         return self.TransformModel.Transform(points, **kwargs)
 
     def InverseTransform(self, points: NDArray[np.floating], **kwargs):
-        if not self._rbf_prewarm_ready:
+        if not self._rbf_prewarm_ready or self.interactive_edit_in_progress:
             kwargs.setdefault('extrapolate', False)
         return self.TransformModel.InverseTransform(points, **kwargs)
 
@@ -623,6 +640,7 @@ class TransformController:
         self._full_refresh_needed = False
         self._rbf_prewarm_generation = 0
         self._rbf_prewarm_ready = True
+        self._hold_composite_display_until_prewarm = False
         self._interactive_gesture = TransformGesture.NONE
         self._cached_composite_display_lookat = None
         self._cached_composite_display_bounds = None
@@ -640,11 +658,18 @@ class TransformController:
         """True when the model may lazily build RBF weights on Transform."""
         if model is None or not hasattr(model, 'InitializeDataStructures'):
             return False
+        # Do not use the ForwardRBFInstance property: getattr/hasattr would
+        # construct RBF weights on this thread.
         return (
-            hasattr(model, 'ForwardRBFInstance')
-            or hasattr(model, '_ForwardRBFInstance')
+            hasattr(model, '_ForwardRBFInstance')
             or hasattr(model, '_continuous_transform')
+            or callable(getattr(model, 'build_refreshed_continuous', None))
         )
+
+    def _model_defers_post_drag_remesh(
+            self, model: nornir_imageregistration.ITransform | None) -> bool:
+        """True when tile remesh must wait for off-UI Delaunay/RBF install (mesh)."""
+        return getattr(model, "type", None) == nornir_imageregistration.transforms.TransformType.MESH
 
     def _queue_rbf_prewarm(self) -> None:
         """Build a replacement RBF fallback on the single prewarm thread, then install it."""
@@ -665,9 +690,12 @@ class TransformController:
             if self._TransformModel is not target_model:
                 return
             if new_continuous is not None:
-                target_model._continuous_transform = new_continuous  # type: ignore[attr-defined]
-                target_model._continuous_stale = False  # type: ignore[attr-defined]
+                apply = getattr(target_model, "apply_refreshed_continuous", None)
+                if callable(apply):
+                    apply(new_continuous)
             self._rbf_prewarm_ready = True
+            self._hold_composite_display_until_prewarm = False
+            self._clear_composite_display_cache()
             self._tile_mesh_cache.clear()
             self.FireOnChangeEvent()
 
@@ -976,7 +1004,12 @@ class TransformController:
             print(f"No point found for index {np_index}")
             return index  # type: ignore[return-value]
 
-        point = original_point + numpy.array((ImageDY, ImageDX))
+        try:
+            import cupy as cp
+            xp = cp.get_array_module(original_point)
+        except Exception:
+            xp = numpy
+        point = original_point + xp.asarray((ImageDY, ImageDX))
 
         if space == Space.Source:
             if isinstance(self.TransformModel, nornir_imageregistration.transforms.ISourceSpaceControlPointEdit):

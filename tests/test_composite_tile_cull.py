@@ -11,6 +11,7 @@ import nornir_imageregistration
 from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.views.imagetransformview import ImageTransformView
+from pyre.views.compositetransformview import composite_layer_ready_to_cache
 
 
 class TestCompositeTileCull(unittest.TestCase):
@@ -92,6 +93,31 @@ class TestCompositeTileCull(unittest.TestCase):
         coords = captured.get("visible_coords")
         self.assertIsInstance(coords, set)
         self.assertEqual(len(coords), 16)  # type: ignore[arg-type]
+
+
+class TestCompositeLayerFboCache(unittest.TestCase):
+    """Empty first-paint FBO fills must not be cached as a complete overlay."""
+
+    def test_uninitialized_view_is_not_ready_to_cache(self) -> None:
+        view = MagicMock()
+        view._gl_initialized = False
+        view.image_view_model = MagicMock()
+        view.image_view_model._ImageArray = [[1]]
+        self.assertFalse(composite_layer_ready_to_cache(view))
+
+    def test_initialized_view_with_textures_is_ready_to_cache(self) -> None:
+        view = MagicMock()
+        view._gl_initialized = True
+        view.image_view_model = MagicMock()
+        view.image_view_model._ImageArray = [[1]]
+        self.assertTrue(composite_layer_ready_to_cache(view))
+
+    def test_initialized_view_without_textures_is_not_ready_to_cache(self) -> None:
+        view = MagicMock()
+        view._gl_initialized = True
+        view.image_view_model = MagicMock()
+        view.image_view_model._ImageArray = []
+        self.assertFalse(composite_layer_ready_to_cache(view))
 
 
 if __name__ == "__main__":

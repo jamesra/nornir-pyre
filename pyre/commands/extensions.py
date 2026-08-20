@@ -1,6 +1,6 @@
 """Helper functions for converting Qt events to Pyre InputEvents."""
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 from pyre.selection_event_data import InputEvent, InputModifiers
 
@@ -51,6 +51,19 @@ def GetMouseModifiers(event: QMouseEvent | QWheelEvent, last_mouse_event: QMouse
             modifiers |= InputModifiers.BackMouseButton
         if event.buttons() & Qt.MouseButton.ForwardButton:
             modifiers |= InputModifiers.ForwardMouseButton
+        # Qt reports buttons() after the event. On release the released button is
+        # in button(), not buttons(), so last-event comparison can miss the change.
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton:
+                modifiers |= InputModifiers.LeftMouseButtonChanged
+            elif event.button() == Qt.MouseButton.MiddleButton:
+                modifiers |= InputModifiers.MiddleMouseButtonChanged
+            elif event.button() == Qt.MouseButton.RightButton:
+                modifiers |= InputModifiers.RightMouseButtonChanged
+            elif event.button() == Qt.MouseButton.BackButton:
+                modifiers |= InputModifiers.BackMouseButtonChanged
+            elif event.button() == Qt.MouseButton.ForwardButton:
+                modifiers |= InputModifiers.ForwardMouseButtonChanged
 
     # Check wheel rotation for QWheelEvent
     if isinstance(event, QWheelEvent):

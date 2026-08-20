@@ -10,7 +10,7 @@ from dependency_injector.wiring import Provide
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
+from PyQt6.QtGui import QGuiApplication, QMouseEvent, QKeyEvent, QWheelEvent
 import nornir_imageregistration
 
 import abc
@@ -199,11 +199,13 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             return PointPair(target=position, source=position)
 
         if self._space == Space.Source:
-            return PointPair(target=np.squeeze(self._transform_controller.Transform(position)),
+            mapped = np.squeeze(self._transform_controller.Transform(position))
+            return PointPair(target=mapped,
                              source=position)
         elif self._space == Space.Target:
+            mapped = np.squeeze(self._transform_controller.InverseTransform(position))
             return PointPair(target=position,
-                             source=np.squeeze(self._transform_controller.InverseTransform(position)))
+                             source=mapped)
         else:
             raise ValueError("Unknown space")
 
@@ -282,9 +284,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self._width, self._height = panel_w, panel_h
                 self.camera.window_size = np.array((panel_h, panel_w))
 
+            # Wheel events can keep Shift/Ctrl from an earlier gesture; query live keys.
+            wheel_mods = QGuiApplication.queryKeyboardModifiers()
             shift_scale = (
-                (e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-                and not (e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+                (wheel_mods & Qt.KeyboardModifier.ShiftModifier)
+                and not (wheel_mods & Qt.KeyboardModifier.ControlModifier)
                 and isinstance(
                     self._transform_controller.TransformModel,
                     nornir_imageregistration.ITransformRelativeScaling)
@@ -313,13 +317,13 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     self.parent.update()
                 except NotImplementedError:
                     pass
-            elif e.modifiers() & Qt.KeyboardModifier.ControlModifier:  # rotate
+            elif wheel_mods & Qt.KeyboardModifier.ControlModifier:  # rotate
                 if wheel_rotate_locked(
                         self._transform_controller.type, self.space, self._view_type()):
                     pass
                 else:
                     angle = float(abs(scroll_y) * 2) ** 2.0
-                    if e.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    if wheel_mods & Qt.KeyboardModifier.ShiftModifier:
                         angle = float(abs(scroll_y) / 2) ** 2.0
 
                     rangle = (angle / 180.0) * math.pi

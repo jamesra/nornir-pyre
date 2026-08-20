@@ -157,6 +157,7 @@ class ImageTransformView(IImageTransformView):
         self._image_mask_viewmodel = image_mask_view_model
         self._transform_controller = transform_controller  # type: ignore[assignment]
         self._z = 0.5
+        self._gl_initialized = False
 
         if self._transform_controller is not None:
             self._transform_controller.AddOnChangeEventListener(self.OnTransformChanged)
@@ -211,10 +212,16 @@ class ImageTransformView(IImageTransformView):
         return render_data is not None and render_data.mesh_populated
 
     def _rbf_extrapolate_enabled(self) -> bool:
-        """False until TransformController finishes off-UI RBF weight precompute."""
+        """False until TransformController finishes off-UI RBF weight precompute.
+
+        Also False during interactive drag so a failed tile patch cannot rebuild
+        RBF weights on the UI thread.
+        """
         tc = self._transform_controller
         if tc is None:
             return True
+        if tc.interactive_edit_in_progress:
+            return False
         return tc.rbf_prewarm_ready
 
     def _build_tile_mesh(self, grid_coords: tuple[int, int]) -> None:
@@ -243,6 +250,9 @@ class ImageTransformView(IImageTransformView):
         if visible_coords is None or self._image_viewmodel is None or self.transform is None:
             return
         if not self._uses_lazy_mesh_build():
+            return
+        tc = self._transform_controller
+        if tc is not None and tc.interactive_edit_in_progress:
             return
 
         self._activate_context()
@@ -398,21 +408,12 @@ class ImageTransformView(IImageTransformView):
         if self._transform_controller.interactive_edit_in_progress and tile_coords:
             mapper = gltiles.source_to_target_mapper_for_interactive_drag(self.transform)
             if mapper is not None:
-                remesh_coords: set[tuple[int, int]] = set()
-                n_present = 0
-                n_patched = 0
                 for grid_coords in tile_coords:
                     render_data = self._tile_render_data.get(grid_coords)
                     if render_data is None:
                         continue
-                    n_present += 1
-                    if not gltiles.try_patch_tile_vertices_from_control_points(render_data, mapper):
-                        remesh_coords.add(grid_coords)
-                    else:
-                        n_patched += 1
-                if not remesh_coords:
-                    return
-                tile_coords = remesh_coords
+                    gltiles.try_patch_tile_vertices_from_control_points(render_data, mapper)
+            return
 
         self._transform_controller.tile_mesh_cache.invalidate_tiles(tile_coords)
 

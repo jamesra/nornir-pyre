@@ -28,6 +28,7 @@ class ControlPointMap:
     _view_type: ViewType | None
     _cached_tween_points: NDArray[np.floating] | None = None
     _cached_points: NDArray[np.floating] | None = None  # The cached source and target points
+    _kdtree_stale: bool
 
     def __init__(self, transformcontroller: TransformController,
                  tween: float | Space,
@@ -41,6 +42,7 @@ class ControlPointMap:
         self._tween = tween
         self._view_type = view_type
         self._transformcontroller = transformcontroller
+        self._kdtree_stale = False
         self._transformcontroller.AddOnChangeEventListener(self._OnTransformChange)
         self._transformcontroller.AddOnPointMovedEventListener(self._OnPointMoved)
         self.create_kdtree()
@@ -49,12 +51,14 @@ class ControlPointMap:
         self.create_kdtree()
 
     def _OnPointMoved(self, transform_controller: TransformController, indices: NDArray[np.integer]):
+        if self._transformcontroller.interactive_edit_in_progress:
+            self._kdtree_stale = True
+            return
         self.create_kdtree()
 
     @property
     def points(self) -> NDArray[np.floating]:
-        assert self._cached_points is not None
-        return self._cached_points
+        return self._query_points()
 
     @property
     def tween(self) -> float | Space:
@@ -115,6 +119,19 @@ class ControlPointMap:
             transform_controller.SourcePoints * (1.0 - tween) +
             transform_controller.TargetPoints * tween)
 
+    def _query_points(self) -> NDArray[np.floating]:
+        """Points for hit-testing: live positions while the KD-tree is stale."""
+        if self._kdtree_stale:
+            return _as_numpy_f64(
+                self.tweened_points(self._transformcontroller, self.tween, self._view_type))
+        assert self._cached_points is not None
+        return self._cached_points
+
+    def _ensure_kdtree(self) -> None:
+        """Rebuild the tree on first pick after drag; mesh OnChange waits for RBF."""
+        if self._kdtree_stale and not self._transformcontroller.interactive_edit_in_progress:
+            self.create_kdtree()
+
     def create_kdtree(self):
         """Create a KDTree from the current control points, if they have changed.
 
@@ -127,22 +144,25 @@ class ControlPointMap:
         if (self._cached_points is not None and
                 self._cached_points.shape == new_points.shape and
                 np.allclose(self._cached_points, new_points)):
+            self._kdtree_stale = False
             return
 
         self._kdtree = scipy.spatial.KDTree(new_points,
                                             copy_data=True,
                                             balanced_tree=True)
         self._cached_points = np.array(new_points, dtype=np.float64, copy=True)
-
-        # print('KDTree created')
+        self._kdtree_stale = False
 
     def find_nearest_within(self, points: NDArray[np.floating], max_distance: float) -> set[int]:
         """Find the single nearest point within max_distance (avoids multi-select when zoomed out)."""
+        self._ensure_kdtree()
         query = np.asarray(points, dtype=np.float64).reshape(-1, 2)
         if query.size == 0 or not np.all(np.isfinite(query)):
             # InverseTransform/Transform can yield NaN outside the mesh (e.g. right after
             # delete while RBF prewarm forces extrapolate=False). Treat as no hit.
             return set()
+        if self._kdtree_stale:
+            return _brute_force_nearest_within(self._query_points(), query, max_distance)
         if query.shape[0] != 1:
             results = self._kdtree.query_ball_point(query, r=max_distance, return_sorted=True)
             return {int(i) for sub in results for i in sub}
@@ -158,11 +178,12 @@ class ControlPointMap:
             corner_b: NDArray[np.floating] | object,
     ) -> set[int]:
         """Return indices of control points inside an axis-aligned rectangle (inclusive)."""
+        self._ensure_kdtree()
         a = np.asarray(corner_a, dtype=np.float64).reshape(-1)
         b = np.asarray(corner_b, dtype=np.float64).reshape(-1)
         if a.size < 2 or b.size < 2 or not np.all(np.isfinite(a[:2])) or not np.all(np.isfinite(b[:2])):
             return set()
-        pts = np.asarray(self.points, dtype=np.float64)
+        pts = np.asarray(self._query_points(), dtype=np.float64)
         if pts.size == 0:
             return set()
         y0, x0 = np.minimum(a[:2], b[:2])
@@ -173,11 +194,12 @@ class ControlPointMap:
 
     def find_in_polygon(self, vertices: NDArray[np.floating] | object) -> set[int]:
         """Return indices of control points inside a polygon, including the boundary."""
+        self._ensure_kdtree()
         verts = np.asarray(vertices, dtype=np.float64).reshape(-1, 2)
         finite_v = verts[np.isfinite(verts).all(axis=1)]
         if finite_v.shape[0] < 3:
             return set()
-        pts = np.asarray(self.points, dtype=np.float64)
+        pts = np.asarray(self._query_points(), dtype=np.float64)
         if pts.size == 0:
             return set()
         finite = np.isfinite(pts).all(axis=1)
@@ -185,6 +207,34 @@ class ControlPointMap:
         inside[finite] = _even_odd_contains(pts[finite], finite_v) | _points_on_polygon_boundary(
             pts[finite], finite_v)
         return {int(i) for i in np.nonzero(inside)[0]}
+
+
+def _brute_force_nearest_within(
+        pts: NDArray[np.floating],
+        query: NDArray[np.floating],
+        max_distance: float,
+) -> set[int]:
+    """Hit-test against live points while the KD-tree is stale during a drag."""
+    if pts.size == 0:
+        return set()
+    host = np.asarray(pts, dtype=np.float64).reshape(-1, 2)
+    if query.shape[0] != 1:
+        delta = host[None, :, :] - query[:, None, :]
+        dist = np.sqrt(np.sum(delta * delta, axis=2))
+        finite = np.isfinite(host).all(axis=1)
+        hits = finite & np.any(dist <= max_distance, axis=0)
+        return {int(i) for i in np.nonzero(hits)[0]}
+
+    finite = np.isfinite(host).all(axis=1)
+    if not np.any(finite):
+        return set()
+    delta = host - query[0]
+    dist = np.sqrt(np.sum(delta * delta, axis=1))
+    dist = np.where(finite, dist, np.inf)
+    index = int(np.argmin(dist))
+    if dist[index] <= max_distance:
+        return {index}
+    return set()
 
 
 def _even_odd_contains(points: NDArray[np.floating], vertices: NDArray[np.floating]) -> NDArray[np.bool_]:
