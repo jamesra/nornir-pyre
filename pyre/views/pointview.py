@@ -338,7 +338,8 @@ class PointView:
         self._vao.add_index_buffer(self._indicies)
         self._vao.end_init()
 
-    def draw(self, view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float):
+    def draw(self, view_proj_matrix: NDArray[np.floating], tween: float, scale_factor: float,
+             busy_angle: float = 0.0):
         """
         Render the points with their associated textures.
 
@@ -352,6 +353,7 @@ class PointView:
             tween (float): Interpolation factor for animations, typically between 0.0 and 1.0
             scale_factor (float): Scale factor to apply to the point billboards, controlling
                 their size on screen
+            busy_angle (float): Rotation in radians applied to busy (queued) glyphs
         """
         from pyre.gl_engine.helpers import check_for_error
         self.gl_funcs.glDisable(gl.GL_DEPTH_TEST)
@@ -364,6 +366,7 @@ class PointView:
                                                            self._texture_array,
                                                            self._vao,
                                                            len(self._point_buffer.data),  # type: ignore[arg-type]
-                                                           tween=tween, scale=scale_factor)
+                                                           tween=tween, scale=scale_factor,
+                                                           busy_angle=busy_angle)
         self.gl_funcs.glEnable(gl.GL_DEPTH_TEST)
         check_for_error("after glEnable(GL_DEPTH_TEST) in pointview.draw")

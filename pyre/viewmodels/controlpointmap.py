@@ -153,6 +153,13 @@ class ControlPointMap:
         self._cached_points = np.array(new_points, dtype=np.float64, copy=True)
         self._kdtree_stale = False
 
+    def _exclude_busy(self, hits: set[int]) -> set[int]:
+        """Drop queued/busy control-point rows from a hit-test result."""
+        busy = self._transformcontroller.busy_point_indices
+        if not busy:
+            return hits
+        return hits - busy
+
     def find_nearest_within(self, points: NDArray[np.floating], max_distance: float) -> set[int]:
         """Find the single nearest point within max_distance (avoids multi-select when zoomed out)."""
         self._ensure_kdtree()
@@ -162,14 +169,14 @@ class ControlPointMap:
             # delete while RBF prewarm forces extrapolate=False). Treat as no hit.
             return set()
         if self._kdtree_stale:
-            return _brute_force_nearest_within(self._query_points(), query, max_distance)
+            return self._exclude_busy(_brute_force_nearest_within(self._query_points(), query, max_distance))
         if query.shape[0] != 1:
             results = self._kdtree.query_ball_point(query, r=max_distance, return_sorted=True)
-            return {int(i) for sub in results for i in sub}
+            return self._exclude_busy({int(i) for sub in results for i in sub})
 
         distance, index = self._kdtree.query(query[0])
         if distance <= max_distance:
-            return {int(index)}
+            return self._exclude_busy({int(index)})
         return set()
 
     def find_in_rect(
@@ -190,7 +197,7 @@ class ControlPointMap:
         y1, x1 = np.maximum(a[:2], b[:2])
         finite = np.isfinite(pts).all(axis=1)
         inside = finite & (pts[:, 0] >= y0) & (pts[:, 0] <= y1) & (pts[:, 1] >= x0) & (pts[:, 1] <= x1)
-        return {int(i) for i in np.nonzero(inside)[0]}
+        return self._exclude_busy({int(i) for i in np.nonzero(inside)[0]})
 
     def find_in_polygon(self, vertices: NDArray[np.floating] | object) -> set[int]:
         """Return indices of control points inside a polygon, including the boundary."""
@@ -206,7 +213,7 @@ class ControlPointMap:
         inside = np.zeros(pts.shape[0], dtype=bool)
         inside[finite] = _even_odd_contains(pts[finite], finite_v) | _points_on_polygon_boundary(
             pts[finite], finite_v)
-        return {int(i) for i in np.nonzero(inside)[0]}
+        return self._exclude_busy({int(i) for i in np.nonzero(inside)[0]})
 
 
 def _brute_force_nearest_within(

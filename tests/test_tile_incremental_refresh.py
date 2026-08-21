@@ -13,6 +13,12 @@ from nornir_imageregistration.transforms import Rigid
 from nornir_imageregistration.transforms.gridtransform import GridTransform
 from nornir_imageregistration.transforms.gridwithrbffallback import GridWithRBFFallback
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+from nornir_imageregistration.transforms.triangulation import (
+    apply_barycentric_stencil,
+    barycentric_sample_delaunay,
+    barycentric_stencil_delaunay,
+    barycentric_weights_in_triangle,
+)
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache, TileMeshCpuEntry
 from pyre.space import Space
 from pyre.views import gltiles
@@ -334,9 +340,14 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         from pyre.views.imagetransformview import ImageTransformView
 
         transform = _identity_mesh()
+        source = np.asarray(transform.SourcePoints)
+        target = np.asarray(transform.TargetPoints)
+        delaunay = transform.source_space_trianglulation
+        cp_indices, cp_weights = barycentric_stencil_delaunay(source, delaunay)
         view = ImageTransformView.__new__(ImageTransformView)
         view._transform_controller = MagicMock()
         view._transform_controller.interactive_edit_in_progress = True
+        view._transform_controller.interactive_edit_space = Space.Target
         view._transform_controller.tile_mesh_cache = TileMeshCpuCache()
         view._image_space = Space.Source
         view._warp_into_target_display = True
@@ -348,8 +359,9 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         render_data = MagicMock()
         render_data.is_rigid_quad = False
         render_data.mesh_populated = True
-        render_data.vertex_buffer.data = _pack_tile_vertices(
-            np.asarray(transform.TargetPoints), np.asarray(transform.SourcePoints))
+        render_data.cp_indices = cp_indices
+        render_data.cp_weights = cp_weights
+        render_data.vertex_buffer.data = _pack_tile_vertices(target, source)
         view._tile_render_data = {(0, 0): render_data}
         with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: transform)):
             with patch("pyre.views.gltiles._update_tile_buffers") as remesh:
@@ -451,6 +463,212 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         finally:
             with patch.object(controller, "_queue_rbf_prewarm"):
                 controller.end_interactive_edit()
+
+    def test_interactive_transform_ignores_extrapolate_true(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        mesh = _identity_mesh()
+        _ = mesh.source_space_trianglulation
+        controller = TransformController(mesh)
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            mesh.UpdateTargetPointsByIndex(
+                0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((3.0, 1.0)))
+            self.assertIsNone(mesh._ForwardRBFInstance)
+            with patch(
+                    "nornir_imageregistration.transforms.meshwithrbffallback.OneWayRBFWithLinearCorrection",
+                    side_effect=AssertionError("RBF")):
+                controller.Transform(
+                    np.asarray(mesh.SourcePoints), extrapolate=True)
+        finally:
+            with patch.object(controller, "_queue_rbf_prewarm"):
+                controller.end_interactive_edit()
+
+    def test_mesh_build_attaches_barycentric_stencil(self) -> None:
+        transform = _identity_mesh()
+        entry = gltiles.build_tile_mesh_cpu(
+            transform, (0, 0), (32, 32), Space.Source, extrapolate=False)
+        self.assertFalse(entry.is_rigid_quad)
+        self.assertIsNotNone(entry.cp_indices)
+        self.assertIsNotNone(entry.cp_weights)
+        assert entry.cp_indices is not None
+        assert entry.cp_weights is not None
+        self.assertEqual(entry.cp_indices.shape, (entry.vertices.shape[0], 3))
+        self.assertEqual(entry.cp_weights.shape, entry.cp_indices.shape)
+
+    def test_grid_build_does_not_attach_mesh_stencil(self) -> None:
+        entry = gltiles.build_tile_mesh_cpu(
+            _identity_grid(), (0, 0), (32, 32), Space.Source)
+        self.assertIsNone(entry.cp_indices)
+        self.assertIsNone(entry.cp_weights)
+
+    def test_second_target_stencil_patch_does_not_call_find_simplex(self) -> None:
+        transform = _identity_mesh()
+        source = np.asarray(transform.SourcePoints, dtype=np.float64)
+        target = np.asarray(transform.TargetPoints, dtype=np.float64)
+        delaunay = transform.source_space_trianglulation
+        queries = np.array([[8.0, 8.0], [16.0, 16.0], [0.0, 0.0]], dtype=np.float64)
+        cp_indices, cp_weights = barycentric_stencil_delaunay(queries, delaunay)
+        mapped = apply_barycentric_stencil(cp_indices, cp_weights, target)
+        verts = _pack_tile_vertices(mapped, queries)
+        transform.UpdateTargetPointsByIndex(
+            0, target[0] + np.array((4.0, -2.0), dtype=np.float64))
+        first = gltiles.patch_tile_vertices_from_stencil(
+            verts, cp_indices, cp_weights, transform.TargetPoints, transform.SourcePoints,
+            np.array([0], dtype=np.intp), Space.Target)
+        self.assertIsNotNone(first)
+        assert first is not None
+        with patch.object(delaunay, "find_simplex", side_effect=AssertionError("find_simplex")):
+            second = gltiles.patch_tile_vertices_from_stencil(
+                first[0], cp_indices, first[1], transform.TargetPoints, transform.SourcePoints,
+                np.array([0], dtype=np.intp), Space.Target)
+        self.assertIsNotNone(second)
+        assert second is not None
+        expected = apply_barycentric_stencil(
+            cp_indices, cp_weights, np.asarray(transform.TargetPoints, dtype=np.float64))
+        np.testing.assert_allclose(
+            np.column_stack((second[0][:, 1], second[0][:, 0])),
+            expected,
+            rtol=1e-6,
+            atol=1e-5,
+        )
+
+    @example(dy=0.0, dx=0.0)
+    @example(dy=5.0, dx=-3.0)
+    @given(
+        dy=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+        dx=st.floats(-8.0, 8.0, allow_nan=False, allow_infinity=False),
+    )
+    @settings(max_examples=20, deadline=None)
+    def test_target_stencil_patch_matches_barycentric_sample(self, dy: float, dx: float) -> None:
+        transform = _identity_mesh()
+        queries = np.array([[8.0, 8.0], [16.0, 16.0], [24.0, 8.0]], dtype=np.float64)
+        delaunay = transform.source_space_trianglulation
+        cp_indices, cp_weights = barycentric_stencil_delaunay(queries, delaunay)
+        mapped = apply_barycentric_stencil(
+            cp_indices, cp_weights, np.asarray(transform.TargetPoints, dtype=np.float64))
+        verts = _pack_tile_vertices(mapped, queries)
+        transform.UpdateTargetPointsByIndex(
+            0, np.asarray(transform.TargetPoints[0], dtype=np.float64) + np.array((dy, dx)))
+        patched = gltiles.patch_tile_vertices_from_stencil(
+            verts, cp_indices, cp_weights, transform.TargetPoints, transform.SourcePoints,
+            np.array([0], dtype=np.intp), Space.Target)
+        self.assertIsNotNone(patched)
+        assert patched is not None
+        sampled = barycentric_sample_delaunay(
+            queries, delaunay, np.asarray(transform.TargetPoints, dtype=np.float64))
+        np.testing.assert_allclose(
+            np.column_stack((patched[0][:, 1], patched[0][:, 0])),
+            sampled,
+            rtol=1e-6,
+            atol=1e-5,
+        )
+
+    def test_source_stencil_patch_restencils_still_inside_without_find_simplex(self) -> None:
+        transform = _identity_mesh()
+        query = np.array([[8.0, 8.0]], dtype=np.float64)
+        delaunay = transform.source_space_trianglulation
+        cp_indices, cp_weights = barycentric_stencil_delaunay(query, delaunay)
+        mapped = apply_barycentric_stencil(
+            cp_indices, cp_weights, np.asarray(transform.TargetPoints, dtype=np.float64))
+        verts = _pack_tile_vertices(mapped, query)
+        from nornir_imageregistration import interactive_edit
+        interactive_edit.begin()
+        try:
+            transform.UpdateSourcePointsByIndex(
+                0, np.asarray(transform.SourcePoints[0], dtype=np.float64) + np.array((0.5, 0.4)))
+            with patch.object(delaunay, "find_simplex", side_effect=AssertionError("find_simplex")):
+                patched = gltiles.patch_tile_vertices_from_stencil(
+                    verts, cp_indices, cp_weights, transform.TargetPoints, transform.SourcePoints,
+                    np.array([0], dtype=np.intp), Space.Source)
+            self.assertIsNotNone(patched)
+            assert patched is not None
+            self.assertFalse(np.allclose(patched[1], cp_weights))
+            i0, i1, i2 = (int(v) for v in cp_indices[0])
+            source = np.asarray(transform.SourcePoints, dtype=np.float64)
+            expected_w, inside = barycentric_weights_in_triangle(
+                query, source[i0], source[i1], source[i2])
+            self.assertTrue(bool(inside[0]))
+            np.testing.assert_allclose(patched[1], expected_w, rtol=1e-9, atol=1e-9)
+        finally:
+            interactive_edit.end()
+
+    def test_source_stencil_patch_skips_vert_that_left_triangle_without_qhull(self) -> None:
+        transform = _identity_mesh()
+        query = np.array([[8.0, 8.0]], dtype=np.float64)
+        delaunay = transform.source_space_trianglulation
+        cp_indices, cp_weights = barycentric_stencil_delaunay(query, delaunay)
+        mapped = apply_barycentric_stencil(
+            cp_indices, cp_weights, np.asarray(transform.TargetPoints, dtype=np.float64))
+        verts = _pack_tile_vertices(mapped, query)
+        from nornir_imageregistration import interactive_edit
+        interactive_edit.begin()
+        try:
+            transform.UpdateSourcePointsByIndex(0, np.array([30.0, 30.0], dtype=np.float64))
+            with patch("scipy.spatial.Delaunay", side_effect=AssertionError("Qhull")):
+                with patch.object(delaunay, "find_simplex", side_effect=AssertionError("find_simplex")):
+                    patched = gltiles.patch_tile_vertices_from_stencil(
+                        verts, cp_indices, cp_weights, transform.TargetPoints,
+                        transform.SourcePoints, np.array([0], dtype=np.intp), Space.Source)
+            self.assertIsNotNone(patched)
+            assert patched is not None
+            np.testing.assert_allclose(patched[0][:, 0:2], verts[:, 0:2])
+            np.testing.assert_allclose(patched[1], cp_weights)
+        finally:
+            interactive_edit.end()
+
+    def test_interactive_mesh_update_skips_tile_without_stencil(self) -> None:
+        from pyre.views.imagetransformview import ImageTransformView
+
+        transform = _identity_mesh()
+        view = ImageTransformView.__new__(ImageTransformView)
+        view._transform_controller = MagicMock()
+        view._transform_controller.interactive_edit_in_progress = True
+        view._transform_controller.interactive_edit_space = Space.Target
+        view._transform_controller.tile_mesh_cache = TileMeshCpuCache()
+        view._image_space = Space.Source
+        view._warp_into_target_display = True
+        view._image_viewmodel = MagicMock()
+        view._image_viewmodel.TextureSize = np.array([64, 64], dtype=np.int32)
+        view._image_viewmodel.width = 32
+        view._image_viewmodel.height = 32
+        view._activate_context = MagicMock()
+        render_data = MagicMock()
+        render_data.is_rigid_quad = False
+        render_data.mesh_populated = True
+        render_data.cp_indices = None
+        render_data.cp_weights = None
+        render_data.vertex_buffer.data = _pack_tile_vertices(
+            np.asarray(transform.TargetPoints), np.asarray(transform.SourcePoints))
+        view._tile_render_data = {(0, 0): render_data}
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: transform)):
+            with patch("pyre.views.gltiles._update_tile_buffers") as remesh:
+                with patch("pyre.views.gltiles.source_to_target_mapper_for_interactive_drag") as mapper:
+                    view.update_tiles_for_point_indices(np.array([0], dtype=np.intp))
+        remesh.assert_not_called()
+        mapper.assert_not_called()
+
+    def test_source_patch_updates_nearest_neighbor_outside_hull_vert(self) -> None:
+        """Outside-hull (i,i,i) stencils must still follow the moved control point."""
+        query = np.array([[-8.0, -8.0]], dtype=np.float64)
+        cp_indices = np.array([[0, 0, 0]], dtype=np.intp)
+        cp_weights = np.array([[1.0, 0.0, 0.0]], dtype=np.float64)
+        transform = _identity_mesh()
+        mapped = np.asarray(transform.TargetPoints[0:1], dtype=np.float64)
+        verts = _pack_tile_vertices(mapped, query)
+        new_target = mapped[0] + np.array((4.0, -2.0), dtype=np.float64)
+        transform.UpdateTargetPointsByIndex(0, new_target)
+        patched = gltiles.patch_tile_vertices_from_stencil(
+            verts, cp_indices, cp_weights, transform.TargetPoints, transform.SourcePoints,
+            np.array([0], dtype=np.intp), Space.Source)
+        self.assertIsNotNone(patched)
+        assert patched is not None
+        np.testing.assert_allclose(
+            np.column_stack((patched[0][:, 1], patched[0][:, 0])),
+            np.asarray([new_target], dtype=np.float64),
+            rtol=1e-6,
+            atol=1e-5,
+        )
 
 
 if __name__ == "__main__":

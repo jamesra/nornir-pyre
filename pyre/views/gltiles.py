@@ -16,7 +16,12 @@ from nornir_imageregistration.transforms.base import (
     IRigidTransform,
     ITriangulatedSourceSpace,
 )
-from nornir_imageregistration.transforms.triangulation import barycentric_sample_delaunay
+from nornir_imageregistration.transforms.triangulation import (
+    apply_barycentric_stencil,
+    barycentric_sample_delaunay,
+    barycentric_stencil_delaunay,
+    barycentric_weights_in_triangle,
+)
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
 from pyre.space import Space
 from pyre.perf_debug import timed
@@ -49,6 +54,8 @@ class TileGLObjects:
     point_count: int = 0
     is_rigid_quad: bool = False
     mesh_populated: bool = False
+    cp_indices: NDArray[np.integer] | None = None
+    cp_weights: NDArray[np.floating] | None = None
 
 
 RenderDataMap = dict[
@@ -684,6 +691,117 @@ def try_patch_tile_vertices_from_control_points(
     return True
 
 
+def _tile_vertices_as_nx8(data: Any) -> NDArray[np.floating] | None:
+    """Return vertex buffer contents as (N, 8), or None when the layout is unusable."""
+    if data is None:
+        return None
+    verts = np.asarray(data)
+    if verts.ndim == 1:
+        if verts.size % 8 != 0:
+            return None
+        verts = verts.reshape((-1, 8))
+    if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
+        return None
+    return verts
+
+
+def patch_tile_vertices_from_stencil(
+        vertices: NDArray[np.floating],
+        cp_indices: NDArray[np.integer],
+        cp_weights: NDArray[np.floating],
+        target_points: NDArray[np.floating],
+        source_points: NDArray[np.floating],
+        moved_indices: NDArray[np.integer],
+        edit_space: Space,
+) -> tuple[NDArray[np.floating], NDArray[np.floating]] | None:
+    """Patch Target XY from a cached barycentric stencil.
+
+    Target-space edits blend live TargetPoints with cached weights. Source-space
+    edits refresh weights from live SourcePoints when the query is still inside
+    the last simplex; vertices that left the triangle are left unchanged.
+    """
+    verts = np.array(vertices, dtype=np.float32, copy=True)
+    if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
+        return None
+    indices = np.asarray(cp_indices)
+    weights = np.asarray(cp_weights, dtype=np.float64)
+    if indices.shape != (verts.shape[0], 3) or weights.shape != (verts.shape[0], 3):
+        return None
+    target = np.asarray(target_points, dtype=np.float64)
+    source = np.asarray(source_points, dtype=np.float64)
+    moved = np.unique(np.asarray(moved_indices, dtype=np.intp).ravel())
+    if moved.size == 0:
+        return verts, weights
+    affected = np.any(np.isin(indices, moved), axis=1)
+    if not np.any(affected):
+        return verts, weights
+
+    blend_mask = affected
+    if edit_space == Space.Source:
+        # Outside-hull stencils store nearest CP as (i, i, i). That triangle is
+        # degenerate, so still-inside would skip them; snap to that CP instead.
+        nearest = (indices[:, 0] == indices[:, 1]) & (indices[:, 1] == indices[:, 2])
+        need_inside = affected & ~nearest
+        still_inside = affected & nearest
+        if np.any(need_inside):
+            source_yx = np.column_stack((verts[:, 4], verts[:, 3])).astype(np.float64)
+            tri = indices[need_inside]
+            new_weights, inside = barycentric_weights_in_triangle(
+                source_yx[need_inside],
+                source[tri[:, 0]],
+                source[tri[:, 1]],
+                source[tri[:, 2]],
+            )
+            weights = np.array(weights, dtype=np.float64, copy=True)
+            need_idx = np.flatnonzero(need_inside)
+            still_inside[need_idx[inside]] = True
+            weights[need_idx[inside]] = new_weights[inside]
+        blend_mask = still_inside
+        if not np.any(blend_mask):
+            return verts, weights
+
+    mapped = apply_barycentric_stencil(indices[blend_mask], weights[blend_mask], target)
+    if mapped.shape[0] != int(np.count_nonzero(blend_mask)):
+        return None
+    if not np.all(np.isfinite(mapped)):
+        return None
+    verts[blend_mask, 0] = mapped[:, 1]
+    verts[blend_mask, 1] = mapped[:, 0]
+    return verts, weights
+
+
+def try_patch_tile_vertices_from_stencil(
+        render_data: TileGLObjects,
+        target_points: NDArray[np.floating],
+        source_points: NDArray[np.floating],
+        moved_indices: NDArray[np.integer],
+        edit_space: Space,
+) -> bool:
+    """Patch a mesh tile from its cached stencil. Returns False when no stencil exists."""
+    if render_data.is_rigid_quad or not render_data.mesh_populated:
+        return False
+    if render_data.cp_indices is None or render_data.cp_weights is None:
+        return False
+    verts = _tile_vertices_as_nx8(render_data.vertex_buffer.data)
+    if verts is None:
+        return False
+    patched = patch_tile_vertices_from_stencil(
+        verts,
+        render_data.cp_indices,
+        render_data.cp_weights,
+        target_points,
+        source_points,
+        moved_indices,
+        edit_space,
+    )
+    if patched is None:
+        return False
+    new_verts, new_weights = patched
+    render_data.vertex_buffer.data = new_verts
+    render_data.cp_weights = new_weights
+    return True
+
+
 def tile_coords_for_control_points(image_height: int,
                                    image_width: int,
                                    texture_size: tuple[int, int],
@@ -810,6 +928,54 @@ def _tile_bounding_rect(
     return nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
 
 
+def _mesh_barycentric_stencil(
+        vertices: NDArray[np.floating],
+        transform: nornir_imageregistration.ITransform,
+) -> tuple[NDArray[np.integer] | None, NDArray[np.floating] | None]:
+    """Control-point stencil for deformable mesh tile vertices; None for grid/quads."""
+    if isinstance(transform, IGridTransform):
+        return None, None
+    if not isinstance(transform, ITriangulatedSourceSpace):
+        return None, None
+    verts = np.asarray(vertices)
+    if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
+        return None, None
+    try:
+        delaunay = transform.source_space_trianglulation
+    except Exception:
+        return None, None
+    if delaunay is None or not hasattr(delaunay, "find_simplex"):
+        return None, None
+    source_yx = np.column_stack((verts[:, 4], verts[:, 3])).astype(np.float64)
+    return barycentric_stencil_delaunay(source_yx, delaunay)
+
+
+def _tile_mesh_cpu_entry(
+        vertices: NDArray[np.floating],
+        indices: NDArray[np.integer],
+        simplices: NDArray[np.integer] | None,
+        point_count: int,
+        is_rigid_quad: bool,
+        transform: nornir_imageregistration.ITransform | None = None,
+):
+    """Build a CPU tile entry, attaching a barycentric stencil for mesh tiles."""
+    from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
+
+    cp_indices = None
+    cp_weights = None
+    if not is_rigid_quad and transform is not None:
+        cp_indices, cp_weights = _mesh_barycentric_stencil(vertices, transform)
+    return TileMeshCpuEntry(
+        vertices=vertices,
+        indices=indices,
+        simplices=simplices,
+        point_count=point_count,
+        is_rigid_quad=is_rigid_quad,
+        cp_indices=cp_indices,
+        cp_weights=cp_weights,
+    )
+
+
 def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                         grid_coords: tuple[int, int],
                         texture_size: tuple[int, int],
@@ -824,13 +990,10 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
         TargetPoints cannot fold the displayed image.
     :param extrapolate: When False, skip mesh RBF fallback (avoids UI-thread weight solve).
     """
-    from pyre.controllers.tile_mesh_cache import TileMeshCpuEntry
-
     if force_static_quads or is_rigid_transform(transform):
         tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
         verts, indices = _rigid_tile_quad_render_data(tile_bounding_rect, image_space)
-        return TileMeshCpuEntry(vertices=verts, indices=indices, simplices=None,
-                                point_count=4, is_rigid_quad=True)
+        return _tile_mesh_cpu_entry(verts, indices, None, 4, True)
 
     tile_bounding_rect = _tile_bounding_rect(grid_coords, texture_size)
     if isinstance(transform, IGridTransform):
@@ -841,8 +1004,8 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                 pairs, tile_bounding_rect, image_space, simplices,
                 require_valid_topology=False)
             indices = simplices.flatten().astype(np.uint16)
-            return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
-                                    point_count=int(pairs.shape[0]), is_rigid_quad=False)
+            return _tile_mesh_cpu_entry(
+                vertarray, indices, simplices, int(pairs.shape[0]), False, transform)
 
     all_point_pairs = collect_verticies_within_bounding_box(
         tile_bounding_rect, transform, image_space, extrapolate=extrapolate)
@@ -860,9 +1023,9 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                 vertarray = _render_data_with_cached_simplices(
                     all_point_pairs, tile_bounding_rect, image_space, cached_entry.cached_simplices)
                 indices = cached_entry.cached_simplices.flatten().astype(np.uint16)
-                return TileMeshCpuEntry(vertices=vertarray, indices=indices,
-                                        simplices=cached_entry.cached_simplices,
-                                        point_count=point_count, is_rigid_quad=False)
+                return _tile_mesh_cpu_entry(
+                    vertarray, indices, cached_entry.cached_simplices, point_count, False,
+                    transform)
             except ValueError:
                 repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
                 if repaired is not None:
@@ -870,8 +1033,8 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                         vertarray = _render_data_with_cached_simplices(
                             all_point_pairs, tile_bounding_rect, image_space, repaired)
                         indices = repaired.flatten().astype(np.uint16)
-                        return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=repaired,
-                                                point_count=point_count, is_rigid_quad=False)
+                        return _tile_mesh_cpu_entry(
+                            vertarray, indices, repaired, point_count, False, transform)
                     except ValueError:
                         pass
 
@@ -880,8 +1043,7 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
     vertarray = _render_data_with_cached_simplices(
         all_point_pairs, tile_bounding_rect, image_space, simplices)
     indices = simplices.flatten().astype(np.uint16)
-    return TileMeshCpuEntry(vertices=vertarray, indices=indices, simplices=simplices,
-                            point_count=point_count, is_rigid_quad=False)
+    return _tile_mesh_cpu_entry(vertarray, indices, simplices, point_count, False, transform)
 
 
 def apply_tile_mesh_cpu(render_data: TileGLObjects, entry) -> None:
@@ -891,6 +1053,10 @@ def apply_tile_mesh_cpu(render_data: TileGLObjects, entry) -> None:
     render_data.point_count = entry.point_count
     render_data.is_rigid_quad = entry.is_rigid_quad
     render_data.mesh_populated = True
+    render_data.cp_indices = (
+        None if entry.cp_indices is None else np.array(entry.cp_indices, copy=True))
+    render_data.cp_weights = (
+        None if entry.cp_weights is None else np.array(entry.cp_weights, copy=True))
 
 
 def _update_tile_buffers(transform: nornir_imageregistration.ITransform,

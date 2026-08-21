@@ -232,6 +232,14 @@ class TestRigidRefineActionMaps(unittest.TestCase):
         self.assertEqual(space.action, ControlPointAction.REGISTER)
         self.assertEqual(shift_space.action, ControlPointAction.REGISTER_ALL)
 
+    def test_space_register_unions_selection_and_hover(self) -> None:
+        event = _keyboard_space_event(shift=False)
+        event.existing_selections = {2, 5}  # type: ignore[assignment]
+        result = resolve_space_register_action(event, {7})
+        assert result is not None
+        self.assertEqual(result.action, ControlPointAction.REGISTER)
+        self.assertEqual(result.point_indicies, {2, 5, 7})
+
 
 if __name__ == "__main__":
     unittest.main()

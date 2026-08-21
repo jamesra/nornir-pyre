@@ -3,7 +3,7 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy.typing import NDArray
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QApplication
 from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 from PyQt6.QtCore import Qt, QTimer
 import nornir_imageregistration
@@ -62,7 +62,9 @@ class CreateControlPointCommand(NavigationCommandBase):
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
         self._selected_points = selected_points
-        self._left_mouse_down = True
+        app = QApplication.instance()
+        self._left_mouse_down = bool(
+            app is not None and QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
         self._new_point_position = PointPair(source=source_position, target=target_position)
         self._original_points = transform_controller.points
 

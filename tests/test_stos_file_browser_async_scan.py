@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QApplication
 
 from nornir_imageregistration.stos_quality import QualityCache
 from pyre.qt_eventmanager import init_main_thread_dispatcher
-from pyre.settings.app import AppSettings
+from pyre.settings.app import AppSettings, StosSettings, UISettings
 from pyre.stos_manual_paths import BrowseMode, StosBrowserRow, scan_stos_browser_rows
 from pyre.stos_quality_browser import format_quality_score
 from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
@@ -119,6 +119,67 @@ class TestStosFileBrowserAsyncScan(unittest.TestCase):
         )
         self.assertEqual(browser._last_completed_scan_generation, 3)
         self.assertEqual(browser._list_widget.item(0, 1).text(), "0.500")
+
+    def test_startup_selects_last_session_mid_list_file(self) -> None:
+        """Cached folder + last-loaded STOS selects that row after the async scan."""
+        with tempfile.TemporaryDirectory() as tmp:
+            names = ("a_pair.stos", "m_pair.stos", "z_pair.stos")
+            for name in names:
+                _touch(os.path.join(tmp, name))
+            mid = os.path.join(tmp, "m_pair.stos")
+            settings = AppSettings(
+                ui=UISettings(stos_browser_folder=tmp),
+                stos=StosSettings(
+                    stos_filename=mid,
+                    stos_browser_basename="m_pair.stos",
+                ),
+            )
+            browser = StosFileBrowserWindow(parent=None, settings=settings)
+            browser.wait_for_scan_idle()
+            expected = next(
+                index for index, row in enumerate(browser._rows)
+                if row.basename == "m_pair.stos")
+            self.assertGreater(expected, 0)
+            self.assertLess(expected, len(browser._rows) - 1)
+            self.assertEqual(browser._current_index, expected)
+            self.assertEqual(browser._list_widget.currentRow(), expected)
+            self.assertIsNone(browser._pending_select_path)
+
+    def test_set_current_file_selects_immediately_when_rows_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("a_pair.stos", "m_pair.stos", "z_pair.stos"):
+                _touch(os.path.join(tmp, name))
+            browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
+            with patch(
+                    "pyre.ui.windows.stosfilebrowser.attach_quality_scores",
+                    side_effect=lambda folder, rows, source, cache=None: (list(rows), QualityCache(), []),
+            ):
+                browser._apply_folder(tmp, persist=False, confirm_manual=False)
+                browser.wait_for_scan_idle()
+            mid = os.path.join(tmp, "m_pair.stos")
+            browser.set_current_file(mid)
+            expected = next(
+                index for index, row in enumerate(browser._rows)
+                if row.basename == "m_pair.stos")
+            self.assertEqual(browser._current_index, expected)
+            self.assertEqual(browser._list_widget.currentRow(), expected)
+
+    def test_set_current_file_no_match_clears_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _touch(os.path.join(tmp, "pair.stos"))
+            browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
+            with patch(
+                    "pyre.ui.windows.stosfilebrowser.attach_quality_scores",
+                    side_effect=lambda folder, rows, source, cache=None: (list(rows), QualityCache(), []),
+            ):
+                browser._apply_folder(tmp, persist=False, confirm_manual=False)
+                browser.wait_for_scan_idle()
+            browser.set_current_file(os.path.join(tmp, "pair.stos"))
+            self.assertEqual(browser._current_index, 0)
+            browser.set_current_file(os.path.join(tmp, "missing.stos"))
+            self.assertEqual(browser._current_index, -1)
+            self.assertEqual(browser._list_widget.currentRow(), -1)
+            self.assertIsNone(browser._pending_select_path)
 
 
 if __name__ == "__main__":

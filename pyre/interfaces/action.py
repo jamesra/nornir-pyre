@@ -26,6 +26,8 @@ class ControlPointAction(enum.Flag):
     CALL_TO_MOUSE = 1 << 13  # Call the selected control point to the mouse cursor
     REFINE_RIGID_ANGLE = 1 << 14  # Local rigid angle refine around current transform
     REFINE_RIGID_ANGLE_SCALE = 1 << 15  # Local rigid angle + scale refine around current transform
+    BOX_SELECT = 1 << 16  # Marquee-select control points in a rectangle
+    LASSO_SELECT = 1 << 17  # Freehand polygon select control points
 
 
 class ControlPointActionResult(NamedTuple):

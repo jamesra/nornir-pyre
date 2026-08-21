@@ -195,7 +195,11 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
-        self._transform_controller.begin_interactive_edit(self._space)
+        # Use the MovePoint space (Target on composite mesh/grid), not the panel command space.
+        self._transform_controller.begin_interactive_edit(
+            self._edit_space_for_translate(),
+            view_type=self._view_type(),
+        )
         self._selected_point_set.update(
             self._command_points)  # Ensure the command points are included in the selected points
 

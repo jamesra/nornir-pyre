@@ -20,6 +20,8 @@ class TileMeshCpuEntry:
   simplices: NDArray[np.integer] | None = None
   point_count: int = 0
   is_rigid_quad: bool = False
+  cp_indices: NDArray[np.integer] | None = None
+  cp_weights: NDArray[np.floating] | None = None
 
 
 class TileMeshCpuCache:

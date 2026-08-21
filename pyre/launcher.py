@@ -418,6 +418,9 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     from pyre.qt_eventmanager import init_main_thread_dispatcher
     init_main_thread_dispatcher()
 
+    from pyre.controllers.transformcontroller import start_alignment_process_pool_warmup
+    start_alignment_process_pool_warmup()
+
     # Create the windows
     # mosaic_window = MosaicWindow(None, 1, "Mosaic Viewer")
 

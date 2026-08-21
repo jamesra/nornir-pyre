@@ -35,8 +35,6 @@ from pyre.commands.extensions import wheel_scroll_steps
 from pyre.views.composite_display import (
     lookat_delta_from_display_delta,
     world_point_pair_for_composite_mouse,
-    display_lookat_for_composite,
-    lookat_from_display_position,
     apply_composite_display_pan_delta,
     resolve_composite_display_draw_params,
     target_space_lookat_for_stos_view,
@@ -44,6 +42,16 @@ from pyre.views.composite_display import (
 from pyre.views.gltiles import is_rigid_transform
 
 import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
+
+
+def wheel_applies_warped_transform(controller: object) -> bool:
+    """True when Shift/Ctrl+wheel may scale or rotate the transform.
+
+    Queued (busy) control points must stay put, so leftover Shift after
+    Shift+Space zooms the camera instead of ScaleWarped.
+    """
+    busy = getattr(controller, "busy_point_ids", None)
+    return not bool(busy)
 
 
 class NavigationCommandBase(UICommandBase, abc.ABC):
@@ -159,9 +167,8 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self.camera.lookat = self.camera.lookat - delta_lookat
                 return
             delta_display = after.target - before.target
-            current_display = display_lookat_for_composite(self.camera, self._transform_controller)
-            self.camera.lookat = lookat_from_display_position(
-                self._transform_controller, current_display - delta_display)
+            apply_composite_display_pan_delta(
+                self.camera, self._transform_controller, -delta_display)
             return
         delta = after[self.space] - before[self.space]
         self.camera.lookat = self.camera.lookat - delta
@@ -292,6 +299,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 and isinstance(
                     self._transform_controller.TransformModel,
                     nornir_imageregistration.ITransformRelativeScaling)
+                and wheel_applies_warped_transform(self._transform_controller)
             )
             if shift_scale and scroll_y != 0.0:
                 scale_delta = (1.0 + (-scroll_y / 50.0))
@@ -317,7 +325,10 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                     self.parent.update()
                 except NotImplementedError:
                     pass
-            elif wheel_mods & Qt.KeyboardModifier.ControlModifier:  # rotate
+            elif (
+                    (wheel_mods & Qt.KeyboardModifier.ControlModifier)
+                    and wheel_applies_warped_transform(self._transform_controller)
+            ):  # rotate
                 if wheel_rotate_locked(
                         self._transform_controller.type, self.space, self._view_type()):
                     pass
@@ -382,10 +393,10 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 if new_scale > max_image_dimension_value * 2.0:
                     new_scale = max_image_dimension_value * 2.0
 
-                self.camera.scale = new_scale
-
-                mouse_position_after_scale = self.get_world_positions(e)
-                self._adjust_camera_lookat_for_cursor(mouse_position, mouse_position_after_scale)
+                with self.camera.defer_change_events():
+                    self.camera.scale = new_scale
+                    mouse_position_after_scale = self.get_world_positions(e)
+                    self._adjust_camera_lookat_for_cursor(mouse_position, mouse_position_after_scale)
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
                 self.parent.update()

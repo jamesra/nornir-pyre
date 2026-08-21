@@ -8,3 +8,4 @@ from .createregistercontrolpointcommand import CreateRegisterControlPointCommand
 from .translaterigidcommand import ManipulateRigidTransformCommand
 from .refinerigidtransformcommand import RefineRigidTransformCommand
 from .rigidtransformactionmap import RigidTransformActionMap
+from .regionselectcommand import RegionSelectCommand, RegionSelectShape, indices_in_region

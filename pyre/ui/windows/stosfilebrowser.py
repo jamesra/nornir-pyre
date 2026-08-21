@@ -150,6 +150,7 @@ class StosFileBrowserWindow(QMainWindow):
     _scan_generation: int
     _last_completed_scan_generation: int
     _pending_rescan_basename: str | None
+    _pending_select_path: str | None
     _scan_future: Future | None
     _manual_override_color = QColor("#c9a227")
     _manual_only_color = QColor("#8b6914")
@@ -189,6 +190,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._scan_generation = 0
         self._last_completed_scan_generation = 0
         self._pending_rescan_basename = None
+        self._pending_select_path = None
         self._scan_future = None
         self._quality_cache = QualityCache()
         self._pending_load = None
@@ -245,7 +247,7 @@ class StosFileBrowserWindow(QMainWindow):
         layout.addWidget(self._file_source_selector)
 
         self._list_widget = QTableWidget(0, 2)
-        self._list_widget.setHorizontalHeaderLabels(['Transform', 'ZNCC'])
+        self._list_widget.setHorizontalHeaderLabels(['Transform', 'Quality'])
         self._list_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -335,14 +337,37 @@ class StosFileBrowserWindow(QMainWindow):
         self._apply_folder(folder, persist=True, confirm_manual=True)
 
     def set_current_file(self, filepath: str) -> None:
-        """Highlight the row matching *filepath* without loading."""
-        norm = os.path.normcase(os.path.abspath(filepath))
+        """Highlight the row matching *filepath* without loading.
+
+        When the folder scan has not produced rows yet, stash *filepath* and
+        apply the selection once names land.
+        """
+        if not filepath:
+            return
+        if not self._rows:
+            self._pending_select_path = filepath
+            return
         for index, row in enumerate(self._rows):
-            for candidate in (row.auto_path, row.manual_path, row.default_load_path):
-                if candidate and os.path.normcase(os.path.abspath(candidate)) == norm:
-                    self._current_index = index
-                    self._set_current_row(index)
-                    return
+            if self._row_matches_select_path(row, filepath):
+                self._current_index = index
+                self._set_current_row(index)
+                self._pending_select_path = None
+                return
+        self._pending_select_path = None
+        self._current_index = -1
+        self._set_current_row(-1)
+
+    def _row_matches_select_path(self, row: StosBrowserRow, filepath: str) -> bool:
+        """True when *row* is the last-session file by path or basename."""
+        norm = os.path.normcase(os.path.abspath(filepath))
+        for candidate in (row.auto_path, row.manual_path, row.default_load_path):
+            if candidate and os.path.normcase(os.path.abspath(candidate)) == norm:
+                return True
+        wanted = {os.path.normcase(os.path.basename(filepath))}
+        saved_basename = self._settings.stos.stos_browser_basename
+        if saved_basename:
+            wanted.add(os.path.normcase(os.path.basename(saved_basename)))
+        return os.path.normcase(row.basename) in wanted
 
     def navigate_by_delta(self, delta: int) -> None:
         """Load the transform *delta* rows from the current selection (clamped to list bounds)."""
@@ -428,6 +453,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._file_source_selector.set_flat_manual_mode(mode == BrowseMode.flat_manual)
         self._rows = []
         self._current_index = -1
+        self._pending_select_path = None
         self._list_widget.setRowCount(0)
         self._quality_histogram.set_histogram(histogram_from_rows([]), selected_score=None)
         self._update_source_selector_for_current_row()
@@ -449,11 +475,16 @@ class StosFileBrowserWindow(QMainWindow):
         return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING + 64)
 
     def _set_current_row(self, index: int) -> None:
-        """Select table row *index* (stand-in for ``QListWidget.setCurrentRow``)."""
+        """Select table row *index* and scroll it into view."""
         if index < 0 or index >= self._list_widget.rowCount():
             self._list_widget.clearSelection()
+            self._list_widget.setCurrentCell(-1, -1)
             return
         self._list_widget.setCurrentCell(index, 0)
+        item = self._list_widget.item(index, 0)
+        if item is None:
+            return
+        self._list_widget.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def _populate_list(self) -> None:
         """Fill the table from ``_rows`` (names and any scores already on the rows)."""
@@ -609,6 +640,8 @@ class StosFileBrowserWindow(QMainWindow):
                 else:
                     self._current_index = -1
             self._pending_rescan_basename = None
+        if self._pending_select_path:
+            self.set_current_file(self._pending_select_path)
         self._update_source_selector_for_current_row()
 
     def _on_quality_attach_ready(
@@ -750,11 +783,11 @@ class StosFileBrowserWindow(QMainWindow):
             self._settings.stos.stos_file_source = fallback.value
 
     def _on_table_selection_changed(self) -> None:
-        index = self._list_widget.currentRow()
-        if index < 0:
+        if not self._list_widget.selectedIndexes():
             self._current_index = -1
         else:
-            self._current_index = index
+            index = self._list_widget.currentRow()
+            self._current_index = index if index >= 0 else -1
         self._update_source_selector_for_current_row()
         self._refresh_quality_histogram()
 

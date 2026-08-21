@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -122,6 +122,21 @@ class TestGridControlPointDragDirection(unittest.TestCase):
         cmd._transform_controller = TransformController(_identity_grid())
         cmd._view_type = MagicMock(return_value=ViewType.Composite)  # type: ignore[method-assign]
         self.assertEqual(cmd._edit_space_for_translate(), Space.Target)
+
+    def test_composite_activate_begins_interactive_edit_in_target_space(self) -> None:
+        from pyre.commands.navigationcommandbase import NavigationCommandBase
+
+        cmd = object.__new__(TranslateControlPointCommand)
+        cmd._space = Space.Source
+        controller = MagicMock()
+        cmd._transform_controller = controller
+        cmd._view_type = MagicMock(return_value=ViewType.Composite)  # type: ignore[method-assign]
+        cmd._selected_point_set = set()
+        cmd._command_points = {0}
+        with patch.object(NavigationCommandBase, "activate", lambda self: None):
+            TranslateControlPointCommand.activate(cmd)
+        controller.begin_interactive_edit.assert_called_once_with(
+            Space.Target, view_type=ViewType.Composite)
 
 
 if __name__ == "__main__":

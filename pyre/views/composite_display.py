@@ -88,8 +88,10 @@ def transform_visible_rectangle_mesh(
     cached = transform_controller._cached_composite_display_bounds
     if cached is not None and transform_controller._cached_composite_bounds_src == src_key:
         return cached
-    if transform_controller.freeze_composite_display_during_point_drag() and cached is not None:
-        return cached
+    if transform_controller.freeze_composite_display_during_point_drag():
+        if cached is not None:
+            return cached
+        return rect
     corners = np.asarray(rect.Corners, dtype=np.float64)
     mapped = _as_numpy_f64(transform_controller.Transform(corners))
     result = nornir_imageregistration.Rectangle.CreateFromBounds(
@@ -199,8 +201,10 @@ def display_lookat_for_composite(
     cached = transform_controller._cached_composite_display_lookat
     if cached is not None and transform_controller._cached_composite_lookat_src == src_key:
         return cached
-    if transform_controller.freeze_composite_display_during_point_drag() and cached is not None:
-        return cached
+    if transform_controller.freeze_composite_display_during_point_drag():
+        if cached is not None:
+            return cached
+        return lookat.copy()
     result = _ui_transform_point(transform_controller, True, lookat)
     transform_controller._cached_composite_display_lookat = result
     transform_controller._cached_composite_lookat_src = src_key
@@ -232,6 +236,21 @@ def rebase_composite_camera_after_rigid_gesture(
     camera.lookat = lookat_from_display_position(transform_controller, display_yx)
 
 
+def visible_rectangle_around_lookat(
+        lookat_yx: NDArray[np.floating],
+        scale: float,
+        height: int,
+        width: int,
+) -> nornir_imageregistration.Rectangle:
+    """Axis-aligned world rectangle for an orthographic camera at ``lookat_yx``."""
+    half_y = (float(height) / float(scale)) / 2.0
+    half_x = (float(width) / float(scale)) / 2.0
+    y = float(np.asarray(lookat_yx, dtype=np.float64).ravel()[0])
+    x = float(np.asarray(lookat_yx, dtype=np.float64).ravel()[1])
+    return nornir_imageregistration.Rectangle.CreateFromBounds(
+        np.array([y - half_y, x - half_x, y + half_y, x + half_x], dtype=np.float64))
+
+
 def resolve_composite_display_draw_params(
         camera: Camera,
         transform_controller: TransformController,
@@ -248,6 +267,8 @@ def resolve_composite_display_draw_params(
     if is_rigid_transform(model):
         view_forward = forward_for_composite_view(transform_controller, model)
         display_bounds = transform_visible_rectangle(camera.VisibleImageBoundingBox, view_forward)
+    elif transform_controller.freeze_composite_display_during_point_drag():
+        display_bounds = visible_rectangle_around_lookat(display_lookat, camera.scale, height, width)
     else:
         display_bounds = transform_visible_rectangle_mesh(
             camera.VisibleImageBoundingBox, transform_controller)
@@ -271,6 +292,44 @@ def lookat_delta_from_display_delta(
     return apply_rigid_linear_delta(inverse, delta_display)
 
 
+def _translate_display_rectangle(
+        rect: nornir_imageregistration.Rectangle,
+        delta_yx: NDArray[np.floating],
+) -> nornir_imageregistration.Rectangle:
+    """Shift a display-space rectangle by ``delta_yx`` (MinY, MinX, MaxY, MaxX)."""
+    box = np.asarray(rect.BoundingBox, dtype=np.float64).copy()
+    dy, dx = float(delta_yx[0]), float(delta_yx[1])
+    box[0] += dy
+    box[1] += dx
+    box[2] += dy
+    box[3] += dx
+    return nornir_imageregistration.Rectangle.CreateFromBounds(box)
+
+
+def _pan_frozen_mesh_composite_display(
+        camera: Camera,
+        transform_controller: TransformController,
+        delta: NDArray[np.floating],
+) -> None:
+    """Pan while Transform() is frozen: shift the cached display lookat, not InverseTransform.
+
+    InverseTransform(cached + delta) every mouse move leaves the cache stuck (images
+    do not move) and chatters ``camera.lookat`` (control points jitter).
+    """
+    cached = transform_controller._cached_composite_display_lookat
+    if cached is None:
+        cached = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+    new_display = np.asarray(cached, dtype=np.float64).ravel()[:2] + delta
+    transform_controller._cached_composite_display_lookat = new_display
+    bounds = transform_controller._cached_composite_display_bounds
+    if bounds is not None:
+        transform_controller._cached_composite_display_bounds = _translate_display_rectangle(
+            bounds, delta)
+    camera.translate(delta)
+    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+    transform_controller._cached_composite_lookat_src = (float(lookat[0]), float(lookat[1]))
+
+
 def apply_composite_display_pan_delta(
         camera: Camera,
         transform_controller: TransformController,
@@ -284,6 +343,9 @@ def apply_composite_display_pan_delta(
         return
     if is_rigid_transform(model):
         camera.translate(lookat_delta_from_display_delta(model, delta))
+        return
+    if transform_controller.freeze_composite_display_during_point_drag():
+        _pan_frozen_mesh_composite_display(camera, transform_controller, delta)
         return
     current_display = display_lookat_for_composite(camera, transform_controller)
     camera.lookat = lookat_from_display_position(

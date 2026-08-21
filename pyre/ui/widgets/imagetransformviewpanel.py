@@ -54,6 +54,10 @@ from pyre.views.composite_display import (
 )
 
 
+GLYPH_TIMER_IDLE_MS = 100
+GLYPH_TIMER_BUSY_MS = 33
+
+
 @dataclass
 class ImageTransformPanelConfig:
     glcontext_manager: pyre.interfaces.managers.gl_context_manager.IGLContextManager
@@ -210,7 +214,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.DebugTickCounter = 0
         # Use singleShot timer that reschedules itself instead of repeating timer
         # This works around a Qt issue where repeating timers stop firing
-        QTimer.singleShot(100, self.on_timer_singleshot)
+        QTimer.singleShot(GLYPH_TIMER_IDLE_MS, self.on_timer_singleshot)
 
         self.statusbar.space = self.space
 
@@ -221,6 +225,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
         transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
+        transform_controller.AddOnBusyPointsChanged(self._on_busy_points_changed)
 
         if self._view_type == ViewType.Source and self._space == Space.Source:
             self._fixed_layer_hint = QLabel(self)
@@ -312,6 +317,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         try:
             self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
+        except ValueError:
+            pass
+
+        try:
+            self._transform_controller.RemoveOnBusyPointsChanged(self._on_busy_points_changed)
         except ValueError:
             pass
 
@@ -498,14 +508,23 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             if self.view_type == ViewType.Composite:
                 QTimer.singleShot(0, self._glpanel.update)
 
+    def _glyph_timer_interval_ms(self) -> int:
+        """Faster glyph-only paints while any control point is queued."""
+        if self._transform_controller.busy_point_ids:
+            return GLYPH_TIMER_BUSY_MS
+        return GLYPH_TIMER_IDLE_MS
+
+    def _on_busy_points_changed(self, controller: TransformController, ids: frozenset[int]) -> None:
+        """Repaint immediately so busy glyphs appear without waiting for the blink timer."""
+        self.glcanvas.update()
+
     def on_timer_singleshot(self):
         """Timer callback that reschedules itself - workaround for repeating timer issues"""
         try:
             self.DebugTickCounter += 1
             # Blink only control-point glyphs; reuse the retained texture background.
             self.glcanvas.update()
-            # Reschedule the timer
-            QTimer.singleShot(100, self.on_timer_singleshot)
+            QTimer.singleShot(self._glyph_timer_interval_ms(), self.on_timer_singleshot)
         except Exception as e:
             print(f"ERROR in on_timer_singleshot for {self.view_type.value}: {e}")
             import traceback
@@ -585,9 +604,14 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             )
         return bounding_box
 
+    def _request_image_repaint(self) -> None:
+        """Mark the texture layer dirty and request a GL update."""
+        self.mark_image_layer_dirty()
+        self._glpanel.update()
+
     def _wire_tile_mesh_repaint(self, view: object) -> None:
         """Connect lazy mesh continuation callbacks to this panel's repaint."""
-        repaint = self._glpanel.update
+        repaint = self._request_image_repaint
         if hasattr(view, '_repaint_callback'):
             view._repaint_callback = repaint  # type: ignore[attr-defined]
         if isinstance(view, CompositeTransformView):
@@ -677,9 +701,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     self.view_type == ViewType.Composite
                     and self.transform_controller is not None
                     and self.transform_controller.freeze_composite_display_during_point_drag()
+                    and not self._image_layer_dirty
             ):
-                refill_source = True
+                # Glyph-timer paints must not refill FBOs (avoids UI-thread Transform
+                # while a worker owns CUDA). Camera pan sets _image_layer_dirty and
+                # must still refill so the images follow the view.
                 refill_target = False
+                if (
+                        self.transform_controller.busy_point_ids
+                        or self.transform_controller.registration_apply_in_progress
+                ):
+                    refill_source = False
             if isinstance(self._image_transform_view, CompositeTransformView):
                 draw_kwargs["refill_source_layer"] = refill_source
                 draw_kwargs["refill_target_layer"] = refill_target

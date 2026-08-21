@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
@@ -77,6 +77,79 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         roundtrip = np.squeeze(
             self.controller.Transform(pair.source.reshape(1, 2), extrapolate=True))
         np.testing.assert_allclose(roundtrip, pair.target, rtol=1e-4, atol=1e-3)
+
+    def test_busy_points_reuse_cached_lookat_without_transform(self) -> None:
+        """Queued alignments own the CUDA device; composite paints must not Transform()."""
+        cached = display_lookat_for_composite(self.camera, self.controller)
+        point_id = self.controller.point_id_for_index(0)
+        assert point_id is not None
+        self.controller.mark_busy_points("register", [point_id])
+        self.assertTrue(self.controller.freeze_composite_display_during_point_drag())
+        with patch.object(
+                self.controller, "Transform",
+                side_effect=AssertionError("Transform must not run while points are busy")):
+            frozen = display_lookat_for_composite(self.camera, self.controller)
+        np.testing.assert_allclose(frozen, cached)
+
+    def test_busy_points_skip_transform_when_lookat_cache_empty(self) -> None:
+        point_id = self.controller.point_id_for_index(0)
+        assert point_id is not None
+        self.controller.mark_busy_points("register", [point_id])
+        self.controller._clear_composite_display_cache()
+        with patch.object(
+                self.controller, "Transform",
+                side_effect=AssertionError("Transform must not run while points are busy")):
+            fallback = display_lookat_for_composite(self.camera, self.controller)
+        np.testing.assert_allclose(fallback, self.camera.lookat)
+
+    def test_pan_while_busy_shifts_cached_display_lookat_without_transform(self) -> None:
+        """Right-drag pan must move the frozen composite view, not chatter lookat."""
+        camera = _TestCamera(np.array([20.0, 30.0], dtype=np.float64))
+        display_before = display_lookat_for_composite(camera, self.controller)
+        point_id = self.controller.point_id_for_index(0)
+        assert point_id is not None
+        self.controller.mark_busy_points("register", [point_id])
+        delta_display = np.array([3.0, -5.0], dtype=np.float64)
+        with (
+            patch.object(
+                self.controller, "Transform",
+                side_effect=AssertionError("Transform must not run while points are busy")),
+            patch.object(
+                self.controller, "InverseTransform",
+                side_effect=AssertionError("InverseTransform must not run while points are busy")),
+        ):
+            apply_composite_display_pan_delta(camera, self.controller, delta_display)
+            display_after = display_lookat_for_composite(camera, self.controller)
+        np.testing.assert_allclose(display_after, display_before + delta_display, rtol=1e-4, atol=1e-3)
+
+    def test_cursor_lock_while_busy_shifts_cache_without_inverse(self) -> None:
+        """Wheel zoom cursor-lock uses the same freeze-safe pan as right-drag."""
+        camera = _TestCamera(np.array([20.0, 30.0], dtype=np.float64))
+        display_before = display_lookat_for_composite(camera, self.controller)
+        point_id = self.controller.point_id_for_index(0)
+        assert point_id is not None
+        self.controller.mark_busy_points("register", [point_id])
+        cursor_shift = np.array([2.0, 4.0], dtype=np.float64)
+        with (
+            patch.object(
+                self.controller, "Transform",
+                side_effect=AssertionError("Transform must not run while points are busy")),
+            patch.object(
+                self.controller, "InverseTransform",
+                side_effect=AssertionError("InverseTransform must not run while points are busy")),
+        ):
+            apply_composite_display_pan_delta(camera, self.controller, -cursor_shift)
+            display_after = display_lookat_for_composite(camera, self.controller)
+        np.testing.assert_allclose(display_after, display_before - cursor_shift, rtol=1e-4, atol=1e-3)
+
+    def test_visible_rectangle_around_lookat_uses_scale_and_client_size(self) -> None:
+        from pyre.views.composite_display import visible_rectangle_around_lookat
+
+        rect = visible_rectangle_around_lookat(
+            np.array([10.0, 20.0], dtype=np.float64), scale=2.0, height=100, width=200)
+        np.testing.assert_allclose(rect.Center, [10.0, 20.0], rtol=1e-6, atol=1e-6)
+        self.assertAlmostEqual(rect.Height, 50.0)
+        self.assertAlmostEqual(rect.Width, 100.0)
 
     def test_composite_controlpointmap_uses_display_source_positions(self) -> None:
         cmap = ControlPointMap(self.controller, Space.Source, view_type=ViewType.Composite)

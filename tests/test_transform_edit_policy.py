@@ -33,10 +33,10 @@ def _mesh() -> MeshWithRBFFallback:
 class _GridLikeTransform(ITargetSpaceControlPointEdit):
     """Minimal stand-in for grid-like target-only control point edits."""
 
-    def UpdateTargetPointsByIndex(self, index, points):
+    def UpdateTargetPointsByIndex(self, index, points, *, remove_duplicates=True):
         return index
 
-    def UpdateTargetPointsByPosition(self, old_points, new_points):
+    def UpdateTargetPointsByPosition(self, old_points, new_points, *, remove_duplicates=True):
         return 0
 
 

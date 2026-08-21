@@ -7,6 +7,8 @@ Created on Oct 17, 2012
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable
 
 import numpy as np
@@ -42,6 +44,8 @@ class Camera(IReadOnlyCamera):
     _log: logging.Logger
     _window_size: NDArray[np.integer]
     _view_size: NDArray[np.floating]
+    _deferred_change_depth: int
+    _deferred_change_pending: bool
 
     @property
     def max_zoom(self) -> float:
@@ -200,6 +204,8 @@ class Camera(IReadOnlyCamera):
         self._angle = 0  # tilt
         self._scale = scale  # zoom
         self.__OnChangeEventListeners = []
+        self._deferred_change_depth = 0
+        self._deferred_change_pending = False
         self._aspect = None
         self._window_size = np.array((1, 1))
 
@@ -216,8 +222,27 @@ class Camera(IReadOnlyCamera):
             self.__OnChangeEventListeners.remove(func)
 
     def _FireChangeEvent(self):
+        if self._deferred_change_depth > 0:
+            self._deferred_change_pending = True
+            return
         for func in self.__OnChangeEventListeners:
             func()
+
+    @contextmanager
+    def defer_change_events(self) -> Iterator[None]:
+        """Coalesce lookat/scale updates into a single listener notification.
+
+        Composite zoom must not paint once at the new scale (old lookat) and
+        again after the cursor-lock lookat adjust — those two framings jump.
+        """
+        self._deferred_change_depth += 1
+        try:
+            yield
+        finally:
+            self._deferred_change_depth -= 1
+            if self._deferred_change_depth == 0 and self._deferred_change_pending:
+                self._deferred_change_pending = False
+                self._FireChangeEvent()
 
     def translate(self, delta: nornir_imageregistration.PointLike):
         """translate the camera by the specified amount"""

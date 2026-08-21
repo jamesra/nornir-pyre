@@ -95,6 +95,55 @@ class TestCompositeTileCull(unittest.TestCase):
         self.assertEqual(len(coords), 16)  # type: ignore[arg-type]
 
 
+class TestEagerMeshSkipDuringInteractive(unittest.TestCase):
+    """Composite source must not remesh the full tile grid mid-drag."""
+
+    def test_eager_draw_skips_full_remesh_during_interactive(self) -> None:
+        view = ImageTransformView.__new__(ImageTransformView)
+        view._transform_controller = MagicMock()
+        draw_state = MagicMock()
+        draw_state.use_rigid_path = False
+        draw_state.source_to_target = None
+        draw_state.target_to_source = None
+        draw_state.rigid_native_is_target = False
+        draw_state.rigid_source_in_target_display = False
+        draw_state.rigid_overlay = None
+        view._transform_controller.resolve_draw_state.return_value = draw_state
+        view._image_viewmodel = MagicMock()
+        view._image_viewmodel.height = 512
+        view._image_viewmodel.width = 512
+        view._image_viewmodel.TextureSize = np.array([128, 128], dtype=np.int32)
+        view._image_viewmodel.NumCols = 4
+        view._image_viewmodel.NumRows = 4
+        view._image_viewmodel.ImageArray = [[1] * 4 for _ in range(4)]
+        view._image_viewmodel.generate_grid_indicies.return_value = [
+            (ix, iy) for ix in range(4) for iy in range(4)
+        ]
+        view._image_space = Space.Source
+        view._tile_render_data = {}
+        view._built_mesh_tiles = set()
+        view._lazy_mesh_pending_repaint = False
+        view._eager_tile_meshes = True
+        view._warp_into_target_display = True
+        view._gl_initialized = True
+        view.get_or_create_tile_globjects = MagicMock(return_value=MagicMock(mesh_populated=True))
+        mesh_transform = MagicMock()
+        contrast = MagicMock(min=0.0, max=255.0, gamma=1.0)
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: mesh_transform)):
+            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
+                with patch("pyre.views.imagetransformview.shaders.texture_shader.draw"):
+                    with patch("pyre.image_contrast.contrast_for_space", return_value=contrast):
+                        with patch.object(view, "update_all_tile_buffers") as remesh:
+                            view._draw_imageviewmodel(
+                                view_proj=np.eye(4, dtype=np.float32),
+                                image_viewmodel=view._image_viewmodel,
+                                space=Space.Source,
+                                bounding_box=None,
+                                view_type=ViewType.Composite,
+                            )
+        remesh.assert_not_called()
+
+
 class TestCompositeLayerFboCache(unittest.TestCase):
     """Empty first-paint FBO fills must not be cached as a complete overlay."""
 

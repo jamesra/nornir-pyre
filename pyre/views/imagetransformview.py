@@ -177,6 +177,9 @@ class ImageTransformView(IImageTransformView):
 
         if self._uses_lazy_mesh_build():
             return
+        tc = self._transform_controller
+        if tc is not None and tc.interactive_edit_in_progress:
+            return
         self.update_all_tile_buffers()
 
     def _use_static_tile_quads(self) -> bool:
@@ -405,14 +408,27 @@ class ImageTransformView(IImageTransformView):
         if visible is not None:
             tile_coords &= visible
 
-        if self._transform_controller.interactive_edit_in_progress and tile_coords:
-            mapper = gltiles.source_to_target_mapper_for_interactive_drag(self.transform)
-            if mapper is not None:
+        if self._transform_controller.patch_live_tile_vertices and tile_coords:
+            if isinstance(self.transform, nornir_imageregistration.transforms.IGridTransform):
+                mapper = gltiles.source_to_target_mapper_for_interactive_drag(self.transform)
+                if mapper is not None:
+                    for grid_coords in tile_coords:
+                        render_data = self._tile_render_data.get(grid_coords)
+                        if render_data is None:
+                            continue
+                        gltiles.try_patch_tile_vertices_from_control_points(render_data, mapper)
+            else:
+                edit_space = self._transform_controller.interactive_edit_space
+                if edit_space is None:
+                    edit_space = Space.Target
+                target_points = nornir_imageregistration.EnsureNumpyArray(self.transform.TargetPoints)
+                source_points = nornir_imageregistration.EnsureNumpyArray(self.transform.SourcePoints)
                 for grid_coords in tile_coords:
                     render_data = self._tile_render_data.get(grid_coords)
                     if render_data is None:
                         continue
-                    gltiles.try_patch_tile_vertices_from_control_points(render_data, mapper)
+                    gltiles.try_patch_tile_vertices_from_stencil(
+                        render_data, target_points, source_points, indices, edit_space)
             return
 
         self._transform_controller.tile_mesh_cache.invalidate_tiles(tile_coords)
@@ -640,10 +656,12 @@ class ImageTransformView(IImageTransformView):
             cull_rect)
 
         if not self._uses_lazy_mesh_build():
+            tc = self._transform_controller
+            skip_remesh = tc is not None and tc.interactive_edit_in_progress
             needs_build = not self._built_mesh_tiles
             if not needs_build and visible is not None:
                 needs_build = any(not self._tile_mesh_is_ready(coord) for coord in visible)
-            if needs_build:
+            if needs_build and not skip_remesh:
                 self.update_all_tile_buffers(visible_rect=cull_rect)
 
         if self._uses_lazy_mesh_build():

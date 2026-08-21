@@ -81,5 +81,5 @@ class StosQualityHistogramWidget(QWidget):
         axes.set_ylim(0, max(1, y_max) * 1.15)
         axes.set_xlabel('ZNCC')
         axes.set_ylabel('Count')
-        axes.set_title('Pair ZNCC')
+        axes.set_title('Registration Quality (ZNCC)')
         self._canvas.draw_idle()

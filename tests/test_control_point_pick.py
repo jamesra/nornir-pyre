@@ -6,16 +6,19 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
 
 from pyre.commands.stos.actionmaphelpers import (
     drag_translate_interactions,
     find_control_point_interactions,
 )
-from pyre.selection_event_data import InputEvent, SelectionEventData
-from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.controllers.transformcontroller import TransformController
+from pyre.selection_event_data import InputEvent, SelectionEventData
 from pyre.space import Space
-from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+from pyre.viewmodels.controlpointmap import ControlPointMap
 
 
 def _mesh() -> MeshWithRBFFallback:
@@ -106,6 +109,38 @@ class TestControlPointPick(unittest.TestCase):
           existing_selections={2, 5},
       )
       self.assertEqual(drag_translate_interactions(event, set()), set())
+
+  def test_find_nearest_within_skips_busy_point(self) -> None:
+      controller = TransformController(_mesh())
+      point_id = controller.point_id_for_index(0)
+      assert point_id is not None
+      controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      self.assertEqual(cmap.find_nearest_within(np.array([100.0, 200.0]), 5.0), set())
+      self.assertEqual(cmap.find_nearest_within(np.array([300.0, 400.0]), 5.0), {1})
+
+  def test_find_in_rect_skips_busy_rows(self) -> None:
+      controller = TransformController(_mesh())
+      point_id = controller.point_id_for_index(0)
+      assert point_id is not None
+      controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      self.assertEqual(
+          cmap.find_in_rect((100.0, 200.0), (300.0, 400.0)),
+          {1},
+      )
+
+  @given(busy=st.lists(st.integers(min_value=0, max_value=3), unique=True, max_size=4))
+  @settings(max_examples=20, deadline=None)
+  def test_find_in_rect_excludes_busy_subset(self, busy: list[int]) -> None:
+      controller = TransformController(_mesh())
+      for index in busy:
+          point_id = controller.point_id_for_index(index)
+          assert point_id is not None
+          controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      hits = cmap.find_in_rect((0.0, 0.0), (1000.0, 1000.0))
+      self.assertEqual(hits, {0, 1, 2, 3} - set(busy))
 
 
 if __name__ == "__main__":

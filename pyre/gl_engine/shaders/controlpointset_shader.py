@@ -20,8 +20,9 @@ _controlpointset_vertex_shader_program = """
         in vec2 vertex_texture_coordinate;
         in vec2 point_source_offset; //The position of the point in source space
         in vec2 point_target_offset; //The position of the point in target space
-        in float texture_index; //The index of the texture to use
+        in float texture_index; // 0 idle, 1 selected, 2 busy
         out float frag_texture_index;
+        uniform float busy_angle; // Rotation for busy glyphs, radians
         
         mat4 BuildTranslation(vec3 delta)
         {
@@ -45,11 +46,20 @@ _controlpointset_vertex_shader_program = """
             vec3 blended_offset_pos = mix(vec3(point_source_offset, 1),
                                    vec3(point_target_offset, 1),
                                    tween);
+            vec3 local_vertex = vertex_position;
+            if (texture_index >= 1.5) {
+                float c = cos(busy_angle);
+                float s = sin(busy_angle);
+                local_vertex = vec3(
+                    c * vertex_position.x - s * vertex_position.y,
+                    s * vertex_position.x + c * vertex_position.y,
+                    vertex_position.z);
+            }
             mat4 translate_matrix;
             translate_matrix = BuildScaleTranslation(scale, blended_offset_pos);
             mat4 model_view_proj;
             model_view_proj =  view_projection_matrix * translate_matrix; 
-            gl_Position = model_view_proj * vec4(vertex_position, 1.0);
+            gl_Position = model_view_proj * vec4(local_vertex, 1.0);
             frag_texture_coordinate = vertex_texture_coordinate;
             frag_texture_index = texture_index;
         }
@@ -62,12 +72,15 @@ _controlpointset_fragment_shader_program = """
     in float frag_texture_index;
     out vec4 outputColor;
     void main() {
+        float layer = frag_texture_index >= 1.5 ? 0.0 : frag_texture_index;
         vec4 texColor = texture(
-                texture_sampler, vec3(frag_texture_coordinate, frag_texture_index)
+                texture_sampler, vec3(frag_texture_coordinate, layer)
             ); 
-        // outputColor = vec4(texColor.r, frag_texture_coordinate.x, frag_texture_coordinate.y, 1);
-        //outputColor = vec4(frag_texture_index, texColor.g, texColor.b, 1);
-        outputColor = texColor;
+        if (frag_texture_index >= 1.5) {
+            outputColor = vec4(1.0, 0.45, 0.0, texColor.a);
+        } else {
+            outputColor = texColor;
+        }
     }
 """
 
@@ -86,6 +99,7 @@ class ControlPointSetShader(BaseShader):
     _tween_location: int | None = None
     _scale_location: int | None = None
     _view_projection_matrix_location: int | None = None
+    _busy_angle_location: int | None = None
     _attributes: Sequence[VertexAttribute] | None = None
     _vertex_layout: VertexArrayLayout | None = None
     _pointset_layout: VertexArrayLayout | None = None
@@ -219,12 +233,22 @@ class ControlPointSetShader(BaseShader):
         assert self._view_projection_matrix_location is not None
         return self._view_projection_matrix_location
 
+    @property
+    def busy_angle_location(self) -> int:
+        if self._busy_angle_location is None:
+            self._busy_angle_location = gl.glGetUniformLocation(self.program, "busy_angle")
+            if self._busy_angle_location == -1:
+                raise ValueError("Could not find busy_angle uniform")
+        assert self._busy_angle_location is not None
+        return self._busy_angle_location
+
     def draw(self, model_view_proj_matrix: NDArray[np.floating],
              texture: int,
              vao: InstancedVAO,
              num_instances: int,
              scale: float,
-             tween: float):
+             tween: float,
+             busy_angle: float = 0.0):
         """Draws the texture using the vertex and index buffers."""
         if num_instances == 0:
             return
@@ -245,6 +269,8 @@ class ControlPointSetShader(BaseShader):
             gl.glUniform1f(self.tween_location, tween)
             check_for_error()
             gl.glUniform1f(self.scale_location, scale)
+            check_for_error()
+            gl.glUniform1f(self.busy_angle_location, float(busy_angle))
             check_for_error()
             gl.glUniformMatrix4fv(self.model_view_projection_matrix_location, 1, False,
                                   model_view_proj_matrix.astype(np.float32))

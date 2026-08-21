@@ -8,7 +8,8 @@ from pyre.interfaces.managers import IControlPointActionMap
 from pyre.commands import DefaultTransformCommand
 from pyre.commands.stos import ManipulateRigidTransformCommand, RegisterControlPointCommand, \
     TranslateControlPointCommand, DeleteControlPointCommand, \
-    CreateControlPointCommand, CreateRegisterControlPointCommand, RefineRigidTransformCommand
+    CreateControlPointCommand, CreateRegisterControlPointCommand, RefineRigidTransformCommand, \
+    RegionSelectCommand, RegionSelectShape
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
 from pyre.observable import SetOperation
@@ -24,6 +25,17 @@ def _selection_command_providers() -> dict[ControlPointAction, providers.Provide
         ).provider,
         ControlPointAction.TOGGLE_SELECTION: providers.Factory(
             ToggleControlPointSelectionCommand, set_operation=SetOperation.SymmetricDifference
+        ).provider,
+    }
+
+
+def _region_select_command_providers() -> dict[ControlPointAction, providers.Provider]:
+    return {
+        ControlPointAction.BOX_SELECT: providers.Factory(
+            RegionSelectCommand, shape=RegionSelectShape.BOX
+        ).provider,
+        ControlPointAction.LASSO_SELECT: providers.Factory(
+            RegionSelectCommand, shape=RegionSelectShape.LASSO
         ).provider,
     }
 
@@ -51,6 +63,7 @@ def _mesh_like_command_providers() -> dict[ControlPointAction, providers.Provide
         ).provider,
         ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand).provider,
         **_selection_command_providers(),
+        **_region_select_command_providers(),
         **_register_command_providers(),
         ControlPointAction.CREATE: providers.Factory(CreateControlPointCommand).provider,
         ControlPointAction.CREATE_REGISTER: providers.Factory(
@@ -68,6 +81,7 @@ action_command_dp_map = providers.Dict({
         ControlPointAction.TRANSLATE: providers.Factory(TranslateControlPointCommand).provider,
         ControlPointAction.TRANSLATE_ALL: providers.Factory(TranslateControlPointCommand, translate_all=True).provider,
         **_selection_command_providers(),
+        **_region_select_command_providers(),
         **_register_command_providers(),
         ControlPointAction.CALL_TO_MOUSE: providers.Factory(CallControlPointToMouseCommand).provider
 

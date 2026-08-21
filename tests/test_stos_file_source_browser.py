@@ -146,7 +146,7 @@ class TestStosBrowserFileSource(unittest.TestCase):
                 source=StosFileSource.auto,
             )
             browser._populate_list()
-            browser._on_cell_double_clicked(0, 1)  # ZNCC column
+            browser._on_cell_double_clicked(0, 1)  # Quality column
             pending = browser._pending_load
             self.assertIsNotNone(pending)
             assert pending is not None

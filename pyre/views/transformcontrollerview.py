@@ -1,5 +1,7 @@
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QOpenGLContext
+import math
+import time
 import numpy as np
 from numpy.typing import NDArray
 from typing import AbstractSet, Sequence, Iterable, Callable
@@ -16,6 +18,28 @@ from pyre.space import Space
 from pyre.views.pointview import PointView
 import pyre.controllers
 from pyre.interfaces.managers.buffertype import BufferType
+
+POINT_INSTANCE_IDLE = 0.0
+POINT_INSTANCE_BUSY = 2.0
+BUSY_GLYPH_SPIN_RAD_PER_SEC = 2.0 * math.pi
+
+
+def control_point_instance_states(
+        n: int,
+        selection_mask: NDArray[np.bool_] | None,
+        busy_indices: Iterable[int],
+        blink_phase: int,
+) -> NDArray[np.float32]:
+    """Per-instance glyph state: 0 idle, 0/1 selected blink, 2 busy (overrides)."""
+    tex = np.zeros((n, 1), dtype=np.float32)
+    if n <= 0:
+        return tex
+    if selection_mask is not None and selection_mask.shape[0] == n:
+        tex[selection_mask, 0] = float(blink_phase % 2)
+    busy = [int(index) for index in busy_indices if 0 <= int(index) < n]
+    if busy:
+        tex[np.asarray(busy, dtype=np.intp), 0] = POINT_INSTANCE_BUSY
+    return tex
 
 
 class BinarySelectionMapper:
@@ -100,6 +124,7 @@ class TransformControllerView:
         self._transform_controller.AddOnChangeEventListener(self._OnTransformChange)  # type: ignore[union-attr]
         self._transform_controller.AddOnPointMovedEventListener(self._OnPointMoved)  # type: ignore[union-attr]
         self._transform_controller.AddOnModelReplacedEventListener(self._OnTransformModelReplaced)  # type: ignore[union-attr]
+        self._transform_controller.AddOnBusyPointsChanged(self._OnBusyPointsChanged)  # type: ignore[union-attr]
         self._initialized = False
         self._gl_context_manager.add_glcontext_added_event_listener(self.create_objects)
         # pyre.state.currentStosConfig.AddOnTransformControllerChangeEventListener(self._OnTransformControllerChange)
@@ -214,8 +239,14 @@ class TransformControllerView:
         self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
         self.selected = None
 
+    def _OnBusyPointsChanged(self, controller: TransformController, ids: frozenset[int]) -> None:
+        """Refresh glyph state without a mesh rebuild."""
+        if self._controlpoint_view is None:
+            return
+        self._apply_selection_texture(0)
+
     def _apply_selection_texture(self, blink_phase: int) -> None:
-        """Write selection texture indices, alternating selected points for blink."""
+        """Write instance states: selected blink, then busy override."""
         if self._controlpoint_view is None:
             return
 
@@ -223,9 +254,11 @@ class TransformControllerView:
         if n == 0:
             return
 
-        tex = np.zeros((n, 1), dtype=np.float32)
-        if self._selection_mask is not None and self._selection_mask.shape[0] == n:
-            tex[self._selection_mask, 0] = float(blink_phase % 2)
+        busy_indices: Iterable[int] = ()
+        if self._transform_controller is not None:
+            busy_indices = self._transform_controller.busy_point_indices
+        tex = control_point_instance_states(
+            n, self._selection_mask, busy_indices, blink_phase)
         self._controlpoint_view.texture_index = tex
 
     @property
@@ -288,11 +321,15 @@ class TransformControllerView:
             self._controlpoint_view.points = display_point_rows
             try:
                 self._apply_selection_texture(blink_phase)
-                self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)
+                self._controlpoint_view.draw(
+                    model_view_proj_matrix, tween, scale_factor,
+                    busy_angle=time.monotonic() * BUSY_GLYPH_SPIN_RAD_PER_SEC)
             finally:
                 self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
             return
 
         self._apply_selection_texture(blink_phase)
-        self._controlpoint_view.draw(model_view_proj_matrix, tween, scale_factor)
+        self._controlpoint_view.draw(
+            model_view_proj_matrix, tween, scale_factor,
+            busy_angle=time.monotonic() * BUSY_GLYPH_SPIN_RAD_PER_SEC)
 

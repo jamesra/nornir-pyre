@@ -58,7 +58,9 @@ class StosContainer(containers.DeclarativeContainer):
     window_manager = providers.ThreadSafeSingleton(WindowManager)
 
     image_loader = providers.Factory(ImageLoader)
-    transform_controller = providers.ThreadSafeSingleton(TransformController)
+    selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=qt_post_to_main))
+    transform_controller = providers.ThreadSafeSingleton(
+        TransformController, selected_points=selected_points)
 
     # Returns the key for the configured transform controller and space
     control_point_map_manager = providers.ThreadSafeSingleton(ControlPointMapManager)
@@ -76,7 +78,5 @@ class StosContainer(containers.DeclarativeContainer):
             TransformType.RBF: providers.Factory(TriangulationTransformActionMap).provider,
             TransformType.RIGID: providers.Factory(RigidTransformActionMap).provider,
         })
-
-    selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=qt_post_to_main))
 
     # stos_settings: providers.Resource = providers.Resource(load_settings)

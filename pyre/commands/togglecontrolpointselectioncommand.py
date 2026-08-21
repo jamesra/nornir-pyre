@@ -21,6 +21,28 @@ from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
 
 
+def apply_selection_set_operation(
+        selection_set: ObservableSet[int],
+        command_points: set[int] | None,
+        set_operation: SetOperation,
+) -> None:
+    """Apply ``set_operation`` between ``selection_set`` and ``command_points`` in place."""
+    points = set() if command_points is None else set(command_points)
+    if set_operation == SetOperation.Union:
+        selection_set.update(points)
+    elif set_operation == SetOperation.Replace:
+        selection_set.clear()
+        selection_set.update(points)
+    elif set_operation == SetOperation.SymmetricDifference:
+        selection_set ^= points
+    elif set_operation == SetOperation.Intersection:
+        selection_set.intersection_update(points)
+    elif set_operation == SetOperation.Difference:
+        selection_set.difference_update(points)
+    else:
+        raise ValueError(f"Unknown SetOperation {set_operation}")
+
+
 class ToggleControlPointSelectionCommand(InstantCommandBase):
     """
     This command doesn't subscribe to input events by default and
@@ -79,27 +101,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
         return
 
     def execute(self):
-        # Check if shift is pressed to add to a selection
-
-        if self._set_operation == SetOperation.Union:
-            self._selection_set.update(self._command_points)
-        elif self._set_operation == SetOperation.Replace:
-            self._selection_set.clear()
-            self._selection_set.update(self._command_points)
-        elif self._set_operation == SetOperation.SymmetricDifference:
-            self._selection_set ^= self._command_points
-        elif self._set_operation == SetOperation.Intersection:
-            self._selection_set.intersection_update(self._command_points)
-        else:
-            raise ValueError(f"Unknown SetOperation {self._set_operation}")
-
-        # if selection_event_data.IsShiftPressed:
-        #     self._selection_set ^= self._command_action_points
-        # else:
-        #     # Clear the existing selection and set the new selection
-        #     self._selection_set.clear()
-        #     self._selection_set.update(self._command_action_points)
-
+        apply_selection_set_operation(self._selection_set, self._command_points, self._set_operation)
         super().execute()
 
     def activate(self):
