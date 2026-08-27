@@ -41,3 +41,6 @@ nosetests.xml
 # Logs
 pyre-console*.log
 
+
+# Hypothesis example database (local test cache)
+.hypothesis/

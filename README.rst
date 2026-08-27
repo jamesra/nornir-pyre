@@ -97,7 +97,8 @@ Image Registration
 3. Align the images:
 
    * Rigid transforms: Space runs a local BruteForce refine (±5° at 1° steps) keeping scale; Shift+Space also refines scale
-   * Mesh / grid / RBF: Space auto-aligns the selected control point; Shift+Space auto-aligns all points
+   * Mesh / RBF: Space auto-aligns the selected control point; Shift+Space auto-aligns all points
+   * Grid: Space auto-aligns the selected control point; Shift+Space runs one Refine w/ Grid pass (settings dialog, then live preview). Menu Refine w/ Grid runs the chosen number of iterations in one job and updates the view after each pass. Do not treat N Shift+Space presses as N-pass refine.
    * Manually adjust points by dragging them
 
 4. Save the transformation:
@@ -158,7 +159,8 @@ View Controls:
 
 Alignment:
     * Rigid: Space refines angle (±5° at 1° steps); Shift+Space also refines scale
-    * Mesh / grid / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
+    * Mesh / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
+    * Grid: Space auto-aligns the selected point; Shift+Space is one refine pass; Refine w/ Grid is the multi-pass job with per-pass preview
 
 Undo/Redo:
     * Ctrl+Z: Undo a step

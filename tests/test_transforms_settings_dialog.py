@@ -154,6 +154,52 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
             result = ConvertToGridDialog.GetGridDivisionSettings()
         self.assertIsNone(result)
 
+    def test_fixed_num_iterations_hides_spinner_and_returns_one(self) -> None:
+        defaults = GridRefineDefaults(num_iterations=8, cell_size=512, grid_spacing=256)
+        dlg = RefineGridSettingsDialog(defaults=defaults, fixed_num_iterations=1)
+        self.assertTrue(dlg.iterations_ctrl.isHidden())
+        self.assertEqual(1, dlg.iterations)
+        self.assertEqual(512, dlg.cell_size)
+
+    def test_fixed_num_iterations_does_not_clobber_stored_iterations(self) -> None:
+        settings = AppSettings()
+        settings.stos.grid_refine = GridRefineDefaults(
+            cell_size=512,
+            grid_spacing=256,
+            num_iterations=8,
+            max_angle=6.0,
+            angle_step_size=1.5,
+        )
+
+        def accept_and_change_size(self: RefineGridSettingsDialog) -> QDialog.DialogCode:
+            RefineGridSettingsDialog._set_combo_value(self.cell_size_ctrl, 1024)
+            RefineGridSettingsDialog._set_combo_value(self.cell_spacing_ctrl, 384)
+            return QDialog.DialogCode.Accepted
+
+        with patch.object(RefineGridSettingsDialog, "exec", accept_and_change_size):
+            result = RefineGridSettingsDialog.GetGridRefineSettings(
+                app_settings=settings, fixed_num_iterations=1)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(1, result.num_iterations)
+        self.assertEqual(1024, result.cell_size)
+        self.assertEqual(384, result.grid_spacing)
+        self.assertEqual(1024, settings.stos.grid_refine.cell_size)
+        self.assertEqual(384, settings.stos.grid_refine.grid_spacing)
+        self.assertEqual(8, settings.stos.grid_refine.num_iterations)
+
+    def test_fixed_num_iterations_cancelled_does_not_persist(self) -> None:
+        settings = AppSettings()
+        settings.stos.grid_refine = GridRefineDefaults(
+            cell_size=512, grid_spacing=256, num_iterations=8)
+        with patch.object(RefineGridSettingsDialog, "exec", return_value=QDialog.DialogCode.Rejected):
+            result = RefineGridSettingsDialog.GetGridRefineSettings(
+                app_settings=settings, fixed_num_iterations=1)
+        self.assertIsNone(result)
+        self.assertEqual(512, settings.stos.grid_refine.cell_size)
+        self.assertEqual(8, settings.stos.grid_refine.num_iterations)
+
 
 if __name__ == "__main__":
     unittest.main()

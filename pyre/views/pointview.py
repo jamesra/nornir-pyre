@@ -30,7 +30,8 @@ class PointView:
     This class provides functionality for storing and rendering control points
     in OpenGL using instanced rendering. Each point is rendered as a billboard
     texture (a quad that always faces the camera) with a specific texture from
-    a texture array.
+    a texture array. Instance texture index 2 is busy: the shader keeps the
+    glyph upright and grey and draws a spinning comet arc outside it.
 
     The class manages the OpenGL resources needed for rendering, including
     vertex buffers, instance buffers, and vertex array objects. It provides
@@ -156,6 +157,7 @@ class PointView:
         This property returns the array of texture indices that determine which
         texture from the texture array is used for each point. Each index corresponds
         to a point in the points array. Stored as float32 in the GL buffer.
+        Values: 0 idle, 1 selected blink, 2 busy (grey glyph + comet in the shader).
 
         Returns:
             NDArray[np.floating]: Array of texture indices (stored as float32 in GL buffer)
@@ -353,7 +355,7 @@ class PointView:
             tween (float): Interpolation factor for animations, typically between 0.0 and 1.0
             scale_factor (float): Scale factor to apply to the point billboards, controlling
                 their size on screen
-            busy_angle (float): Rotation in radians applied to busy (queued) glyphs
+            busy_angle (float): Spin angle in radians for the busy comet arc
         """
         from pyre.gl_engine.helpers import check_for_error
         self.gl_funcs.glDisable(gl.GL_DEPTH_TEST)

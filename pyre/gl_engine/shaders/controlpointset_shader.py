@@ -22,7 +22,7 @@ _controlpointset_vertex_shader_program = """
         in vec2 point_target_offset; //The position of the point in target space
         in float texture_index; // 0 idle, 1 selected, 2 busy
         out float frag_texture_index;
-        uniform float busy_angle; // Rotation for busy glyphs, radians
+        const float BUSY_QUAD_SCALE = 2.0;
         
         mat4 BuildTranslation(vec3 delta)
         {
@@ -48,12 +48,7 @@ _controlpointset_vertex_shader_program = """
                                    tween);
             vec3 local_vertex = vertex_position;
             if (texture_index >= 1.5) {
-                float c = cos(busy_angle);
-                float s = sin(busy_angle);
-                local_vertex = vec3(
-                    c * vertex_position.x - s * vertex_position.y,
-                    s * vertex_position.x + c * vertex_position.y,
-                    vertex_position.z);
+                local_vertex = vertex_position * BUSY_QUAD_SCALE;
             }
             mat4 translate_matrix;
             translate_matrix = BuildScaleTranslation(scale, blended_offset_pos);
@@ -68,26 +63,62 @@ _controlpointset_vertex_shader_program = """
 _controlpointset_fragment_shader_program = """
     #version 450
     uniform sampler2DArray texture_sampler;
+    uniform float busy_angle; // Spin angle for the busy comet, radians
     in vec2 frag_texture_coordinate;
     in float frag_texture_index;
     out vec4 outputColor;
+    const float BUSY_QUAD_SCALE = 2.0;
+    const float PI = 3.14159265359;
+    const float COMET_ARC = 1.0 / 3.0;
+    const float COMET_STROKE = 0.18;
+    const vec3 GLYPH_GREY = vec3(0.78);
+    const vec3 COMET_BLUE = vec3(0.35, 0.65, 1.0);
+
     void main() {
-        float layer = frag_texture_index >= 1.5 ? 0.0 : frag_texture_index;
-        vec4 texColor = texture(
-                texture_sampler, vec3(frag_texture_coordinate, layer)
-            ); 
-        if (frag_texture_index >= 1.5) {
-            outputColor = vec4(1.0, 0.45, 0.0, texColor.a);
-        } else {
-            outputColor = texColor;
+        if (frag_texture_index < 1.5) {
+            outputColor = texture(
+                texture_sampler, vec3(frag_texture_coordinate, frag_texture_index)
+            );
+            return;
         }
+
+        vec2 glyphUV = 0.5 + (frag_texture_coordinate - 0.5) * BUSY_QUAD_SCALE;
+        vec4 texColor = vec4(0.0);
+        if (glyphUV.x >= 0.0 && glyphUV.x <= 1.0 && glyphUV.y >= 0.0 && glyphUV.y <= 1.0) {
+            texColor = texture(texture_sampler, vec3(glyphUV, 0.0));
+        }
+        vec4 glyph = vec4(GLYPH_GREY, texColor.a);
+
+        vec2 p = frag_texture_coordinate * 2.0 - 1.0;
+        float r = length(p);
+        float ang = atan(p.y, p.x);
+        float a = fract((ang - busy_angle) / (2.0 * PI));
+        float along = clamp(a / COMET_ARC, 0.0, 1.0);
+        float arcMask = 1.0 - smoothstep(COMET_ARC - 0.02, COMET_ARC + 0.02, a);
+        // Keep the whole 1/3-turn readable; pow(1-t,2) plus SRC_ALPHA made only the head a spec.
+        float tail = 1.0 - along;
+        float cometAlong = mix(0.5, 1.0, pow(tail, 0.6)) * arcMask;
+        float rGlyph = 1.0 / BUSY_QUAD_SCALE;
+        float rInner = rGlyph + 0.03;
+        float rOuter = rInner + COMET_STROKE;
+        float ring = smoothstep(rInner - 0.02, rInner + 0.02, r)
+            * (1.0 - smoothstep(rOuter - 0.02, rOuter + 0.02, r));
+        float cometAlpha = cometAlong * ring;
+        vec4 comet = vec4(COMET_BLUE, cometAlpha);
+
+        float outA = glyph.a + comet.a * (1.0 - glyph.a);
+        vec3 premul = glyph.rgb * glyph.a + comet.rgb * comet.a * (1.0 - glyph.a);
+        outputColor = vec4(outA > 0.0 ? premul / outA : vec3(0.0), outA);
     }
 """
 
 
 class ControlPointSetShader(BaseShader):
-    """
-    This shader renders a set of points with a texture centered on each point
+    """Instanced control-point billboards.
+
+    Instance ``texture_index`` 0/1 sample the idle/selected texture layers.
+    Index 2 is busy: the glyph stays upright and light-grey while a blue comet
+    arc spins in the extra margin outside the point.
     """
 
     _texture_sampler_location: int | None = None
@@ -249,7 +280,10 @@ class ControlPointSetShader(BaseShader):
              scale: float,
              tween: float,
              busy_angle: float = 0.0):
-        """Draws the texture using the vertex and index buffers."""
+        """Draw instanced control-point billboards.
+
+        ``busy_angle`` drives the comet arc for instances with texture index 2.
+        """
         if num_instances == 0:
             return
 

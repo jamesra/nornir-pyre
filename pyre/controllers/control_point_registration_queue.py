@@ -63,40 +63,54 @@ class ControlPointBusySet:
 
 
 class ControlPointRegistrationQueue:
-    """Deduped FIFO of point IDs with at most one in-flight job."""
+    """Deduped FIFO of point IDs allowing several concurrent in-flight jobs."""
 
     _pending: deque[int]
     _pending_set: set[int]
-    _in_flight: int | None
+    _in_flight: set[int]
     _cancelled: set[int]
 
     def __init__(self) -> None:
         self._pending = deque()
         self._pending_set = set()
-        self._in_flight = None
+        self._in_flight = set()
         self._cancelled = set()
 
     @property
     def in_flight_id(self) -> int | None:
-        """ID of the alignment currently running, if any."""
-        return self._in_flight
+        """A representative running alignment ID, or None when nothing is running."""
+        for point_id in self._in_flight:
+            return point_id
+        return None
+
+    @property
+    def in_flight_ids(self) -> frozenset[int]:
+        """All alignment IDs currently running."""
+        return frozenset(self._in_flight)
+
+    @property
+    def in_flight_count(self) -> int:
+        """Number of alignments currently running."""
+        return len(self._in_flight)
+
+    @property
+    def pending_count(self) -> int:
+        """Number of IDs waiting to start."""
+        return len(self._pending_set)
 
     @property
     def queued_ids(self) -> frozenset[int]:
         """Pending and in-flight IDs (cancelled pending IDs are omitted)."""
-        ids = set(self._pending_set)
-        if self._in_flight is not None:
-            ids.add(self._in_flight)
-        return frozenset(ids)
+        return frozenset(self._pending_set | self._in_flight)
 
     @property
     def is_idle(self) -> bool:
         """True when nothing is pending or in flight."""
-        return self._in_flight is None and not self._pending_set
+        return not self._in_flight and not self._pending_set
 
     def contains(self, point_id: int) -> bool:
         """True when *point_id* is pending or in flight."""
-        return point_id in self._pending_set or point_id == self._in_flight
+        return point_id in self._pending_set or point_id in self._in_flight
 
     def enqueue(self, point_ids: Iterable[int]) -> list[int]:
         """Append new IDs. Already pending or in-flight IDs are ignored."""
@@ -114,13 +128,12 @@ class ControlPointRegistrationQueue:
         """Drop a pending ID or mark an in-flight job so its result is discarded."""
         if point_id in self._pending_set:
             self._pending_set.discard(point_id)
-        if self._in_flight == point_id:
+        if point_id in self._in_flight:
             self._cancelled.add(point_id)
 
     def cancel_all(self) -> None:
-        """Clear pending work and discard the in-flight result when it arrives."""
-        if self._in_flight is not None:
-            self._cancelled.add(self._in_flight)
+        """Clear pending work and discard in-flight results when they arrive."""
+        self._cancelled.update(self._in_flight)
         self._pending.clear()
         self._pending_set.clear()
 
@@ -135,12 +148,11 @@ class ControlPointRegistrationQueue:
             if point_id not in self._pending_set:
                 continue
             self._pending_set.discard(point_id)
-            self._in_flight = point_id
+            self._in_flight.add(point_id)
             return point_id
         return None
 
     def finish(self, point_id: int) -> None:
         """Clear in-flight state after a job completes or is skipped."""
-        if self._in_flight == point_id:
-            self._in_flight = None
+        self._in_flight.discard(point_id)
         self._cancelled.discard(point_id)

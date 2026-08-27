@@ -97,6 +97,8 @@ class TestBundledReadmeSnippet(unittest.TestCase):
         self.assertIsNotNone(section)
         assert section is not None
         self.assertIn("Keyboard Controls", section)
+        self.assertIn("Grid:", section)
+        self.assertIn("Refine w/ Grid", section)
 
 
 if __name__ == "__main__":

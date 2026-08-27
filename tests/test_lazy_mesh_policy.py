@@ -80,6 +80,19 @@ class TestLazyMeshPolicy(unittest.TestCase):
                 self.assertTrue(view._use_static_tile_quads())
                 self.assertFalse(view._uses_lazy_mesh_build())
 
+    def test_camera_prefetch_skips_gl_upload_for_static_quads(self) -> None:
+        """Zoom/pan must not upload buffers outside paintGL (grid Source static quads)."""
+        view = self._make_view()
+        view._image_space = Space.Source
+        view._warp_into_target_display = False
+        view._image_viewmodel = MagicMock()
+        mesh_transform = MagicMock()
+        with patch.object(ImageTransformView, "transform", new_callable=lambda: property(lambda self: mesh_transform)):
+            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
+                with patch.object(view, "update_all_tile_buffers") as upload:
+                    view.update_visible_tile_meshes(MagicMock(), margin_tiles=1)
+        upload.assert_not_called()
+
     def test_point_moved_skips_incremental_for_static_quads(self) -> None:
         view = self._make_view()
         view._image_space = Space.Target

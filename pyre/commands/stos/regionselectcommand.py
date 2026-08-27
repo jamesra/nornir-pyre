@@ -77,7 +77,7 @@ def indices_in_region(
 
 
 class RegionSelectCommand(NavigationCommandBase):
-    """Drag a box or lasso over control points, then replace or union the selection."""
+    """Drag a box or lasso over control points, then replace or shift-add/remove the selection."""
 
     _selected_points: ObservableSet[int]
     _space: Space

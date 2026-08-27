@@ -17,7 +17,11 @@ from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
 
 
-from pyre.commands.stos.point_coords import control_point_row_from_pair
+from pyre.commands.stos.point_coords import (
+    control_point_row_from_pair,
+    known_space_for_control_point_create,
+    known_yx_from_pair,
+)
 
 
 class CreateControlPointCommand(NavigationCommandBase):
@@ -116,7 +120,10 @@ class CreateControlPointCommand(NavigationCommandBase):
 
     def queue_translate_command(self):
 
-        point = self._new_point_position
+        known_space = known_space_for_control_point_create(self._space, self._view_type())
+        known_yx = known_yx_from_pair(self._new_point_position, known_space)
+        point = self._transform_controller.map_pair_for_control_point_create(
+            known_space, known_yx)
         newpoint = control_point_row_from_pair(point)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)  # type: ignore[union-attr]
 

@@ -21,6 +21,20 @@ from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
 
 
+def apply_shift_region_selection(
+        selection_set: ObservableSet[int],
+        hits: set[int] | None,
+) -> None:
+    """Shift+region: add hits unless every hit is already selected, then remove that group."""
+    points = set() if hits is None else set(hits)
+    if not points:
+        return
+    if points <= selection_set:
+        apply_selection_set_operation(selection_set, points, SetOperation.Difference)
+        return
+    apply_selection_set_operation(selection_set, points, SetOperation.Union)
+
+
 def apply_selection_set_operation(
         selection_set: ObservableSet[int],
         command_points: set[int] | None,
@@ -39,6 +53,8 @@ def apply_selection_set_operation(
         selection_set.intersection_update(points)
     elif set_operation == SetOperation.Difference:
         selection_set.difference_update(points)
+    elif set_operation == SetOperation.AddOrRemoveGroup:
+        apply_shift_region_selection(selection_set, points)
     else:
         raise ValueError(f"Unknown SetOperation {set_operation}")
 

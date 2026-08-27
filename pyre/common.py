@@ -18,10 +18,12 @@ from numpy.typing import NDArray
 from PyQt6.QtWidgets import QWidget
 
 import nornir_imageregistration
+from nornir_imageregistration import cp
 from nornir_imageregistration import ITransform, PointLike, AreaLike, ImageStats, StosFile
 from nornir_imageregistration.settings import StosBruteSettings, GridRefinement, SliceToSliceMethod
 from nornir_imageregistration.transforms import IControlPoints
 from nornir_imageregistration.transforms import utils as transform_utils
+from nornir_imageregistration.refine_shared.progress import snapshot_transform_for_preview
 import nornir_imageregistration.assemble as assemble
 import nornir_imageregistration.stos_brute as stos
 import nornir_pools
@@ -381,22 +383,61 @@ def RotateTranslateWarpedImage(source_image_key: str,
     # pyre.state.currentStosConfig._transform_controller.transform)
 
 
+def create_pyre_grid_refinement_settings(
+        source_img_data: nornir_imageregistration.ImagePermutationHelper,
+        target_img_data: nornir_imageregistration.ImagePermutationHelper,
+        *,
+        num_iterations: int | None = None,
+        grid_spacing: int | NDArray[np.integer] | Iterable[int] | None = None,
+        cell_size: int | NDArray[np.integer] | Iterable[int] | None = None,
+        angles_to_search: Iterable[float] | NDArray[np.floating] | None = None,
+) -> GridRefinement:
+    """Build STOS grid-refine settings that stay on host arrays.
+
+    Pyre loads mosaics as NumPy for OpenGL. Forcing ``cupy_processing=False``
+    keeps RefineTransform off CUDA so the job thread does not share the GPU
+    with ``paintGL``. ``single_thread_processing`` stays False so images go to
+    shared memory and per-cell work uses the CPU pool, matching buildmanager
+    CPU refine. Buildmanager still uses the default ``UsingCupy()`` upload.
+    """
+    return GridRefinement.CreateWithPreprocessedImages(
+        source_img_data=source_img_data,
+        target_img_data=target_img_data,
+        num_iterations=num_iterations,
+        grid_spacing=grid_spacing,
+        cell_size=cell_size,
+        angles_to_search=angles_to_search,
+        cupy_processing=False,
+        single_thread_processing=False,
+    )
+
+
 def compute_grid_refine_transform(
         transform: ITransform,
         settings: GridRefinement,
         cancel_event: threading.Event | None = None,
-        progress_callback=None) -> ITransform:
-    """Run grid refine for *transform* using *settings*; intended for background workers."""
+        progress_callback=None,
+        save_plots: bool = True) -> ITransform:
+    """Run grid refine for *transform* using *settings*; intended for background workers.
+
+    Forwards *progress_callback* so ``RefineTransform`` can preview each pass.
+    Planned pass count is ``settings.num_iterations`` in this one call — do not
+    emulate N iterations with N one-pass jobs.
+    """
     with settings:
-        return nornir_imageregistration.RefineTransform(
+        result = nornir_imageregistration.RefineTransform(
             transform,
             settings=settings,
             SaveImages=False,
-            SavePlots=True,
+            SavePlots=save_plots,
             outputDir=tempfile.gettempdir(),
             cancel_event=cancel_event,
             progress_callback=progress_callback,
         )
+        # Convert on this worker thread: GUI paint must not use CuPy arrays
+        # allocated here (cudaErrorIllegalAddress).
+        host = snapshot_transform_for_preview(result)
+        return host if host is not None else result
 
 
 def GridRefineTransform(settings: GridRefinement | None):
@@ -408,7 +449,8 @@ def GridRefineTransform(settings: GridRefinement | None):
         return
     try:
         updatedTransform = compute_grid_refine_transform(
-            config.TransformController.TransformModel,
+            snapshot_transform_for_preview(config.TransformController.TransformModel)
+            or config.TransformController.TransformModel,
             settings)
         config.TransformController.TransformModel = updatedTransform
         # pyre.history.SaveState(pyre.state.currentStosConfig._transform_controller.SetPoints,
@@ -524,15 +566,18 @@ def _indices_to_remove_for_mask(
         points: NDArray,
         mask_image: NDArray) -> NDArray:
     """Return point indices that fall outside the mask image or on masked (zero) pixels."""
-    num_points = points.shape[0]
-    point_indices = np.asarray(np.floor(points), dtype=np.int32)
+    xp = cp.get_array_module(points)
+    point_indices = nornir_imageregistration.EnsureNumpyArray(
+        xp.floor(points), dtype=np.int32)
+    host_points = nornir_imageregistration.EnsureNumpyArray(points)
+    num_points = host_points.shape[0]
 
     out_of_bounds = FindIndiciesOutsideImage(point_indices, mask_image)
     index_range = np.asarray(range(0, len(out_of_bounds)), dtype=np.int32)
     out_of_bounds_indices = index_range[out_of_bounds]
 
     points_and_index = np.hstack(
-        (points, np.asarray(range(0, num_points), dtype=np.int32).reshape(num_points, 1))).astype(
+        (host_points, np.asarray(range(0, num_points), dtype=np.int32).reshape(num_points, 1))).astype(
         np.int32, copy=False)
     in_bounds_points_and_index = points_and_index[out_of_bounds == 0, :]
 

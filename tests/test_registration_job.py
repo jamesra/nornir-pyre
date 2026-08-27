@@ -79,6 +79,81 @@ class TestPyreRegistrationJobRunner(unittest.TestCase):
         gate.set()
         self._drain(runner)
 
+    def test_on_preview_posted_to_main_thread(self) -> None:
+        runner = RegistrationJobRunner()
+        previews: list[object] = []
+        applied: list[object] = []
+        main_thread = threading.get_ident()
+        preview_threads: list[int] = []
+
+        def worker(cancel_event, progress_callback):
+            progress_callback(1, 2, "a", "first")
+            progress_callback(2, 2, "b", "second")
+            return "done"
+
+        def on_preview(payload: object) -> None:
+            preview_threads.append(threading.get_ident())
+            previews.append(payload)
+
+        self.assertTrue(runner.submit(
+            worker,
+            title="preview-test",
+            on_success=lambda result: applied.append(result),
+            on_preview=on_preview,
+        ))
+        self._drain(runner)
+        self.assertEqual(applied, ["done"])
+        self.assertTrue(previews)
+        self.assertEqual(previews[-1], "second")
+        self.assertTrue(all(thread_id == main_thread for thread_id in preview_threads))
+
+    def test_on_preview_applies_each_pass_when_gui_keeps_up(self) -> None:
+        """Spaced RefineTransform-style previews each reach on_preview."""
+        runner = RegistrationJobRunner()
+        previews: list[object] = []
+        applied: list[object] = []
+        pass_applied = threading.Event()
+
+        def worker(cancel_event, progress_callback):
+            for i in range(1, 4):
+                pass_applied.clear()
+                progress_callback(i, 3, f"Refine pass {i}/3", f"pass-{i}")
+                if not pass_applied.wait(timeout=2.0):
+                    raise TimeoutError(f"preview for pass {i} was not applied")
+            return "done"
+
+        def on_preview(payload: object) -> None:
+            previews.append(payload)
+            pass_applied.set()
+
+        self.assertTrue(runner.submit(
+            worker,
+            title="spaced-preview-test",
+            on_success=lambda result: applied.append(result),
+            on_preview=on_preview,
+        ))
+        self._drain(runner)
+        self.assertEqual(applied, ["done"])
+        self.assertEqual(previews, ["pass-1", "pass-2", "pass-3"])
+
+    def test_cancel_keeps_preview_already_posted(self) -> None:
+        runner = RegistrationJobRunner()
+        previews: list[object] = []
+
+        def worker(cancel_event, progress_callback):
+            progress_callback(1, 1, "pass", "kept")
+            raise RegistrationCancelled()
+
+        self.assertTrue(runner.submit(
+            worker,
+            title="cancel-preview",
+            on_success=lambda _r: None,
+            on_cancelled=lambda: None,
+            on_preview=lambda payload: previews.append(payload),
+        ))
+        self._drain(runner)
+        self.assertEqual(previews[-1], "kept")
+
 
 if __name__ == "__main__":
     unittest.main()

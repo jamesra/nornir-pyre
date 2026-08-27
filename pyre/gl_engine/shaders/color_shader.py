@@ -1,3 +1,6 @@
+import ctypes
+from collections.abc import Sequence
+
 from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
@@ -7,6 +10,8 @@ from pyre.gl_engine.shader_vao import ShaderVAO
 from pyre.gl_engine.shaders.shader_base import BaseShader, FragmentShader, VertexShader
 from pyre.gl_engine.vertex_attribute import VertexAttribute
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
+
+_DEFAULT_COLOR = np.array((0.5, 1.0, 0.0, 0.5), dtype=np.float32)
 
 _color_vertex_shader_program = """
         #version 330
@@ -22,24 +27,24 @@ _color_vertex_shader_program = """
 """
 _color_fragment_shader_program = """
     #version 330  
+    uniform vec4 color;
     layout(location = 0) out vec4 outputColor;
     out float gl_FragDepth;
     void main() {
-        outputColor = vec4(0.5f, 1.0f, 0.0f, 0.5f);
+        outputColor = color;
         gl_FragDepth = 0;
     }
 """
 
 
 class ColorShader(BaseShader):
-    """
-    Colors fragments with a constant color, used for testing
-    """
+    """Solid-color geometry (source/target tween), including registration cell overlays."""
 
-    _source_pos_location = None
-    _target_pos_location = None
-    _tween_location = None
-    _model_view_projection_matrix_location = None
+    _source_pos_location: int | None = None
+    _target_pos_location: int | None = None
+    _tween_location: int | None = None
+    _color_location: int | None = None
+    _model_view_projection_matrix_location: int | None = None
 
     def __init__(self):
         """initialize the static class.  This must be called AFTER the OpenGL context is created."""
@@ -59,6 +64,7 @@ class ColorShader(BaseShader):
             self._source_pos_location = gl.glGetAttribLocation(self.program, "vertex_source_position")
             if self._source_pos_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._source_pos_location is not None
         return self._source_pos_location
 
     @property
@@ -67,6 +73,7 @@ class ColorShader(BaseShader):
             self._target_pos_location = gl.glGetAttribLocation(self.program, "vertex_target_position")
             if self._target_pos_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._target_pos_location is not None
         return self._target_pos_location
 
     @property
@@ -75,7 +82,17 @@ class ColorShader(BaseShader):
             self._tween_location = gl.glGetUniformLocation(self.program, "tween")
             if self._tween_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._tween_location is not None
         return self._tween_location
+
+    @property
+    def color_location(self) -> int:
+        if self._color_location is None:
+            self._color_location = gl.glGetUniformLocation(self.program, "color")
+            if self._color_location == -1:
+                raise ValueError("Could not find attribute")
+        assert self._color_location is not None
+        return self._color_location
 
     @property
     def model_view_projection_matrix(self) -> int:
@@ -84,10 +101,17 @@ class ColorShader(BaseShader):
                                                                                   "model_view_projection_matrix")
             if self._model_view_projection_matrix_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._model_view_projection_matrix_location is not None
         return self._model_view_projection_matrix_location
 
-    def draw(self, model_view_proj_matrix: NDArray[np.floating], vertex_array_object: ShaderVAO, tween: float):
-        """Draws the texture using the vertex and index buffers."""
+    def draw(self,
+             model_view_proj_matrix: NDArray[np.floating],
+             vertex_array_object: ShaderVAO,
+             tween: float,
+             color: Sequence[float] | NDArray[np.floating] | None = None,
+             mode: int = gl.GL_TRIANGLES):
+        """Draw indexed geometry with a constant RGBA color."""
+        rgba = _DEFAULT_COLOR if color is None else np.asarray(color, dtype=np.float32).ravel()[:4]
         try:
             gl.glUseProgram(self.program)
             check_for_error()
@@ -95,16 +119,19 @@ class ColorShader(BaseShader):
 
             gl.glUniform1f(self.tween_location, tween)
             check_for_error()
+            gl.glUniform4f(self.color_location, float(rgba[0]), float(rgba[1]), float(rgba[2]), float(rgba[3]))
+            check_for_error()
 
             gl.glUniformMatrix4fv(self.model_view_projection_matrix, 1, False,
                                   model_view_proj_matrix.astype(np.float32))
             check_for_error()
 
-            status = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER)
-            if status != gl.GL_FRAMEBUFFER_COMPLETE:
-                print("Framebuffer is not complete")
-
-            gl.glDrawElements(gl.GL_TRIANGLES, vertex_array_object.num_elements, gl.GL_UNSIGNED_SHORT, None)
+            gl.glDrawElements(
+                mode,
+                vertex_array_object.num_elements,
+                gl.GL_UNSIGNED_SHORT,
+                ctypes.c_void_p(0),
+            )
         finally:
             check_for_error()
             vertex_array_object.unbind()

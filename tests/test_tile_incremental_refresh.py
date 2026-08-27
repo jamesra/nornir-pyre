@@ -31,6 +31,35 @@ def _identity_grid() -> GridTransform:
     return GridTransform(grid)
 
 
+def _rotated_grid(
+        source_shape: tuple[int, int] = (80, 80),
+        cell_size: tuple[int, int] = (13, 13)) -> GridTransform:
+    grid = ITKGridDivision(source_shape=source_shape, cell_size=cell_size)
+    cy = source_shape[0] / 2.0
+    cx = source_shape[1] / 2.0
+    grid.PopulateTargetPoints(
+        Rigid(target_offset=(1.25, -0.75), source_rotation_center=(cy, cx), angle=0.15))
+    return GridTransform(grid)
+
+
+def _tile_rect(y0: float, x0: float, y1: float, x1: float) -> nornir_imageregistration.Rectangle:
+    return nornir_imageregistration.Rectangle.CreateFromBounds(np.array((y0, x0, y1, x1)))
+
+
+def _control_points_inside_tile(
+        transform: GridTransform,
+        y0: float,
+        x0: float,
+        y1: float,
+        x1: float) -> tuple[np.ndarray, np.ndarray]:
+    source = np.asarray(transform.SourcePoints, dtype=np.float64)
+    target = np.asarray(transform.TargetPoints, dtype=np.float64)
+    inside = (
+        (source[:, 0] >= y0) & (source[:, 0] <= y1)
+        & (source[:, 1] >= x0) & (source[:, 1] <= x1))
+    return source[inside], target[inside]
+
+
 def _identity_grid_with_rbf() -> GridWithRBFFallback:
     grid = ITKGridDivision(source_shape=(32, 32), cell_size=(16, 16))
     grid.PopulateTargetPoints(
@@ -201,6 +230,70 @@ class TestRegularGridSimplices(unittest.TestCase):
         pairs, simplices = mesh
         self.assertGreater(simplices.shape[0], 0)
         self.assertEqual(pairs.shape[1], 4)
+
+    def test_misaligned_tile_includes_interior_control_points(self) -> None:
+        transform = _rotated_grid()
+        y0, x0, y1, x1 = 5.0, 7.0, 37.0, 39.0
+        mesh = gltiles._grid_tile_mesh_point_pairs(transform, _tile_rect(y0, x0, y1, x1))
+        self.assertIsNotNone(mesh)
+        assert mesh is not None
+        pairs, _simplices = mesh
+        src = pairs[:, 2:4]
+        tgt = pairs[:, 0:2]
+        inside_src, inside_tgt = _control_points_inside_tile(transform, y0, x0, y1, x1)
+        self.assertGreater(inside_src.shape[0], 0)
+        for source_yx, target_yx in zip(inside_src, inside_tgt):
+            match = np.all(np.isclose(src, source_yx, atol=1e-6, rtol=0.0), axis=1)
+            self.assertTrue(np.any(match), msg=f"missing control point at source {source_yx}")
+            np.testing.assert_allclose(tgt[match][0], target_yx, atol=1e-5, rtol=1e-6)
+        np.testing.assert_allclose(src[:, 0].min(), y0, atol=1e-9)
+        np.testing.assert_allclose(src[:, 0].max(), y1, atol=1e-9)
+        np.testing.assert_allclose(src[:, 1].min(), x0, atol=1e-9)
+        np.testing.assert_allclose(src[:, 1].max(), x1, atol=1e-9)
+
+    def test_adjacent_tiles_share_warped_edge(self) -> None:
+        transform = _rotated_grid()
+        left = gltiles._grid_tile_mesh_point_pairs(transform, _tile_rect(0.0, 0.0, 40.0, 40.0))
+        right = gltiles._grid_tile_mesh_point_pairs(transform, _tile_rect(0.0, 40.0, 40.0, 80.0))
+        self.assertIsNotNone(left)
+        self.assertIsNotNone(right)
+        assert left is not None and right is not None
+        left_edge = left[0][np.isclose(left[0][:, 3], 40.0)]
+        right_edge = right[0][np.isclose(right[0][:, 3], 40.0)]
+        left_edge = left_edge[np.argsort(left_edge[:, 2])]
+        right_edge = right_edge[np.argsort(right_edge[:, 2])]
+        np.testing.assert_allclose(left_edge, right_edge, atol=1e-6, rtol=1e-6)
+
+    @given(
+        y0=st.integers(0, 400).map(lambda v: v / 10.0),
+        x0=st.integers(0, 400).map(lambda v: v / 10.0),
+    )
+    @example(y0=0.0, x0=0.0)
+    @example(y0=5.0, x0=7.0)
+    @settings(max_examples=25, deadline=None)
+    def test_tile_mesh_contains_every_in_tile_control_point(self, y0: float, x0: float) -> None:
+        transform = _rotated_grid()
+        y1 = y0 + 32.0
+        x1 = x0 + 32.0
+        mesh = gltiles._grid_tile_mesh_point_pairs(transform, _tile_rect(y0, x0, y1, x1))
+        self.assertIsNotNone(mesh)
+        assert mesh is not None
+        pairs, _simplices = mesh
+        src = pairs[:, 2:4]
+        inside_src, _inside_tgt = _control_points_inside_tile(transform, y0, x0, y1, x1)
+        for source_yx in inside_src:
+            match = np.all(np.isclose(src, source_yx, atol=1e-6, rtol=0.0), axis=1)
+            self.assertTrue(np.any(match), msg=f"missing control point at source {source_yx}")
+        outside = np.asarray(transform.SourcePoints, dtype=np.float64)
+        # CPs on the closed tile, or closer than a texel-scale epsilon to an
+        # edge sample, are not halo; those vertices are the shared seam.
+        halo = 1e-4
+        outside = outside[
+            (outside[:, 0] < y0 - halo) | (outside[:, 0] > y1 + halo)
+            | (outside[:, 1] < x0 - halo) | (outside[:, 1] > x1 + halo)]
+        for source_yx in outside:
+            match = np.all(np.isclose(src, source_yx, atol=1e-6, rtol=0.0), axis=1)
+            self.assertFalse(np.any(match), msg=f"halo control point {source_yx} leaked into tile mesh")
 
 
 class TestInteractiveControlPointVertexPatch(unittest.TestCase):
@@ -433,13 +526,60 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         finally:
             controller.end_interactive_edit()
 
+    def test_rbf_prewarm_install_posts_to_gui_not_qtimer(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        mesh = _identity_mesh()
+        captured: list = []
+
+        def _capture_task(_name, func, *args, **kwargs):
+            captured.append(func)
+            return MagicMock()
+
+        pool = MagicMock()
+        pool.add_task.side_effect = _capture_task
+        with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool", return_value=pool):
+            controller = TransformController(mesh)
+            self.assertTrue(captured)
+            with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+                qapp.instance.return_value = MagicMock()
+                with patch("pyre.controllers.transformcontroller.QTimer") as timer:
+                    with patch("pyre.controllers.transformcontroller.qt_post_to_main") as post:
+                        captured[-1]()
+        post.assert_called()
+        timer.singleShot.assert_not_called()
+        self.assertTrue(callable(post.call_args.args[0]))
+
+    def test_rbf_prewarm_install_notifies_views(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        mesh = _identity_mesh()
+        captured: list = []
+
+        def _capture_task(_name, func, *args, **kwargs):
+            captured.append(func)
+            return MagicMock()
+
+        pool = MagicMock()
+        pool.add_task.side_effect = _capture_task
+        with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool", return_value=pool):
+            controller = TransformController(mesh)
+            self.assertTrue(captured)
+            with patch.object(controller, "notify_views_now") as notify:
+                captured[-1]()
+            notify.assert_called()
+        self.assertIsNotNone(mesh._ForwardRBFInstance)
+        self.assertTrue(controller._rbf_prewarm_ready)
+
     def test_stale_mesh_prewarm_install_is_discarded(self) -> None:
         from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool
         from pyre.controllers.transformcontroller import TransformController
 
         mesh = _identity_mesh()
+        mesh.InitializeDataStructures()
         controller = TransformController(mesh)
         GetTransformPrewarmPool().wait_completion()
+        live_rbf = mesh._ForwardRBFInstance
         captured: list = []
 
         def _capture_task(name, func, *args, **kwargs):
@@ -450,7 +590,8 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         try:
             mesh.UpdateTargetPointsByIndex(
                 0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((3.0, 1.0)))
-            self.assertIsNone(mesh._ForwardRBFInstance)
+            self.assertIs(mesh._ForwardRBFInstance, live_rbf)
+            self.assertTrue(mesh._continuous_stale)
             with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool") as get_pool:
                 pool = MagicMock()
                 pool.add_task.side_effect = _capture_task
@@ -459,7 +600,8 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
             self.assertTrue(captured)
             controller._rbf_prewarm_generation += 1
             captured[-1]()
-            self.assertIsNone(mesh._ForwardRBFInstance)
+            self.assertIs(mesh._ForwardRBFInstance, live_rbf)
+            self.assertTrue(mesh._continuous_stale)
         finally:
             with patch.object(controller, "_queue_rbf_prewarm"):
                 controller.end_interactive_edit()
@@ -480,6 +622,28 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
                     side_effect=AssertionError("RBF")):
                 controller.Transform(
                     np.asarray(mesh.SourcePoints), extrapolate=True)
+        finally:
+            with patch.object(controller, "_queue_rbf_prewarm"):
+                controller.end_interactive_edit()
+
+    def test_interactive_transform_does_not_construct_rbf_when_stale_exists(self) -> None:
+        from pyre.controllers.transformcontroller import TransformController
+
+        mesh = _identity_mesh()
+        mesh.InitializeDataStructures()
+        live_rbf = mesh._ForwardRBFInstance
+        controller = TransformController(mesh)
+        controller.begin_interactive_edit(Space.Target)
+        try:
+            mesh.UpdateTargetPointsByIndex(
+                0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((3.0, 1.0)))
+            self.assertIs(mesh._ForwardRBFInstance, live_rbf)
+            with patch(
+                    "nornir_imageregistration.transforms.meshwithrbffallback.OneWayRBFWithLinearCorrection",
+                    side_effect=AssertionError("RBF")):
+                controller.Transform(
+                    np.asarray(mesh.SourcePoints), extrapolate=True)
+            self.assertIs(mesh._ForwardRBFInstance, live_rbf)
         finally:
             with patch.object(controller, "_queue_rbf_prewarm"):
                 controller.end_interactive_edit()

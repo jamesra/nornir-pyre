@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable, TypeVar
+from typing import Callable, TypedDict, TypeVar
 
 from nornir_imageregistration.registration_control import (
     ProgressCallback,
@@ -19,6 +19,12 @@ SuccessFn = Callable[[T], None]
 ErrorFn = Callable[[BaseException], None]
 CancelledFn = Callable[[], None]
 BusyChangedFn = Callable[[bool], None]
+PreviewFn = Callable[[object], None]
+
+
+class _PreviewState(TypedDict):
+    seq: int
+    value: object | None
 
 
 class RegistrationJobRunner:
@@ -79,8 +85,17 @@ class RegistrationJobRunner:
             on_success: SuccessFn[T],
             on_error: ErrorFn | None = None,
             on_cancelled: CancelledFn | None = None,
+            on_preview: PreviewFn | None = None,
     ) -> bool:
-        """Start *worker* if idle. Returns False when a job is already running."""
+        """Start *worker* if idle. Returns False when a job is already running.
+
+        *on_preview* is invoked on the GUI thread with optional per-pass
+        payloads (grid refine delivers a transform snapshot). Later previews
+        from the same job replace earlier ones that have not been applied yet.
+        RefineTransform passes take seconds, so the GUI normally applies each
+        snapshot before the next; coalescing only drops a preview when two
+        arrive before the main thread runs.
+        """
         with self._lock:
             if self._busy:
                 return False
@@ -97,15 +112,40 @@ class RegistrationJobRunner:
             listener(True)
 
         init_main_thread_dispatcher()
+        preview_state: _PreviewState = {"seq": 0, "value": None}
 
-        def progress_cb(current: int, total: int, label: str) -> None:
+        def progress_cb(
+                current: int,
+                total: int,
+                label: str,
+                preview: object | None = None,
+        ) -> None:
+            this_preview_seq: int | None = None
+            if preview is not None:
+                with self._lock:
+                    next_seq = preview_state["seq"] + 1
+                    preview_state["seq"] = next_seq
+                    preview_state["value"] = preview
+                    this_preview_seq = next_seq
+
             def _apply() -> None:
                 if generation != self._generation:
                     return
                 with self._lock:
                     active_bars = list(self._status_bars)
+                    still_busy = self._busy
+                    latest_seq = preview_state["seq"]
+                    preview_value = preview_state["value"]
                 for bar in active_bars:
                     bar.set_progress(current, total, label)
+                if (this_preview_seq is None
+                        or on_preview is None
+                        or not still_busy):
+                    return
+                if this_preview_seq != latest_seq:
+                    return
+                if preview_value is not None:
+                    on_preview(preview_value)
 
             qt_post_to_main(_apply)
 

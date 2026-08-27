@@ -5,10 +5,12 @@ Created on Oct 16, 2012
 """
 from __future__ import annotations
 from dataclasses import dataclass
+import time
 import warnings
 
 import PyQt6.QtGui
 import numpy as np
+from numpy.typing import NDArray
 
 import OpenGL.GL as gl
 from PyQt6.QtWidgets import QWidget, QLabel
@@ -50,7 +52,14 @@ from pyre.views.composite_display import (
     camera_lookat_from_target_space,
     composite_control_point_draw_rows,
     composite_legend_rich_text,
+    rebase_composite_camera_to_display,
     resolve_composite_display_draw_params,
+)
+from pyre.views.registration_roi_overlay import (
+    RegistrationRoiFadeTracker,
+    draw_registration_roi_overlays,
+    phase_correlation_roi_overlays,
+    should_draw_registration_roi,
 )
 
 
@@ -103,6 +112,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _composite_legend: QLabel | None = None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
+    _registration_roi_fade: RegistrationRoiFadeTracker
 
     @property
     def control_point_scale(self) -> float:
@@ -187,6 +197,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         :param space:
         """
         self._selected_points = selected_points
+        self._registration_roi_fade = RegistrationRoiFadeTracker()
         self._command = None  # type: ignore[assignment]
         self._transform_controller_view = None  # type: ignore[assignment]
         self._imagename_space_mapping = imagename_space_mapping
@@ -372,6 +383,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _on_transform_controller_changed(self, controller: TransformController) -> None:
         """Repaint when registration or display overlays change in another STOS view."""
+        if self._view_type == ViewType.Composite:
+            pending = controller.consume_pending_composite_display_preserve()
+            if pending is not None:
+                rebase_composite_camera_to_display(self.camera, controller, pending)
         if self._image_layer_dirty_for_transform(controller):
             self.mark_image_layer_dirty()
         self._glpanel.update()
@@ -516,7 +531,29 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _on_busy_points_changed(self, controller: TransformController, ids: frozenset[int]) -> None:
         """Repaint immediately so busy glyphs appear without waiting for the blink timer."""
+        self._registration_roi_fade.sync(ids, time.monotonic())
         self.glcanvas.update()
+
+    def _draw_registration_roi_overlay(self, view_proj: NDArray[np.floating]) -> None:
+        """Draw fading phase-correlation cells on composite for queued busy points."""
+        controller = self.transform_controller
+        if controller is None:
+            return
+        now = time.monotonic()
+        busy_ids = controller.busy_point_ids
+        self._registration_roi_fade.sync(busy_ids, now)
+        alignment_area = controller.registration_alignment_area
+        if alignment_area is None:
+            alignment_area = self._settings.stos.point_registration.alignment_area_shape
+        overlays = phase_correlation_roi_overlays(
+            busy_ids=busy_ids,
+            started_at=self._registration_roi_fade.started_at,
+            index_for_id=controller.index_for_point_id,
+            target_points_yx=controller.TargetPoints,
+            alignment_area_yx_shape=alignment_area,
+            now=now,
+        )
+        draw_registration_roi_overlays(view_proj, overlays)
 
     def on_timer_singleshot(self):
         """Timer callback that reschedules itself - workaround for repeating timer issues"""
@@ -737,6 +774,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                         self.transform_controller,
                         (gl_h, gl_w),
                     )
+            if should_draw_registration_roi(self.view_type):
+                self._draw_registration_roi_overlay(cp_view_proj)
             self._transform_controller_view.draw(
                 cp_view_proj,
                 tween=ControlPointMap.draw_tween_for_pyre_space(self.space),

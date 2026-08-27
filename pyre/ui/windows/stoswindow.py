@@ -1,31 +1,34 @@
-import copy
 import os
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Protocol
 
 import numpy as np
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtCore import Qt
 
 from nornir_shared import prettyoutput
 import nornir_imageregistration
-from nornir_imageregistration.settings import GridRefinement, SliceToSliceMethod
+from nornir_imageregistration.settings import SliceToSliceMethod
 import nornir_imageregistration.transforms
+from nornir_imageregistration.refine_shared.progress import snapshot_transform_for_preview
 import nornir_pools as pools
 import pyre
 from pyre.common import (
     SaveRegisteredWarpedImage,
     build_stos_object_for_save,
     compute_grid_refine_transform,
+    create_pyre_grid_refinement_settings,
     save_stos_object,
     stos_image_dims_from_stos_config,
 )
 from pyre.qt_eventmanager import qt_post_to_main
 from pyre.registration_job import get_registration_job_runner
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
+from pyre.array_host import leading_axis_len
 from pyre.space import Space
 from pyre.container import IContainer
 from pyre.interfaces.managers import ICommandHistory, IImageManager, IImageViewModelManager, IImageLoader
@@ -37,6 +40,10 @@ import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
 from pyre.ui.windows.help_dialog import ControlsHelpDialog
+from pyre.ui.windows.refine_grid_settings_dialog import (
+    GridSettingsDialogResult,
+    RefineGridSettingsDialog,
+)
 from pyre.ui.window_geometry import apply_frame_geometry_to_widget, apply_saved_browser_geometry
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
@@ -60,6 +67,37 @@ def format_stos_window_title(base: str, path: str | None) -> str:
     if path is None or path == "":
         return base
     return f"{base} — {os.path.basename(path)}"
+
+
+class ConvertTransformTypeMenuHost(Protocol):
+    """Object that owns Convert Transform Type QActions."""
+
+    _action_convert_rigid: QAction
+    _action_convert_grid: QAction
+    _action_convert_mesh: QAction
+    _action_convert_rbf: QAction
+
+
+def convert_transform_type_actions(
+        window: ConvertTransformTypeMenuHost,
+) -> dict[nornir_imageregistration.transforms.TransformType, QAction]:
+    """Map Convert Transform Type menu items to transform types."""
+    return {
+        nornir_imageregistration.transforms.TransformType.RIGID: window._action_convert_rigid,
+        nornir_imageregistration.transforms.TransformType.GRID: window._action_convert_grid,
+        nornir_imageregistration.transforms.TransformType.MESH: window._action_convert_mesh,
+        nornir_imageregistration.transforms.TransformType.RBF: window._action_convert_rbf,
+    }
+
+
+def sync_convert_transform_type_menu(
+        window: ConvertTransformTypeMenuHost,
+        current: nornir_imageregistration.transforms.TransformType,
+) -> None:
+    """Check the Convert Transform Type item matching ``current``."""
+    matching = convert_transform_type_actions(window).get(current)
+    if matching is not None:
+        matching.setChecked(True)
 
 
 class StosWindow(PyreWindowBase):
@@ -93,6 +131,11 @@ class StosWindow(PyreWindowBase):
     _action_refine_grid: QAction
     _action_rotate_log_polar: QAction
     _action_rotate_brute: QAction
+    _action_convert_rigid: QAction
+    _action_convert_grid: QAction
+    _action_convert_mesh: QAction
+    _action_convert_rbf: QAction
+    _convert_transform_type_group: QActionGroup
     _registration_actions: list[QAction]
 
     @property
@@ -182,8 +225,11 @@ class StosWindow(PyreWindowBase):
         self.createMenu()
         self._transform_controller.AddOnModelReplacedEventListener(self._update_workarounds_menu_state)
         self._transform_controller.AddOnModelReplacedEventListener(self._update_refinement_menu_state)
+        self._transform_controller.AddOnModelReplacedEventListener(
+            self._sync_convert_transform_type_menu)
         self._update_workarounds_menu_state()
         self._update_refinement_menu_state()
+        self._sync_convert_transform_type_menu()
         get_registration_job_runner().add_busy_changed_listener(self._on_registration_busy_changed)
 
         # Add drag and drop support
@@ -318,14 +364,28 @@ class StosWindow(PyreWindowBase):
 
         convertSubmenu = menu.addMenu("Convert Transform &Type")
         assert convertSubmenu is not None
-        convertToRigid = convertSubmenu.addAction("&Rigid")
-        convertToRigid.triggered.connect(self.onConvertToRigid)  # type: ignore[union-attr]
-        convertToGrid = convertSubmenu.addAction("&Grid")
-        convertToGrid.triggered.connect(self.onConvertToGrid)  # type: ignore[union-attr]
-        convertToMesh = convertSubmenu.addAction("&Mesh")
-        convertToMesh.triggered.connect(self.onConvertToMesh)  # type: ignore[union-attr]
-        convertToRbf = convertSubmenu.addAction("&RBF")
-        convertToRbf.triggered.connect(self.onConvertToRbf)  # type: ignore[union-attr]
+        self._action_convert_rigid = convertSubmenu.addAction("&Rigid")
+        assert self._action_convert_rigid is not None
+        self._action_convert_grid = convertSubmenu.addAction("&Grid")
+        assert self._action_convert_grid is not None
+        self._action_convert_mesh = convertSubmenu.addAction("&Mesh")
+        assert self._action_convert_mesh is not None
+        self._action_convert_rbf = convertSubmenu.addAction("&RBF")
+        assert self._action_convert_rbf is not None
+        self._convert_transform_type_group = QActionGroup(self)
+        self._convert_transform_type_group.setExclusive(True)
+        for action in (
+                self._action_convert_rigid,
+                self._action_convert_grid,
+                self._action_convert_mesh,
+                self._action_convert_rbf):
+            action.setCheckable(True)
+            self._convert_transform_type_group.addAction(action)
+        self._action_convert_rigid.triggered.connect(self.onConvertToRigid)  # type: ignore[union-attr]
+        self._action_convert_grid.triggered.connect(self.onConvertToGrid)  # type: ignore[union-attr]
+        self._action_convert_mesh.triggered.connect(self.onConvertToMesh)  # type: ignore[union-attr]
+        self._action_convert_rbf.triggered.connect(self.onConvertToRbf)  # type: ignore[union-attr]
+        convertSubmenu.aboutToShow.connect(self._sync_convert_transform_type_menu)  # type: ignore[union-attr]
 
         menu.addSeparator()
 
@@ -635,6 +695,10 @@ class StosWindow(PyreWindowBase):
         self.transform_controller.negate_rigid_angle()
         self.imagepanel._glpanel.update()
 
+    def _sync_convert_transform_type_menu(self, *args: object) -> None:
+        """Check the Convert Transform Type item matching the current model."""
+        sync_convert_transform_type_menu(self, self._transform_controller.type)
+
     def _update_workarounds_menu_state(self, *args: object) -> None:
         """Enable Workarounds items only when applicable; disable the submenu if empty."""
         is_rigid = isinstance(
@@ -669,6 +733,7 @@ class StosWindow(PyreWindowBase):
             worker,
             on_success,
             error_title: str,
+            on_preview=None,
     ) -> None:
         """Submit a background registration job or warn if one is already running."""
         runner = get_registration_job_runner()
@@ -693,6 +758,7 @@ class StosWindow(PyreWindowBase):
             on_success=on_success,
             on_error=_on_error,
             on_cancelled=_on_cancelled,
+            on_preview=on_preview,
         )
         if not started:
             QMessageBox.information(
@@ -784,18 +850,21 @@ class StosWindow(PyreWindowBase):
             error_title="Rotate translate estimate",
         )
 
-    def onRefineGrid(self):
-        """Handle Refine Grid action"""
-        if self._settings.stos.source_image is None or \
-                self._settings.stos.target_image is None:
-            print("Need both images loaded with a transform to run refine grid")
-            return None
+    def start_grid_refine_job(
+            self,
+            user_settings: GridSettingsDialogResult,
+            *,
+            title: str,
+            save_plots: bool = True,
+    ) -> None:
+        """Submit one CPU RefineTransform job using *user_settings* from the dialog.
 
-        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(
-            self, app_settings=self._settings)
-        if user_settings is None:
-            return None
-
+        ``num_iterations`` is the planned pass count of a single refine, not a
+        loop of one-pass Shift+Space jobs. Locks, ring pose, residual
+        translation, and cell-size adaptation only persist inside that call.
+        ``on_preview`` applies each ``report_pass_transform`` snapshot so the
+        mesh updates after every pass without splitting the job.
+        """
         from pyre.image_contrast import contrasted_permutation_helper
         source_for_refine = contrasted_permutation_helper(
             self._image_manager[ViewType.Source],
@@ -805,35 +874,45 @@ class StosWindow(PyreWindowBase):
             self._image_manager[ViewType.Target],
             self._settings.ui.target_contrast,
         )
-        grid_refinement_settings = (
-            nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
-                source_img_data=source_for_refine,
-                target_img_data=target_for_refine,
-                num_iterations=user_settings.num_iterations,
-                grid_spacing=user_settings.grid_spacing,
-                cell_size=user_settings.cell_size,
-                angles_to_search=user_settings.angle_range))
-        # Clone so the worker never mutates the live UI model. RefineTransform often
-        # returns the same object it was given; assigning that back was a no-op in
-        # TransformController and left the views on the pre-refine transform.
-        transform_snapshot = copy.deepcopy(self._transform_controller.TransformModel)
+        # Host mesh so the worker never shares CuPy control points with paintGL.
+        transform_snapshot = snapshot_transform_for_preview(
+            self._transform_controller.TransformModel)
+        if transform_snapshot is None:
+            logger.warning("%s: could not snapshot the live transform", title)
+            return
+
+        user_iterations = user_settings.num_iterations
+        user_grid_spacing = user_settings.grid_spacing
+        user_cell_size = user_settings.cell_size
+        user_angle_range = user_settings.angle_range
 
         def _worker(cancel_event, progress_callback):
+            settings = create_pyre_grid_refinement_settings(
+                source_for_refine,
+                target_for_refine,
+                num_iterations=user_iterations,
+                grid_spacing=user_grid_spacing,
+                cell_size=user_cell_size,
+                angles_to_search=user_angle_range,
+            )
             return compute_grid_refine_transform(
                 transform_snapshot,
-                grid_refinement_settings,
+                settings,
                 cancel_event=cancel_event,
                 progress_callback=progress_callback,
+                save_plots=save_plots,
             )
 
-        def _on_success(updated_transform) -> None:
+        def _apply_refine_transform(updated_transform, *, kind: str) -> None:
             if updated_transform is None:
-                logger.warning("Refine w/ Grid finished without a transform result")
+                logger.warning("%s %s without a transform result", title, kind)
                 return
             n_pts = getattr(updated_transform, "points", None)
-            n = 0 if n_pts is None else int(np.asarray(n_pts).shape[0])
+            n = leading_axis_len(n_pts)
             logger.info(
-                "Refine w/ Grid applying result type=%s points=%s",
+                "%s applying %s type=%s points=%s",
+                title,
+                kind,
                 type(updated_transform).__name__,
                 n,
             )
@@ -841,22 +920,36 @@ class StosWindow(PyreWindowBase):
             from pyre.common import repaint_peer_stos_gl_panels
             repaint_peer_stos_gl_panels(self._window_manager)
 
-        runner = get_registration_job_runner()
-        if runner.busy:
-            with grid_refinement_settings:
-                pass
-            QMessageBox.information(
-                self,
-                "Refine w/ Grid",
-                "Another registration job is already running. Cancel it or wait for it to finish.",
-            )
-            return None
+        def _on_preview(updated_transform) -> None:
+            _apply_refine_transform(updated_transform, kind="pass preview")
+
+        def _on_success(updated_transform) -> None:
+            _apply_refine_transform(updated_transform, kind="result")
 
         self._submit_registration_job(
-            title="Refine w/ Grid",
+            title=title,
             worker=_worker,
             on_success=_on_success,
-            error_title="Refine w/ Grid",
+            error_title=title,
+            on_preview=_on_preview,
+        )
+
+    def onRefineGrid(self):
+        """Handle Refine Grid action"""
+        if self._settings.stos.source_image is None or \
+                self._settings.stos.target_image is None:
+            print("Need both images loaded with a transform to run refine grid")
+            return None
+
+        user_settings = RefineGridSettingsDialog.GetGridRefineSettings(
+            self, app_settings=self._settings)
+        if user_settings is None:
+            return None
+
+        self.start_grid_refine_job(
+            user_settings,
+            title="Refine w/ Grid",
+            save_plots=True,
         )
 
     def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):

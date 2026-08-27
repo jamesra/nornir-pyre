@@ -81,7 +81,8 @@ def mesh_get_possible_actions(
             elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
                 actions = ControlPointAction.CREATE_REGISTER
             elif event.IsChordPressed(InputModifiers.ControlKey):
-                actions |= ControlPointAction.TRANSLATE_ALL
+                if len(event.existing_selections or ()) <= 1:
+                    actions |= ControlPointAction.TRANSLATE_ALL
             elif event.IsOnlyAltPressed:
                 actions = ControlPointAction.LASSO_SELECT
             else:
@@ -95,7 +96,8 @@ def mesh_get_possible_actions(
                 if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
                     actions |= ControlPointAction.REGISTER
                 elif event.IsOnlyCtrlPressed:
-                    actions |= ControlPointAction.TRANSLATE_ALL
+                    if len(event.existing_selections or ()) <= 1:
+                        actions |= ControlPointAction.TRANSLATE_ALL
                 else:
                     actions |= ControlPointAction.TRANSLATE
             elif event.IsRightMousePressed:
@@ -122,6 +124,8 @@ def _empty_click_action(event: SelectionEventData) -> ControlPointAction:
 def _empty_drag_action(event: SelectionEventData) -> ControlPointAction:
     """Left-drag on empty space: box, lasso, or translate-all."""
     if event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton):
+        if len(event.existing_selections or ()) > 1:
+            return ControlPointAction.NONE
         return ControlPointAction.TRANSLATE_ALL
     if not event.IsLeftMousePressed:
         return ControlPointAction.NONE
@@ -160,12 +164,15 @@ def mesh_get_action(
                         action = ControlPointAction.DELETE
 
         elif event.input == InputEvent.Drag:
-            if event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton):
+            if (event.IsChordPressed(InputModifiers.ControlKey | InputModifiers.LeftMouseButton)
+                    and len(event.existing_selections or ()) <= 1):
                 action = ControlPointAction.TRANSLATE_ALL
             elif len(interactions) == 0:
                 action = _empty_drag_action(event)
             elif len(interactions) > 0:
-                if event.IsLeftMousePressed and event.NoModifierKeys:
+                if event.IsLeftMousePressed and event.IsOnlyShiftPressed:
+                    action = ControlPointAction.BOX_SELECT
+                elif event.IsLeftMousePressed and event.NoModifierKeys:
                     action = ControlPointAction.TRANSLATE
 
         elif event.input == InputEvent.Release:

@@ -259,6 +259,25 @@ class TestCompositeRigidGestureCameraRebase(unittest.TestCase):
         self.assertFalse(np.allclose(unbased, display_before, atol=1.0))
 
 
+class TestCompositeRegistrationCameraRebase(unittest.TestCase):
+    """Point-queue registration must not jump composite framing when freeze lifts."""
+
+    def test_clear_cache_stashes_display_for_panel_rebase(self) -> None:
+        controller = TransformController(_mesh())
+        camera = _TestCamera(np.array([20.0, 30.0], dtype=np.float64))
+        display_before = display_lookat_for_composite(camera, controller)
+        self.assertIsNotNone(controller._cached_composite_display_lookat)
+
+        # Clearing the freeze cache must hand the frozen display lookat to the panel.
+        controller._clear_composite_display_cache()
+        pending = controller.consume_pending_composite_display_preserve()
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        np.testing.assert_allclose(pending, display_before, atol=1e-5)
+        self.assertIsNone(controller.consume_pending_composite_display_preserve())
+        self.assertIsNone(controller._cached_composite_display_lookat)
+
+
 class TestMatchViewLookatSync(unittest.TestCase):
     """M-key helpers convert between panel camera space and Target sync space."""
 

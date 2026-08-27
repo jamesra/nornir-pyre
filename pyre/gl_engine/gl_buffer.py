@@ -1,4 +1,3 @@
-import ctypes
 from typing import cast
 
 from OpenGL import GL as gl
@@ -10,9 +9,14 @@ from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
+def _gl_buffer_name(value: object) -> int:
+    """PyOpenGL ``glGenBuffers(1)`` returns ``numpy.uint32``; bind/delete need a Python int."""
+    return int(value)
+
+
 class GLBuffer(IBuffer):
     """Contains a buffer object for use in OpenGL"""
-    _buffer: ctypes.c_uint | None = None
+    _buffer: int | None = None
     _layout: VertexArrayLayout | None
     _data: NDArray[np.floating] | None
     _usage: int  # How the buffer will be used
@@ -35,10 +39,10 @@ class GLBuffer(IBuffer):
         self._update_buffer_data(array_value)
 
     @property
-    def buffer(self) -> ctypes.c_uint:
+    def buffer(self) -> int:
         """The OpenGL buffer object"""
         assert self._buffer is not None
-        return self._buffer
+        return _gl_buffer_name(self._buffer)
 
     @property
     def usage(self) -> int:
@@ -81,7 +85,7 @@ class GLBuffer(IBuffer):
     def _create_open_gl_objects(self, data: NDArray[np.floating] | None):
         """Create the buffer object.  This will break any VAO's that use this buffer."""
         check_for_error()
-        self._buffer = gl.glGenBuffers(1)
+        self._buffer = _gl_buffer_name(gl.glGenBuffers(1))
         check_for_error()
 
         if data is not None:
@@ -91,7 +95,7 @@ class GLBuffer(IBuffer):
         """Update the buffer data, should allow existing VAO's to continue to work."""
         data = data.flatten()
         data = np.ascontiguousarray(data)
-        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.buffer)
+        gl.glBindBuffer(gl.GL_ARRAY_BUFFER, _gl_buffer_name(self.buffer))
         check_for_error()
 
         # buffer data will be zero if the buffer is not initialized
@@ -112,14 +116,17 @@ class GLBuffer(IBuffer):
 
     def __del__(self):
         if self._buffer is not None:
-            gl.glDeleteBuffers(1, [self._buffer])
+            try:
+                gl.glDeleteBuffers(1, [int(self._buffer)])
+            except Exception:
+                pass
             self._buffer = None
 
 
 class GLIndexBuffer(IIndexBuffer):
     """Contains a buffer object for use in OpenGL"""
 
-    _buffer: ctypes.c_uint | None = None
+    _buffer: int | None = None
     _data: NDArray[np.integer]
     _usage: int  # How the buffer will be used
 
@@ -141,10 +148,10 @@ class GLIndexBuffer(IIndexBuffer):
         self._update_buffer_data(array_value)
 
     @property
-    def buffer(self) -> ctypes.c_uint:
+    def buffer(self) -> int:
         """The OpenGL buffer object"""
         assert self._buffer is not None
-        return self._buffer
+        return _gl_buffer_name(self._buffer)
 
     @property
     def usage(self) -> int:
@@ -180,7 +187,7 @@ class GLIndexBuffer(IIndexBuffer):
     def _create_open_gl_objects(self, data: NDArray[np.integer] | None):
         """Create the buffer object.  This will break any VAO's that use this buffer."""
         check_for_error()
-        self._buffer = gl.glGenBuffers(1)
+        self._buffer = _gl_buffer_name(gl.glGenBuffers(1))
         raise_on_error()
 
         if data is not None:
@@ -190,7 +197,7 @@ class GLIndexBuffer(IIndexBuffer):
         """Update the buffer data, should allow existing VAO's to continue to work."""
         data = data.flatten()
         data = np.ascontiguousarray(data)
-        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.buffer)
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, _gl_buffer_name(self.buffer))
         check_for_error()
 
         # buffer data will be zero if the buffer is not initialized
@@ -211,5 +218,8 @@ class GLIndexBuffer(IIndexBuffer):
 
     def __del__(self):
         if self._buffer is not None:
-            gl.glDeleteBuffers(1, [self._buffer])
+            try:
+                gl.glDeleteBuffers(1, [int(self._buffer)])
+            except Exception:
+                pass
             self._buffer = None

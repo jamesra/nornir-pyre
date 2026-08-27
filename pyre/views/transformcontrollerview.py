@@ -21,6 +21,7 @@ from pyre.interfaces.managers.buffertype import BufferType
 
 POINT_INSTANCE_IDLE = 0.0
 POINT_INSTANCE_BUSY = 2.0
+# One revolution per second for the busy comet arc around queued points.
 BUSY_GLYPH_SPIN_RAD_PER_SEC = 2.0 * math.pi
 
 
@@ -218,7 +219,6 @@ class TransformControllerView:
             return
 
         tc_points = self._transform_controller.points  # type: ignore[union-attr]
-        tc_points = tc_points.get() if hasattr(tc_points, "get") else tc_points  # type: ignore[attr-defined]
         buf_points = self._controlpoint_view.points
         # Skip allclose when lengths differ (avoids shape-mismatch; buffer may be stale empty)
         if buf_points.shape[0] == tc_points.shape[0] and np.allclose(buf_points, tc_points):

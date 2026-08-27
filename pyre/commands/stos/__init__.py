@@ -5,6 +5,7 @@ from .gridtransformactionmap import GridTransformActionMap
 from .triangulationtransformactionmap import TriangulationTransformActionMap
 from .registercontrolpointcommand import RegisterControlPointCommand
 from .createregistercontrolpointcommand import CreateRegisterControlPointCommand
+from .gridregisterallcommand import GridRegisterAllCommand
 from .translaterigidcommand import ManipulateRigidTransformCommand
 from .refinerigidtransformcommand import RefineRigidTransformCommand
 from .rigidtransformactionmap import RigidTransformActionMap

@@ -10,6 +10,7 @@ import scipy.spatial
 import scipy.spatial.distance
 
 import nornir_imageregistration
+from nornir_imageregistration import cp
 from nornir_imageregistration.transforms.base import (
     IControlPoints,
     IGridTransform,
@@ -127,22 +128,9 @@ def _tile_bounding_points(tile_bounding_rect: nornir_imageregistration.Rectangle
     return warped_corners
 
 
-def _points_to_numpy_f32(points: NDArray[np.floating]) -> NDArray[np.floating]:
-    """Convert transform output (NumPy or CuPy) to NumPy float32 for GL/Qt paths."""
-    try:
-        import cupy as cp
-    except ImportError:
-        return np.asarray(points, dtype=np.float32)
-    if cp.get_array_module(points) is cp:
-        return np.asarray(cp.asnumpy(points), dtype=np.float32)
-    return np.asarray(points, dtype=np.float32)
-
-
 def _point_pairs_to_numpy_f64(point_pairs: NDArray[np.floating]) -> NDArray[np.floating]:
     """Host float64 point pairs for scipy.Delaunay / OpenGL mesh build (CuPy -> NumPy)."""
-    if hasattr(point_pairs, 'get'):
-        point_pairs = point_pairs.get()  # type: ignore[union-attr]
-    return np.asarray(point_pairs, dtype=np.float64)
+    return nornir_imageregistration.EnsureNumpyArray(point_pairs, dtype=np.float64)
 
 
 def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
@@ -150,23 +138,25 @@ def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
                                forward_transform: bool,
                                *,
                                extrapolate: bool = True) -> NDArray[np.floating]:
-    """
-    Map the points through the transform and return the results as a Nx4 array of matched fixed and warped points.
+    """Map points through the transform as Nx4 (warped, fixed) pairs.
 
+    Pairs stay on the Transform output backend until a Delaunay/GL host conversion.
     """
-
-    # Figure out where the corners of the texture belong
     pts_for_transform = nornir_imageregistration.EnsurePointsAre2DArray(points)
     if forward_transform:
-        fixed_points = _points_to_numpy_f32(points)
-        warped_points = _points_to_numpy_f32(
-            transform.Transform(pts_for_transform, extrapolate=extrapolate))
+        mapped = transform.Transform(pts_for_transform, extrapolate=extrapolate)
+        warped_points = mapped
+        fixed_points = points
     else:
-        warped_points = _points_to_numpy_f32(points)
-        fixed_points = _points_to_numpy_f32(
-            transform.InverseTransform(pts_for_transform, extrapolate=extrapolate))
+        mapped = transform.InverseTransform(pts_for_transform, extrapolate=extrapolate)
+        warped_points = points
+        fixed_points = mapped
 
-    return np.hstack((warped_points, fixed_points))
+    xp = cp.get_array_module(mapped)
+    return xp.hstack((
+        xp.asarray(warped_points, dtype=xp.float32),
+        xp.asarray(fixed_points, dtype=xp.float32),
+    ))
 
 
 def _tile_bounding_rect(transform: nornir_imageregistration.ITransform,
@@ -198,8 +188,10 @@ def _merge_point_pairs_with_transform(points_a: NDArray[np.floating],
     # The transform maps target-space points into source space.
     points_b = transform_points
     if len(points_a) > 0 and len(points_b) > 0:
-        all_point_pairs = np.vstack([points_a, points_b])
-        unique_point_pairs = nornir_imageregistration.core.remove_duplicate_points(all_point_pairs, [1, 0])
+        xp = cp.get_array_module(points_a, points_b)
+        all_point_pairs = xp.vstack([xp.asarray(points_a), xp.asarray(points_b)])
+        unique_point_pairs = nornir_imageregistration.core.remove_duplicate_points(
+            all_point_pairs, [1, 0])
         return unique_point_pairs
 
     if len(points_a) > 0:
@@ -256,9 +248,7 @@ def _texture_coordinates(points_yx: NDArray[np.floating],
     Given a set of points inside a bounding rectangle that represents the texture space,
      return the texture coordinates for each point.
     Uses a half-texel offset so we sample texel centers instead of edges; avoids corner
-    artifacts (noise at tile boundaries) when filtering with LINEAR or MIPMAP.
-    Coordinates are inset so we never sample exactly on 0 or 1, reducing visible seams
-    between adjacent tiles at low zoom.
+    artifacts (noise at tile boundaries) when filtering with LINEAR.
     :param points_yx: Points to generate texture coordinates for
     :param bounding_rect: Bounding rectangle for the texture space
     :return: texture coordinates for a rectangle in fixed (source) space
@@ -268,8 +258,6 @@ def _texture_coordinates(points_yx: NDArray[np.floating],
     size = np.array(bounding_rect.Size, dtype=np.float64)
     # +0.5 so the first texel center is at (0.5/w, 0.5/h) instead of sampling at (0,0) edge
     texture_points = (points_yx - np.array(bounding_rect.BottomLeft) + 0.5) / size
-    # Keep UVs strictly inside [0,1] by a half-texel inset to avoid sampling tile edges
-    # (shared boundaries between tiles can produce seams with CLAMP_TO_BORDER at low zoom)
     half_texel = 0.5 / size
     np.clip(texture_points[:, 0], half_texel[0], 1.0 - half_texel[0], out=texture_points[:, 0])
     np.clip(texture_points[:, 1], half_texel[1], 1.0 - half_texel[1], out=texture_points[:, 1])
@@ -509,11 +497,38 @@ def _regular_grid_cell_simplices(ny: int, nx: int) -> NDArray[np.intp]:
         axis=0).astype(np.intp)
 
 
+def _closed_interval_axis_samples(
+        axis: NDArray[np.floating],
+        lo: float,
+        hi: float) -> NDArray[np.float64]:
+    """Inclusive tile-edge samples plus lattice coordinates on [lo, hi].
+
+    Interior lattice samples are control-point source coordinates, so warped
+    vertices coincide with those CPs. The endpoints keep neighboring texture
+    crops on the same bilinear-sampled seam (e.g. source x=4096).
+    """
+    lo_f = float(lo)
+    hi_f = float(hi)
+    if hi_f < lo_f:
+        lo_f, hi_f = hi_f, lo_f
+    axis_f = np.asarray(axis, dtype=np.float64)
+    on_interval = axis_f[(axis_f >= lo_f) & (axis_f <= hi_f)]
+    samples = np.unique(np.concatenate((np.array((lo_f, hi_f), dtype=np.float64), on_interval)))
+    if samples.shape[0] < 2:
+        return np.array((lo_f, hi_f), dtype=np.float64)
+    return samples
+
+
 def _grid_tile_mesh_point_pairs(
         transform: IGridTransform,
         tile_rect: nornir_imageregistration.Rectangle,
 ) -> tuple[NDArray[np.floating], NDArray[np.intp]] | None:
-    """Control-point pairs and regular-grid triangles covering one texture tile."""
+    """Control-point pairs and regular-grid triangles covering one texture tile.
+
+    Vertices are the tensor product of tile-edge samples and in-tile lattice
+    coordinates. That keeps neighboring crops on a shared warped seam while
+    placing every in-tile control point on a mesh vertex.
+    """
     dims = getattr(transform, 'grid_dims', None)
     if dims is None:
         dims = transform.grid.grid_dims
@@ -529,20 +544,15 @@ def _grid_tile_mesh_point_pairs(
     x1 = float(x0) + float(tile_rect.Width)
     axis_y = np.asarray(source_g[:, 0, 0], dtype=np.float64)
     axis_x = np.asarray(source_g[0, :, 1], dtype=np.float64)
-    r0 = int(np.clip(np.searchsorted(axis_y, y0, side='right') - 1, 0, ny - 1))
-    r1 = int(np.clip(np.searchsorted(axis_y, y1, side='left'), 0, ny - 1))
-    c0 = int(np.clip(np.searchsorted(axis_x, x0, side='right') - 1, 0, nx - 1))
-    c1 = int(np.clip(np.searchsorted(axis_x, x1, side='left'), 0, nx - 1))
-    r0 = max(r0 - 1, 0)
-    r1 = min(r1 + 1, ny - 1)
-    c0 = max(c0 - 1, 0)
-    c1 = min(c1 + 1, nx - 1)
-    if r1 - r0 < 1 or c1 - c0 < 1:
+    ys = _closed_interval_axis_samples(axis_y, float(y0), y1)
+    xs = _closed_interval_axis_samples(axis_x, float(x0), x1)
+    sub_ny = int(ys.shape[0])
+    sub_nx = int(xs.shape[0])
+    yy, xx = np.meshgrid(ys, xs, indexing='ij')
+    src = np.column_stack((yy.ravel(), xx.ravel()))
+    tgt = _bilinear_sample_grid(src, axis_y, axis_x, target_g)
+    if tgt.shape[0] != src.shape[0] or not np.all(np.isfinite(tgt)):
         return None
-    sub_ny = r1 - r0 + 1
-    sub_nx = c1 - c0 + 1
-    src = source_g[r0:r1 + 1, c0:c1 + 1].reshape(-1, 2)
-    tgt = target_g[r0:r1 + 1, c0:c1 + 1].reshape(-1, 2)
     pairs = np.hstack((tgt, src))
     simplices = _regular_grid_cell_simplices(sub_ny, sub_nx)
     if simplices.shape[0] == 0:

@@ -152,6 +152,8 @@ class RefineGridSettingsDialog(QDialog):
 
     _CELL_SIZES: list[int] = [256, 512, 1024]
     _CELL_SPACINGS: list[int] = [128, 192, 256, 384, 512, 768]
+    _fixed_num_iterations: int | None
+    _conversion_only: bool
 
     @property
     def cell_size(self) -> int:
@@ -163,6 +165,8 @@ class RefineGridSettingsDialog(QDialog):
 
     @property
     def iterations(self) -> int:
+        if self._fixed_num_iterations is not None:
+            return self._fixed_num_iterations
         return self.iterations_ctrl.value()
 
     @property
@@ -174,13 +178,15 @@ class RefineGridSettingsDialog(QDialog):
         return self.angle_step_size_ctrl.value()
 
     def __init__(self, parent=None, defaults: GridRefineDefaults | None = None,
-                 conversion_only: bool = False, **kwargs):
+                 conversion_only: bool = False,
+                 fixed_num_iterations: int | None = None, **kwargs):
         super(RefineGridSettingsDialog, self).__init__(parent, **kwargs)
 
         if defaults is None:
             defaults = GridRefineDefaults()
 
         self._conversion_only = conversion_only
+        self._fixed_num_iterations = fixed_num_iterations
 
         # Create the main layout
         main_layout = QHBoxLayout(self)
@@ -247,9 +253,13 @@ class RefineGridSettingsDialog(QDialog):
         grid_layout.addWidget(self.cell_spacing_ctrl, 2, 1)
         next_row = 3
         if not conversion_only:
-            grid_layout.addWidget(iterations_label, next_row, 0)
-            grid_layout.addWidget(self.iterations_ctrl, next_row, 1)
-            next_row += 1
+            if self._fixed_num_iterations is None:
+                grid_layout.addWidget(iterations_label, next_row, 0)
+                grid_layout.addWidget(self.iterations_ctrl, next_row, 1)
+                next_row += 1
+            else:
+                iterations_label.hide()
+                self.iterations_ctrl.hide()
             grid_layout.addWidget(max_angle_label, next_row, 0)
             grid_layout.addWidget(self.max_angle_ctrl, next_row, 1)
             next_row += 1
@@ -300,6 +310,7 @@ class RefineGridSettingsDialog(QDialog):
     def GetGridRefineSettings(
             parent: Optional[QWidget] = None,
             app_settings: AppSettings | None = None,
+            fixed_num_iterations: int | None = None,
     ) -> Optional[GridSettingsDialogResult]:
         """
         Static method to create and show the dialog, returning the result if OK was clicked.
@@ -307,17 +318,29 @@ class RefineGridSettingsDialog(QDialog):
         Args:
             parent: The parent widget for the dialog
             app_settings: Optional AppSettings to seed from and write back on accept
+            fixed_num_iterations: When set, hide the iterations spinner, return this
+                value, and do not persist ``num_iterations`` into app settings.
 
         Returns:
             GridSettingsDialogResult if OK was clicked, None otherwise
         """
         defaults = app_settings.stos.grid_refine if app_settings is not None else None
-        dlg = RefineGridSettingsDialog(parent, defaults=defaults)
+        dlg = RefineGridSettingsDialog(
+            parent, defaults=defaults, fixed_num_iterations=fixed_num_iterations)
         result = dlg.exec()
 
         if result == QDialog.DialogCode.Accepted:
             if app_settings is not None:
-                app_settings.stos.grid_refine = dlg.to_defaults()
+                previous = app_settings.stos.grid_refine
+                app_settings.stos.grid_refine = GridRefineDefaults(
+                    cell_size=dlg.cell_size,
+                    grid_spacing=dlg.grid_spacing,
+                    num_iterations=(
+                        previous.num_iterations if fixed_num_iterations is not None
+                        else dlg.iterations),
+                    max_angle=dlg.max_angle,
+                    angle_step_size=dlg.angle_step_size,
+                )
             return GridSettingsDialogResult(
                 num_iterations=dlg.iterations,
                 cell_size=dlg.cell_size,

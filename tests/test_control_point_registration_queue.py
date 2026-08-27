@@ -11,16 +11,23 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from nornir_imageregistration.alignment_record import AlignmentRecord
-from nornir_imageregistration.computational_lib import ComputationLib
+from nornir_imageregistration.computational_lib import ComputationLib, HasCupy
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
 from PyQt6.QtCore import QThread
 from pyre.controllers.control_point_registration_queue import (
     ControlPointBusySet,
     ControlPointRegistrationQueue,
 )
+from nornir_imageregistration.image_permutation_helper import ImagePermutationHelper
+from pyre.controllers.alignment_payload import (
+    SharedImagePairRef,
+    stage_image_pair,
+)
 from pyre.controllers.transformcontroller import (
     TransformController,
+    _mapped_yx_host,
     run_control_point_alignment,
+    run_shared_control_point_alignment,
     uses_process_pool_for_point_alignment,
 )
 from pyre.observable import ObservableSet
@@ -53,6 +60,14 @@ def _record(dy: float = 2.0, dx: float = 3.0, weight: float = 1.0) -> AlignmentR
     return AlignmentRecord(peak=(dy, dx), weight=weight, angle=0.0)
 
 
+def _permutation_helper(size: int = 64) -> ImagePermutationHelper:
+    """A small real helper; staging needs genuine pixels, mask, and stats."""
+    rng = np.random.default_rng(0)
+    image = rng.random((size, size), dtype=np.float32)
+    mask = np.ones((size, size), dtype=bool)
+    return ImagePermutationHelper(image, mask)
+
+
 class TestControlPointRegistrationQueue(unittest.TestCase):
     def test_enqueue_dedup_and_in_flight(self) -> None:
         queue = ControlPointRegistrationQueue()
@@ -73,6 +88,34 @@ class TestControlPointRegistrationQueue(unittest.TestCase):
         queue.finish(1)
         self.assertEqual(queue.take_next(), 3)
         self.assertFalse(queue.contains(1))
+
+    def test_multiple_jobs_can_be_in_flight(self) -> None:
+        queue = ControlPointRegistrationQueue()
+        queue.enqueue([1, 2, 3])
+        self.assertEqual(queue.take_next(), 1)
+        self.assertEqual(queue.take_next(), 2)
+        self.assertEqual(queue.in_flight_ids, frozenset({1, 2}))
+        self.assertEqual(queue.in_flight_count, 2)
+        self.assertEqual(queue.pending_count, 1)
+        self.assertEqual(queue.queued_ids, frozenset({1, 2, 3}))
+        self.assertFalse(queue.is_idle)
+        queue.finish(1)
+        self.assertEqual(queue.in_flight_ids, frozenset({2}))
+        queue.finish(2)
+        self.assertEqual(queue.take_next(), 3)
+        queue.finish(3)
+        self.assertTrue(queue.is_idle)
+
+    def test_cancel_all_marks_every_in_flight_job(self) -> None:
+        queue = ControlPointRegistrationQueue()
+        queue.enqueue([1, 2, 3])
+        queue.take_next()
+        queue.take_next()
+        queue.cancel_all()
+        self.assertTrue(queue.is_cancelled(1))
+        self.assertTrue(queue.is_cancelled(2))
+        self.assertEqual(queue.pending_count, 0)
+        self.assertIsNone(queue.take_next())
 
 
 class TestControlPointBusySet(unittest.TestCase):
@@ -171,14 +214,58 @@ class TestBusyBlocksWholeTransformGestures(unittest.TestCase):
         np.testing.assert_allclose(controller.SourcePoints, before)
 
     def test_wheel_helper_false_when_busy(self) -> None:
-        from pyre.commands.navigationcommandbase import wheel_applies_warped_transform
+        from pyre.commands.navigationcommandbase import (
+            wheel_applies_relative_scale,
+            wheel_applies_warped_transform,
+        )
 
         controller = TransformController(_mesh(4))
         self.assertTrue(wheel_applies_warped_transform(controller))
+        self.assertTrue(wheel_applies_relative_scale(controller))
         point_id = controller.point_id_for_index(0)
         assert point_id is not None
         controller.mark_busy_points("register", [point_id])
         self.assertFalse(wheel_applies_warped_transform(controller))
+        self.assertFalse(wheel_applies_relative_scale(controller))
+
+    def test_wheel_scale_helper_false_when_selected(self) -> None:
+        from pyre.commands.navigationcommandbase import (
+            wheel_applies_relative_scale,
+            wheel_applies_warped_transform,
+        )
+
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        self.assertTrue(controller.has_ui_control_point_selection())
+        self.assertTrue(wheel_applies_warped_transform(controller))
+        self.assertFalse(wheel_applies_relative_scale(controller))
+
+    def test_scale_fixed_leaves_queued_points_unmoved(self) -> None:
+        controller = TransformController(_mesh(4))
+        before_target = np.array(controller.TargetPoints, copy=True)
+        before_source = np.array(controller.SourcePoints, copy=True)
+        point_id = controller.point_id_for_index(0)
+        assert point_id is not None
+        controller.mark_busy_points("register", [point_id])
+        controller.ScaleFixed(2.0, np.array([0.0, 0.0], dtype=np.float64))
+        np.testing.assert_allclose(controller.TargetPoints, before_target)
+        np.testing.assert_allclose(controller.SourcePoints, before_source)
+
+    def test_scale_fixed_leaves_selected_points_unmoved(self) -> None:
+        selection = ObservableSet(initial_set={1})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        before_target = np.array(controller.TargetPoints, copy=True)
+        before_source = np.array(controller.SourcePoints, copy=True)
+        controller.ScaleFixed(2.0, np.array([0.0, 0.0], dtype=np.float64))
+        np.testing.assert_allclose(controller.TargetPoints, before_target)
+        np.testing.assert_allclose(controller.SourcePoints, before_source)
+
+    def test_scale_warped_leaves_selected_points_unmoved(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        before = np.array(controller.SourcePoints, copy=True)
+        controller.ScaleWarped(2.0)
+        np.testing.assert_allclose(controller.SourcePoints, before)
 
     def test_scale_warped_moves_idle_points(self) -> None:
         controller = TransformController(_mesh(4))
@@ -281,6 +368,25 @@ class TestRegistrationApply(unittest.TestCase):
         np.testing.assert_allclose(after, before + np.array([2.0, 3.0]))
         self.assertTrue(controller._registration_queue.is_idle)
 
+    @unittest.skipUnless(HasCupy(), "requires CuPy")
+    def test_enqueue_accepts_cupy_fixed_point(self) -> None:
+        """GPU TargetPoints rows cannot be np.asarray'd; queue snapshot/apply use host YX."""
+        import cupy as cp
+
+        controller = TransformController(_mesh(4))
+        before = _mapped_yx_host(controller.GetFixedPoint(0)).copy()
+        original = controller.GetFixedPoint
+
+        def _cupy_row(index: int) -> object:
+            return cp.asarray(original(index))
+
+        with patch.object(controller, "GetFixedPoint", side_effect=_cupy_row):
+            controller.enqueue_point_registrations(
+                [0], align_fn=lambda **_: _record(2.0, 3.0))
+        after = _mapped_yx_host(controller.GetFixedPoint(0))
+        np.testing.assert_allclose(after, before + np.array([2.0, 3.0]))
+        self.assertTrue(controller._registration_queue.is_idle)
+
     def test_delete_in_flight_discards_result(self) -> None:
         controller = TransformController(_mesh(4))
         targets: dict[int, NDArray[np.floating]] = {}
@@ -325,15 +431,21 @@ class TestRegistrationApply(unittest.TestCase):
         pool.add_task = lambda _name, fn, *a, **k: captured.append(fn)
         with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
             qapp.instance.return_value = _fake_qapp()
+            # Capacity of 1 keeps the second point pending so deleting it can be
+            # observed; with full pool capacity both would already be in flight.
             with patch(
-                    "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
-                    return_value=pool,
+                    "pyre.controllers.transformcontroller.max_concurrent_point_alignments",
+                    return_value=1,
             ):
-                id1 = controller.point_id_for_index(1)
-                assert id1 is not None
-                controller.enqueue_point_registrations([0, 1], align_fn=align_fn)
-                with patch.object(controller, "FireOnChangeEvent"):
-                    self.assertTrue(controller.TryDeletePoints([1]))
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                        return_value=pool,
+                ):
+                    id1 = controller.point_id_for_index(1)
+                    assert id1 is not None
+                    controller.enqueue_point_registrations([0, 1], align_fn=align_fn)
+                    with patch.object(controller, "FireOnChangeEvent"):
+                        self.assertTrue(controller.TryDeletePoints([1]))
         self.assertEqual(len(captured), 1)
         self.assertNotIn(id1, controller.queued_registration_ids)
 
@@ -371,31 +483,25 @@ class TestRegistrationApply(unittest.TestCase):
         self.assertIn("enqueue_point_registrations", source)
         self.assertNotIn("wait_return", source)
 
-    def test_numpy_uses_process_pool_cupy_uses_threads(self) -> None:
-        with patch(
-                "pyre.controllers.transformcontroller.nornir_imageregistration.GetActiveComputationLib",
-                return_value=ComputationLib.numpy,
-        ):
-            self.assertTrue(uses_process_pool_for_point_alignment())
-        with patch(
-                "pyre.controllers.transformcontroller.nornir_imageregistration.GetActiveComputationLib",
-                return_value=ComputationLib.cupy,
-        ):
-            self.assertFalse(uses_process_pool_for_point_alignment())
+    def test_process_pool_eligibility_ignores_active_backend(self) -> None:
+        """Alignment is host-only, so a CuPy session still uses the process pool."""
+        for lib in (ComputationLib.numpy, ComputationLib.cupy):
+            with patch(
+                    "pyre.controllers.transformcontroller.nornir_imageregistration.GetActiveComputationLib",
+                    return_value=lib,
+            ):
+                self.assertTrue(uses_process_pool_for_point_alignment())
 
-    def test_cpu_submits_picklable_process_task(self) -> None:
+    def test_staging_failure_falls_back_to_thread_pool(self) -> None:
         controller = TransformController(_mesh(4))
         process_pool = MagicMock()
         thread_pool = MagicMock()
-        task = MagicMock()
-        task.wait_return.return_value = _record()
-        process_pool.add_task.return_value = task
-        helper = MagicMock()
+        helper = _permutation_helper()
         with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
             qapp.instance.return_value = _fake_qapp()
             with patch(
-                    "pyre.controllers.transformcontroller.nornir_imageregistration.GetActiveComputationLib",
-                    return_value=ComputationLib.numpy,
+                    "pyre.controllers.transformcontroller.stage_image_pair",
+                    return_value=None,
             ):
                 with patch(
                         "pyre.controllers.transformcontroller.pools.GetGlobalLocalMachinePool",
@@ -412,9 +518,160 @@ class TestRegistrationApply(unittest.TestCase):
                             alignment_area=np.array([32, 32], dtype=np.int32),
                             angles_to_search=np.array([0.0]),
                         )
-        process_pool.add_task.assert_called_once()
-        self.assertIs(process_pool.add_task.call_args.args[1], run_control_point_alignment)
+        process_pool.add_task.assert_not_called()
         thread_pool.add_task.assert_called_once()
+
+    def test_cpu_submits_picklable_process_task(self) -> None:
+        controller = TransformController(_mesh(4))
+        process_pool = MagicMock()
+        thread_pool = MagicMock()
+        task = MagicMock()
+        task.wait_return.return_value = _record()
+        process_pool.add_task.return_value = task
+        helper = _permutation_helper()
+        with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+            qapp.instance.return_value = _fake_qapp()
+            with patch(
+                    "pyre.controllers.transformcontroller.pools.GetGlobalLocalMachinePool",
+                    return_value=process_pool,
+            ):
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                        return_value=thread_pool,
+                ):
+                    controller.enqueue_point_registrations(
+                        [0],
+                        source_image=helper,
+                        target_image=helper,
+                        alignment_area=np.array([32, 32], dtype=np.int32),
+                        angles_to_search=np.array([0.0]),
+                    )
+        try:
+            process_pool.add_task.assert_called_once()
+            args = process_pool.add_task.call_args.args
+            self.assertIs(args[1], run_shared_control_point_alignment)
+            # Only segment names cross the pipe, not the image pair itself.
+            self.assertIsInstance(args[3], SharedImagePairRef)
+            thread_pool.add_task.assert_called_once()
+        finally:
+            controller._release_staged_alignment_pair()
+
+    def test_batch_stages_image_pair_once(self) -> None:
+        """Every point in a register-all batch reuses one staged pair."""
+        controller = TransformController(_mesh(8))
+        process_pool = MagicMock()
+        process_pool.add_task.return_value = MagicMock()
+        thread_pool = MagicMock()
+        helper = _permutation_helper()
+        with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+            qapp.instance.return_value = _fake_qapp()
+            with patch(
+                    "pyre.controllers.transformcontroller.max_concurrent_point_alignments",
+                    return_value=8,
+            ):
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalLocalMachinePool",
+                        return_value=process_pool,
+                ):
+                    with patch(
+                            "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                            return_value=thread_pool,
+                    ):
+                        with patch(
+                                "pyre.controllers.transformcontroller.stage_image_pair",
+                                side_effect=stage_image_pair,
+                        ) as stage:
+                            controller.enqueue_point_registrations(
+                                list(range(8)),
+                                source_image=helper,
+                                target_image=helper,
+                                alignment_area=np.array([32, 32], dtype=np.int32),
+                                angles_to_search=np.array([0.0]),
+                            )
+        try:
+            self.assertEqual(process_pool.add_task.call_count, 8)
+            stage.assert_called_once()
+            refs = {id(call.args[3]) for call in process_pool.add_task.call_args_list}
+            self.assertEqual(len(refs), 1)
+        finally:
+            controller._release_staged_alignment_pair()
+
+    def test_register_all_dispatches_up_to_pool_capacity(self) -> None:
+        """Register-all fills pool capacity instead of running one point at a time."""
+        controller = TransformController(_mesh(8))
+        thread_pool = MagicMock()
+        thread_pool.add_task = MagicMock()
+        with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+            qapp.instance.return_value = _fake_qapp()
+            with patch(
+                    "pyre.controllers.transformcontroller.max_concurrent_point_alignments",
+                    return_value=3,
+            ):
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                        return_value=thread_pool,
+                ):
+                    controller.enqueue_point_registrations(
+                        list(range(8)), align_fn=lambda **_: _record())
+        self.assertEqual(thread_pool.add_task.call_count, 3)
+        self.assertEqual(controller._registration_queue.in_flight_count, 3)
+        self.assertEqual(controller._registration_queue.pending_count, 5)
+        # All 8 stay busy so glyphs and edit locks cover queued points too.
+        self.assertEqual(len(controller.busy_point_ids), 8)
+
+    def test_finishing_one_point_starts_the_next(self) -> None:
+        controller = TransformController(_mesh(4))
+        thread_pool = MagicMock()
+        thread_pool.add_task = MagicMock()
+        with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+            qapp.instance.return_value = _fake_qapp()
+            with patch(
+                    "pyre.controllers.transformcontroller.max_concurrent_point_alignments",
+                    return_value=2,
+            ):
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                        return_value=thread_pool,
+                ):
+                    controller.enqueue_point_registrations(
+                        list(range(4)), align_fn=lambda **_: _record())
+                    self.assertEqual(thread_pool.add_task.call_count, 2)
+                    in_flight = sorted(controller._registration_queue.in_flight_ids)
+                    controller._on_registration_finished(
+                        in_flight[0], np.array([0.0, 0.0]), None)
+                    self.assertEqual(thread_pool.add_task.call_count, 3)
+                    self.assertEqual(
+                        controller._registration_queue.in_flight_count, 2)
+
+    def test_max_concurrent_uses_pool_worker_count(self) -> None:
+        from pyre.controllers.transformcontroller import max_concurrent_point_alignments
+
+        pool = MagicMock()
+        pool.max_workers = 6
+        with patch(
+                "pyre.controllers.transformcontroller.uses_process_pool_for_point_alignment",
+                return_value=False,
+        ):
+            with patch(
+                    "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                    return_value=pool,
+            ):
+                self.assertEqual(max_concurrent_point_alignments(), 6)
+
+    def test_max_concurrent_is_at_least_one(self) -> None:
+        from pyre.controllers.transformcontroller import max_concurrent_point_alignments
+
+        pool = MagicMock()
+        pool.max_workers = 0
+        with patch(
+                "pyre.controllers.transformcontroller.uses_process_pool_for_point_alignment",
+                return_value=False,
+        ):
+            with patch(
+                    "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                    return_value=pool,
+            ):
+                self.assertEqual(max_concurrent_point_alignments(), 1)
 
     def test_cupy_submits_thread_pool_worker(self) -> None:
         controller = TransformController(_mesh(4))
@@ -503,3 +760,77 @@ class TestControlPointAlignmentCpu(unittest.TestCase):
                 )
         np.testing.assert_array_equal(align.call_args.kwargs["targetImage"], host)
         self.assertIs(align.call_args.kwargs["use_gpu"], False)
+
+
+def _identity_mesh_square() -> MeshWithRBFFallback:
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 32.0, 0.0, 32.0],
+            [32.0, 0.0, 32.0, 0.0],
+            [32.0, 32.0, 32.0, 32.0],
+        ],
+        dtype=np.float64,
+    )
+    return MeshWithRBFFallback(points)
+
+
+class TestRegistrationIdleRbfPrewarm(unittest.TestCase):
+    """RBF rebuild is deferred until the registration queue is empty."""
+
+    def test_queue_rbf_prewarm_skipped_while_busy(self) -> None:
+        mesh = _identity_mesh_square()
+        mesh.InitializeDataStructures()
+        with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool") as get_pool:
+            pool = MagicMock()
+            get_pool.return_value = pool
+            controller = TransformController(mesh)
+            gen = controller._rbf_prewarm_generation
+            pool.add_task.reset_mock()
+            point_id = controller.point_id_for_index(0)
+            assert point_id is not None
+            controller.mark_busy_points("register", [point_id])
+            controller._queue_rbf_prewarm()
+            pool.add_task.assert_not_called()
+            self.assertEqual(controller._rbf_prewarm_generation, gen)
+
+    def test_rbf_prewarm_ready_when_stale_instance_exists(self) -> None:
+        mesh = _identity_mesh_square()
+        mesh.InitializeDataStructures()
+        with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool"):
+            controller = TransformController(mesh)
+            mesh.UpdateTargetPointsByIndex(
+                0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((2.0, 1.0)))
+            controller._rbf_prewarm_ready = False
+            self.assertTrue(mesh._continuous_stale)
+            self.assertIsNotNone(mesh._ForwardRBFInstance)
+            self.assertTrue(controller.rbf_prewarm_ready)
+
+    def test_n_registration_applies_prewarm_once_on_idle(self) -> None:
+        mesh = _identity_mesh_square()
+        mesh.InitializeDataStructures()
+        live_rbf = mesh._ForwardRBFInstance
+        with patch("pyre.controllers.transformcontroller.GetTransformPrewarmPool"):
+            controller = TransformController(mesh)
+        with patch.object(controller, "_queue_rbf_prewarm") as prewarm:
+            thread_pool = MagicMock()
+            with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+                qapp.instance.return_value = _fake_qapp()
+                with patch(
+                        "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                        return_value=thread_pool,
+                ):
+                    added = controller.enqueue_point_registrations(
+                        [0, 1, 2], align_fn=lambda **_: _record())
+                    self.assertEqual(len(added), 3)
+                    while not controller._registration_queue.is_idle:
+                        pid = controller.in_flight_registration_id
+                        self.assertIsNotNone(pid)
+                        index = controller.index_for_point_id(int(pid))
+                        self.assertIsNotNone(index)
+                        snapshot = _mapped_yx_host(
+                            controller.GetFixedPoint(int(index))).copy()
+                        controller._on_registration_finished(int(pid), snapshot, _record())
+            prewarm.assert_called_once()
+        self.assertIs(mesh._ForwardRBFInstance, live_rbf)
+        self.assertTrue(mesh._continuous_stale)

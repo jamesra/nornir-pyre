@@ -9,7 +9,7 @@ from pyre.commands import DefaultTransformCommand
 from pyre.commands.stos import ManipulateRigidTransformCommand, RegisterControlPointCommand, \
     TranslateControlPointCommand, DeleteControlPointCommand, \
     CreateControlPointCommand, CreateRegisterControlPointCommand, RefineRigidTransformCommand, \
-    RegionSelectCommand, RegionSelectShape
+    RegionSelectCommand, RegionSelectShape, GridRegisterAllCommand
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.commands.stos import GridTransformActionMap, TriangulationTransformActionMap
 from pyre.observable import SetOperation
@@ -82,7 +82,10 @@ action_command_dp_map = providers.Dict({
         ControlPointAction.TRANSLATE_ALL: providers.Factory(TranslateControlPointCommand, translate_all=True).provider,
         **_selection_command_providers(),
         **_region_select_command_providers(),
-        **_register_command_providers(),
+        ControlPointAction.REGISTER: providers.Factory(
+            RegisterControlPointCommand, source_image=Space.Source, target_image=Space.Target
+        ).provider,
+        ControlPointAction.REGISTER_ALL: providers.Factory(GridRegisterAllCommand).provider,
         ControlPointAction.CALL_TO_MOUSE: providers.Factory(CallControlPointToMouseCommand).provider
 
         # ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand), Grid transform does not support DELETE

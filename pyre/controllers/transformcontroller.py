@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
+import os
 import threading
 from collections.abc import Callable, Iterable, Sequence
 
@@ -20,6 +21,7 @@ from PyQt6.QtCore import QTimer, QThread
 
 import nornir_imageregistration
 from nornir_imageregistration import ImagePermutationHelper
+from nornir_imageregistration import cp
 from nornir_imageregistration.transforms.base import IControlPoints
 from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool
 import nornir_imageregistration.interactive_edit
@@ -45,20 +47,90 @@ from pyre.controllers.transform_display import (
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
+from pyre.selection_event_data import PointPair
 from pyre.qt_eventmanager import qt_post_to_main
+from pyre.array_host import yx_host as _mapped_yx_host
+from pyre.controllers.alignment_payload import (
+    SharedImagePairRef,
+    StagedImagePair,
+    shared_memory_supported,
+    stage_image_pair,
+)
 
 _logger = logging.getLogger(__name__)
 
 
 def uses_process_pool_for_point_alignment() -> bool:
-    """True when CPU/numpy point alignment can run in a process pool.
+    """True when point alignment payloads can reach a pool worker as host memory.
 
-    CuPy stays in-process: CUDA contexts and device arrays are not shared with
-    ``LocalMachinePool`` workers, and those children force a numpy backend.
+    The active backend is not the deciding factor: alignment scoring is host-only
+    (``use_gpu=False``) and pool workers force a numpy backend anyway, so a CuPy
+    session is eligible once its images are staged to host shared memory. Sharing
+    device buffers instead is not possible — CUDA IPC is Linux-only. Callers fall
+    back to the thread pool when staging fails.
     """
-    return (
-        nornir_imageregistration.GetActiveComputationLib()
-        != nornir_imageregistration.ComputationLib.cupy
+    return shared_memory_supported()
+
+
+def max_concurrent_point_alignments() -> int:
+    """Concurrent control-point alignments allowed, sized to the executing pool.
+
+    Registration is bounded by pool workers rather than the point count so a
+    "register all" of a large mesh cannot flood the pool or starve the Qt UI
+    thread. Falls back to ``cpu_count() - 1`` when the pool does not report a
+    worker count.
+    """
+    try:
+        pool = (pools.GetGlobalLocalMachinePool()
+                if uses_process_pool_for_point_alignment()
+                else pools.GetGlobalThreadPool())
+        workers = getattr(pool, "max_workers", None)
+    except Exception:
+        _logger.exception("Could not read pool worker count; using CPU-based limit")
+        workers = None
+    if workers is None:
+        workers = (os.cpu_count() or 2) - 1
+    return max(1, int(workers))
+
+
+def _align_control_point_from_arrays(
+        transform: nornir_imageregistration.ITransform,
+        source_pixels: NDArray,
+        source_mask: NDArray,
+        source_stats: nornir_imageregistration.ImageStats,
+        target_pixels: NDArray,
+        target_mask: NDArray,
+        target_stats: nornir_imageregistration.ImageStats,
+        alignment_area: NDArray[np.integer],
+        angles_to_search: NDArray[np.floating] | None,
+        target_controlpoint: NDArray[np.floating],
+) -> object | None:
+    """Align one control point from host arrays. Shared by both pool paths.
+
+    Scoring is host-only (``use_gpu=False``) so CuPy Pyre does not serialize
+    small FFTs on the GPU. Does not change ``GetActiveComputationLib``.
+    """
+    from pyre.common import either_roi_is_masked
+
+    area = np.asarray(alignment_area, dtype=np.float64)
+    if either_roi_is_masked(
+            transform,
+            target_mask,
+            source_mask,
+            target_controlpoint,
+            area):
+        _logger.info("Skipping point alignment: masked ROI at %s", target_controlpoint)
+        return None
+    return nornir_imageregistration.local_distortion_correction.AttemptAlignPoint(
+        transform=transform,
+        targetImage=target_pixels,
+        sourceImage=source_pixels,
+        target_image_stats=target_stats,
+        source_image_stats=source_stats,
+        target_controlpoint=target_controlpoint,
+        alignmentArea=area,
+        anglesToSearch=angles_to_search,
+        use_gpu=False,
     )
 
 
@@ -70,33 +142,47 @@ def run_control_point_alignment(
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
 ) -> object | None:
-    """Align one control point on the CPU. Module-level so process pools can pickle it.
-
-    Scoring is host-only (``use_gpu=False``) so CuPy Pyre does not serialize
-    small FFTs on the GPU. Does not change ``GetActiveComputationLib``.
-    """
-    from pyre.common import either_roi_is_masked
-
-    area = np.asarray(alignment_area, dtype=np.float64)
-    if either_roi_is_masked(
-            transform,
-            target_image.BlendedMask,
-            source_image.BlendedMask,
-            target_controlpoint,
-            area):
-        _logger.info("Skipping point alignment: masked ROI at %s", target_controlpoint)
-        return None
-    return nornir_imageregistration.local_distortion_correction.AttemptAlignPoint(
-        transform=transform,
-        targetImage=_to_numpy(target_image.ImageWithMaskAsNoise),
-        sourceImage=_to_numpy(source_image.ImageWithMaskAsNoise),
-        target_image_stats=target_image.Stats,
-        source_image_stats=source_image.Stats,
-        target_controlpoint=target_controlpoint,
-        alignmentArea=area,
-        anglesToSearch=angles_to_search,
-        use_gpu=False,
+    """Align one control point in this process from ``ImagePermutationHelper`` pairs."""
+    return _align_control_point_from_arrays(
+        transform,
+        _to_numpy(source_image.ImageWithMaskAsNoise),
+        source_image.BlendedMask,
+        source_image.Stats,
+        _to_numpy(target_image.ImageWithMaskAsNoise),
+        target_image.BlendedMask,
+        target_image.Stats,
+        alignment_area,
+        angles_to_search,
+        target_controlpoint,
     )
+
+
+def run_shared_control_point_alignment(
+        transform: nornir_imageregistration.ITransform,
+        image_pair: SharedImagePairRef,
+        alignment_area: NDArray[np.integer],
+        angles_to_search: NDArray[np.floating] | None,
+        target_controlpoint: NDArray[np.floating],
+) -> object | None:
+    """Align one control point in a pool worker from a staged image pair.
+
+    Module-level and taking only segment names so process pools can pickle it
+    without copying the image pair per control point.
+    """
+    with image_pair.source.attach() as (source_pixels, source_mask, source_stats), \
+            image_pair.target.attach() as (target_pixels, target_mask, target_stats):
+        return _align_control_point_from_arrays(
+            transform,
+            source_pixels,
+            source_mask,
+            source_stats,
+            target_pixels,
+            target_mask,
+            target_stats,
+            alignment_area,
+            angles_to_search,
+            target_controlpoint,
+        )
 
 
 def warmup_alignment_process_worker() -> None:
@@ -213,6 +299,9 @@ class TransformController:
     _cached_composite_display_bounds: nornir_imageregistration.Rectangle | None = None
     _cached_composite_lookat_src: tuple[float, float] | None = None
     _cached_composite_bounds_src: tuple[float, float, float, float] | None = None
+    # Stashed target-display lookat so composite panels can rebase camera.lookat when
+    # freeze lifts after registration/remesh (otherwise Transform(lookat) jumps).
+    _pending_composite_display_preserve: NDArray[np.floating] | None = None
     _point_ids: NDArray[np.int64]
     _id_to_index: dict[int, int]
     _next_point_id: int = 0
@@ -226,6 +315,7 @@ class TransformController:
     _registration_target_image: ImagePermutationHelper | None = None
     _registration_alignment_area: NDArray[np.integer] | None = None
     _registration_angles: NDArray[np.floating] | None = None
+    _registration_staged_pair: StagedImagePair | None = None
 
     @property
     def interactive_edit_in_progress(self) -> bool:
@@ -234,7 +324,9 @@ class TransformController:
 
     @property
     def rbf_prewarm_ready(self) -> bool:
-        """False while mesh/grid RBF weights are still being precomputed off the UI thread."""
+        """True when an RBF instance is installed, including a stale one awaiting rebuild."""
+        if self._model_has_installed_rbf(self._TransformModel):
+            return True
         return self._rbf_prewarm_ready
 
     @property
@@ -261,6 +353,11 @@ class TransformController:
         return self._registration_queue.queued_ids
 
     @property
+    def registration_alignment_area(self) -> NDArray[np.integer] | None:
+        """(height, width) last passed to :meth:`enqueue_point_registrations`, if any."""
+        return self._registration_alignment_area
+
+    @property
     def in_flight_registration_id(self) -> int | None:
         """Session ID of the alignment currently running, if any."""
         return self._registration_queue.in_flight_id
@@ -280,6 +377,11 @@ class TransformController:
                 indices.add(index)
         return frozenset(indices)
 
+    def has_ui_control_point_selection(self) -> bool:
+        """True when the shared STOS selection set contains one or more points."""
+        ui = self._ui_selected_points
+        return ui is not None and len(ui) > 0
+
     def freeze_composite_display_during_point_drag(self) -> bool:
         """True when composite camera/bounds must not remap through Transform().
 
@@ -298,11 +400,24 @@ class TransformController:
         )
 
     def _clear_composite_display_cache(self) -> None:
-        """Drop cached composite lookat/bounds so the next paint remaps through Transform()."""
+        """Drop cached composite lookat/bounds so the next paint remaps through Transform().
+
+        If a display lookat was cached (freeze / busy registration), stash it so composite
+        panels can rebase ``camera.lookat`` before the next paint.
+        """
+        if self._cached_composite_display_lookat is not None:
+            self._pending_composite_display_preserve = np.asarray(
+                self._cached_composite_display_lookat, dtype=np.float64).ravel()[:2].copy()
         self._cached_composite_display_lookat = None
         self._cached_composite_display_bounds = None
         self._cached_composite_lookat_src = None
         self._cached_composite_bounds_src = None
+
+    def consume_pending_composite_display_preserve(self) -> NDArray[np.floating] | None:
+        """Return and clear a stashed composite display lookat, if any."""
+        pending = self._pending_composite_display_preserve
+        self._pending_composite_display_preserve = None
+        return pending
 
     @property
     def interactive_edit_space(self) -> Space | None:
@@ -617,7 +732,7 @@ class TransformController:
             kwargs['extrapolate'] = False
         elif self.freeze_composite_display_during_point_drag():
             kwargs['extrapolate'] = False
-        elif not self._rbf_prewarm_ready:
+        elif not self.rbf_prewarm_ready:
             kwargs.setdefault('extrapolate', False)
         return self.TransformModel.Transform(points, **kwargs)
 
@@ -626,7 +741,7 @@ class TransformController:
             kwargs['extrapolate'] = False
         elif self.freeze_composite_display_during_point_drag():
             kwargs['extrapolate'] = False
-        elif not self._rbf_prewarm_ready:
+        elif not self.rbf_prewarm_ready:
             kwargs.setdefault('extrapolate', False)
         return self.TransformModel.InverseTransform(points, **kwargs)
 
@@ -673,7 +788,10 @@ class TransformController:
             return
         if hint == TileRefreshHint.NONE and suppress_remesh:
             return
-        if self._model_needs_rbf_prewarm(self._TransformModel):
+        if (
+                self._model_needs_rbf_prewarm(self._TransformModel)
+                and not self._registration_queue_busy()
+        ):
             self._queue_rbf_prewarm()
         self._tile_mesh_cache.clear()
         self.FireOnChangeEvent()
@@ -816,6 +934,7 @@ class TransformController:
         self._cached_composite_display_bounds = None
         self._cached_composite_lookat_src = None
         self._cached_composite_bounds_src = None
+        self._pending_composite_display_preserve = None
         self._point_ids = np.empty(0, dtype=np.int64)
         self._id_to_index = {}
         self._next_point_id = 0
@@ -853,16 +972,35 @@ class TransformController:
         """True when tile remesh must wait for off-UI Delaunay/RBF install (mesh)."""
         return getattr(model, "type", None) == nornir_imageregistration.transforms.TransformType.MESH
 
+    def _model_has_installed_rbf(
+            self, model: nornir_imageregistration.ITransform | None = None) -> bool:
+        """True when the live model already has a forward RBF instance (possibly stale)."""
+        if model is None:
+            model = self._TransformModel
+        return getattr(model, '_ForwardRBFInstance', None) is not None
+
+    def _registration_queue_busy(self) -> bool:
+        """True while alignments are queued, in flight, or otherwise marked busy."""
+        return (
+            not self._registration_queue.is_idle
+            or self.in_flight_registration_id is not None
+            or bool(self.busy_point_ids)
+        )
+
     def _queue_rbf_prewarm(self) -> None:
         """Build a replacement RBF fallback on the single prewarm thread, then install it."""
         model = self._TransformModel
         if not self._model_needs_rbf_prewarm(model):
             self._rbf_prewarm_ready = True
             return
+        if self._registration_queue_busy():
+            return
 
+        has_rbf = self._model_has_installed_rbf(model)
         self._rbf_prewarm_generation += 1
         generation = self._rbf_prewarm_generation
-        self._rbf_prewarm_ready = False
+        if not has_rbf:
+            self._rbf_prewarm_ready = False
         target_model = model
         builder = getattr(target_model, "build_refreshed_continuous", None)
 
@@ -875,11 +1013,16 @@ class TransformController:
                 apply = getattr(target_model, "apply_refreshed_continuous", None)
                 if callable(apply):
                     apply(new_continuous)
+            if not self._model_has_installed_rbf(target_model):
+                return
             self._rbf_prewarm_ready = True
             self._hold_composite_display_until_prewarm = False
             self._clear_composite_display_cache()
             self._tile_mesh_cache.clear()
-            self.FireOnChangeEvent()
+            # Immediate notify: FireOnChangeEvent coalescing can drop this if a
+            # convert/edit notification is already queued, leaving tiles built
+            # with extrapolate=False after weights exist.
+            self.notify_views_now()
 
         def _prewarm() -> None:
             built: object | None = None
@@ -892,12 +1035,55 @@ class TransformController:
                 if QApplication.instance() is None:
                     _install(built)
                 else:
-                    QTimer.singleShot(0, lambda cont=built: _install(cont))
+                    # Pool threads have no Qt event loop; QTimer.singleShot from
+                    # them never delivers and the render stays on the pre-RBF mesh.
+                    qt_post_to_main(_install, built)
 
         GetTransformPrewarmPool().add_task(
             f"RBF prewarm gen={generation}",
             _prewarm,
         )
+
+    def ensure_rbf_ready_blocking(self) -> None:
+        """Install an RBF fallback if none exists yet. Safe to call from create-point.
+
+        A present (possibly stale) instance is used as-is. Waiting and
+        ``InitializeDataStructures`` are only allowed when no instance exists.
+        """
+        if self._model_has_installed_rbf():
+            return
+        GetTransformPrewarmPool().wait_completion()
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        if self._model_has_installed_rbf():
+            return
+        model = self._TransformModel
+        initialize = getattr(model, "InitializeDataStructures", None)
+        if callable(initialize):
+            initialize()
+
+    def map_pair_for_control_point_create(
+            self,
+            known_space: Space,
+            known_yx: NDArray[np.floating] | Sequence[float],
+    ) -> PointPair:
+        """Map a click in one space to a finite source/target pair for AddPoint.
+
+        Uses the live model with ``extrapolate=True`` so a stale RBF can fill
+        outside-hull queries. Does not go through :meth:`Transform`.
+        """
+        self.ensure_rbf_ready_blocking()
+        known = _mapped_yx_host(known_yx)
+        query = known.reshape(1, 2)
+        model = self._TransformModel
+        if model is None:
+            return PointPair(target=known.copy(), source=known.copy())
+        if known_space == Space.Source:
+            mapped = _mapped_yx_host(model.Transform(query, extrapolate=True))
+            return PointPair(target=mapped, source=known)
+        mapped = _mapped_yx_host(model.InverseTransform(query, extrapolate=True))
+        return PointPair(target=known, source=mapped)
 
     def _rebuild_id_to_index(self) -> None:
         """Rebuild the session ID → row index map from ``_point_ids``."""
@@ -1009,11 +1195,22 @@ class TransformController:
             align_fn: Callable[..., object] | None = None,
     ) -> list[int]:
         """Queue unique control-point alignments by session ID. Returns newly queued IDs."""
+        # #region agent log
+        import time
+        from pyre.debug_shift_space_profile import log_event, phase_timer
+        _enqueue_t0 = time.perf_counter()
+        # #endregion
         point_ids: list[int] = []
-        for index in indices:
-            point_id = self.point_id_for_index(int(index))
-            if point_id is not None:
-                point_ids.append(point_id)
+        with phase_timer(
+                "C",
+                "transformcontroller.py:enqueue_point_registrations",
+                "index_to_point_id",
+                index_count=len(indices),
+        ):
+            for index in indices:
+                point_id = self.point_id_for_index(int(index))
+                if point_id is not None:
+                    point_ids.append(point_id)
         if align_fn is not None:
             self._registration_align_fn = align_fn
         if source_image is not None:
@@ -1024,39 +1221,114 @@ class TransformController:
             self._registration_alignment_area = alignment_area
         if angles_to_search is not None:
             self._registration_angles = angles_to_search
-        added = self._registration_queue.enqueue(point_ids)
+        with phase_timer(
+                "C",
+                "transformcontroller.py:enqueue_point_registrations",
+                "queue_enqueue",
+                point_id_count=len(point_ids),
+        ):
+            added = self._registration_queue.enqueue(point_ids)
         if added:
             _logger.info("Queued control-point alignments ids=%s", added)
-            self._sync_register_busy()
-            self._pump_registration_queue()
+            with phase_timer(
+                    "C",
+                    "transformcontroller.py:enqueue_point_registrations",
+                    "sync_register_busy",
+                    added_count=len(added),
+            ):
+                self._sync_register_busy()
+            with phase_timer(
+                    "D",
+                    "transformcontroller.py:enqueue_point_registrations",
+                    "pump_registration_queue",
+                    added_count=len(added),
+            ):
+                self._pump_registration_queue()
         elif point_ids:
             _logger.info(
                 "Control-point alignments already pending or in flight ids=%s",
                 list(point_ids),
             )
+        # #region agent log
+        log_event(
+            hypothesis_id="C",
+            location="transformcontroller.py:enqueue_point_registrations",
+            message="enqueue complete",
+            data={
+                "index_count": len(indices),
+                "point_id_count": len(point_ids),
+                "added_count": len(added),
+                "pending_count": len(self._registration_queue.queued_ids),
+                "elapsed_ms": round((time.perf_counter() - _enqueue_t0) * 1000.0, 3),
+            },
+        )
+        # #endregion
         return added
 
     def _pump_registration_queue(self) -> None:
-        """Start the next pending alignment when the queue has no in-flight job."""
-        if self._registration_queue.in_flight_id is not None:
+        """Start pending alignments until the concurrency limit is reached."""
+        # Read pool capacity only when work exists; the getters build global pools.
+        if self._registration_queue.pending_count == 0:
+            if self._registration_queue.is_idle:
+                self._on_registration_queue_idle()
             return
-        point_id = self._registration_queue.take_next()
-        if point_id is None:
+        capacity = max_concurrent_point_alignments()
+        started_any = False
+        while self._registration_queue.in_flight_count < capacity:
+            point_id = self._registration_queue.take_next()
+            if point_id is None:
+                break
+            index = self.index_for_point_id(point_id)
+            if index is None:
+                # Point was deleted while queued; drop it and keep filling capacity.
+                self._registration_queue.finish(point_id)
+                self._sync_register_busy()
+                continue
+            self._dispatch_point_alignment(point_id, index)
+            started_any = True
+
+        if self._registration_queue.is_idle and not started_any:
             self._on_registration_queue_idle()
+
+    def _staged_alignment_pair(
+            self,
+            source_image: ImagePermutationHelper,
+            target_image: ImagePermutationHelper) -> StagedImagePair | None:
+        """Shared-memory staging for this image pair, created once per batch.
+
+        Returns None when staging is unavailable, which routes the caller to the
+        in-process thread pool.
+        """
+        existing = self._registration_staged_pair
+        if existing is not None and existing.matches(source_image, target_image):
+            return existing
+        self._release_staged_alignment_pair()
+        self._registration_staged_pair = stage_image_pair(source_image, target_image)
+        return self._registration_staged_pair
+
+    def _release_staged_alignment_pair(self) -> None:
+        """Free the staged segments once no alignment can still attach to them."""
+        staged = self._registration_staged_pair
+        if staged is None:
             return
-        index = self.index_for_point_id(point_id)
-        if index is None:
-            self._registration_queue.finish(point_id)
-            self._sync_register_busy()
-            self._pump_registration_queue()
-            return
-        snapshot_target = np.asarray(self.GetFixedPoint(index), dtype=np.float64).ravel()[:2].copy()
+        self._registration_staged_pair = None
+        staged.close()
+
+    def _dispatch_point_alignment(self, point_id: int, index: int) -> None:
+        """Submit one already-in-flight alignment to the process or thread pool."""
+        # #region agent log
+        import time
+        from pyre.debug_shift_space_profile import log_event, next_alignment_seq
+        _pump_t0 = time.perf_counter()
+        # #endregion
+        snapshot_target = _mapped_yx_host(self.GetFixedPoint(index)).copy()
         source_image = self._registration_source_image
         target_image = self._registration_target_image
         alignment_area = self._registration_alignment_area
         angles = self._registration_angles
         align_fn = self._registration_align_fn
         transform = self.TransformModel
+        alignment_seq = next_alignment_seq()
 
         def _finish(record: object | None) -> None:
             if QApplication.instance() is None:
@@ -1067,6 +1339,9 @@ class TransformController:
 
         def _thread_worker() -> None:
             record: object | None = None
+            # #region agent log
+            _align_t0 = time.perf_counter()
+            # #endregion
             try:
                 _logger.info("Aligning control point id=%s", point_id)
                 record = self._run_point_alignment(
@@ -1080,35 +1355,79 @@ class TransformController:
                 )
             except Exception:
                 _logger.exception("Exception aligning point id %s", point_id)
+            # #region agent log
+            log_event(
+                hypothesis_id="D",
+                location="transformcontroller.py:_thread_worker",
+                message="alignment finished (thread)",
+                data={
+                    "alignment_seq": alignment_seq,
+                    "point_id": point_id,
+                    "index": index,
+                    "elapsed_ms": round((time.perf_counter() - _align_t0) * 1000.0, 3),
+                },
+            )
+            # #endregion
             _finish(record)
 
         if QApplication.instance() is None:
             _thread_worker()
             return
 
-        use_process_pool = (
-            align_fn is None
-            and transform is not None
-            and source_image is not None
-            and target_image is not None
-            and alignment_area is not None
-            and uses_process_pool_for_point_alignment()
+        staged_pair: StagedImagePair | None = None
+        if (align_fn is None
+                and transform is not None
+                and source_image is not None
+                and target_image is not None
+                and alignment_area is not None
+                and uses_process_pool_for_point_alignment()):
+            staged_pair = self._staged_alignment_pair(source_image, target_image)
+        use_process_pool = staged_pair is not None
+        pool_kind = "process" if use_process_pool else "thread"
+        # #region agent log
+        log_event(
+            hypothesis_id="E",
+            location="transformcontroller.py:_pump_registration_queue",
+            message="dispatch alignment",
+            data={
+                "alignment_seq": alignment_seq,
+                "point_id": point_id,
+                "index": index,
+                "pool_kind": pool_kind,
+                "pending_count": self._registration_queue.pending_count,
+                "in_flight_count": self._registration_queue.in_flight_count,
+                "capacity": max_concurrent_point_alignments(),
+                "num_points": self.NumPoints,
+            },
         )
+        # #endregion
         if not use_process_pool:
             pools.GetGlobalThreadPool().add_task(
                 f"Align Pyre Point id={point_id}",
                 _thread_worker,
             )
+            # #region agent log
+            log_event(
+                hypothesis_id="E",
+                location="transformcontroller.py:_pump_registration_queue",
+                message="thread pool submit complete",
+                data={
+                    "alignment_seq": alignment_seq,
+                    "point_id": point_id,
+                    "elapsed_ms": round((time.perf_counter() - _pump_t0) * 1000.0, 3),
+                },
+            )
+            # #endregion
             return
 
+        assert staged_pair is not None
         _logger.info("Aligning control point id=%s on process pool", point_id)
         try:
             task = pools.GetGlobalLocalMachinePool().add_task(
                 f"Align Pyre Point id={point_id}",
-                run_control_point_alignment,
+                run_shared_control_point_alignment,
                 transform,
-                source_image,
-                target_image,
+                staged_pair.ref,
                 alignment_area,
                 angles,
                 snapshot_target,
@@ -1126,16 +1445,44 @@ class TransformController:
 
         def _await_process_result() -> None:
             record: object | None = None
+            # #region agent log
+            _wait_t0 = time.perf_counter()
+            # #endregion
             try:
                 record = task.wait_return()
             except Exception:
                 _logger.exception("Exception aligning point id %s", point_id)
+            # #region agent log
+            log_event(
+                hypothesis_id="E",
+                location="transformcontroller.py:_await_process_result",
+                message="process pool wait complete",
+                data={
+                    "alignment_seq": alignment_seq,
+                    "point_id": point_id,
+                    "index": index,
+                    "wait_ms": round((time.perf_counter() - _wait_t0) * 1000.0, 3),
+                },
+            )
+            # #endregion
             _finish(record)
 
         pools.GetGlobalThreadPool().add_task(
             f"Await Pyre Point id={point_id}",
             _await_process_result,
         )
+        # #region agent log
+        log_event(
+            hypothesis_id="E",
+            location="transformcontroller.py:_pump_registration_queue",
+            message="process pool submit complete",
+            data={
+                "alignment_seq": alignment_seq,
+                "point_id": point_id,
+                "elapsed_ms": round((time.perf_counter() - _pump_t0) * 1000.0, 3),
+            },
+        )
+        # #endregion
 
     def _run_point_alignment(
             self,
@@ -1175,12 +1522,31 @@ class TransformController:
             record: object | None,
     ) -> None:
         """Apply a finished alignment on the UI thread, then start the next job."""
+        # #region agent log
+        import time
+        from pyre.debug_shift_space_profile import log_event
+        _finish_t0 = time.perf_counter()
+        # #endregion
         cancelled = self._registration_queue.is_cancelled(point_id)
         self._registration_queue.finish(point_id)
         self._sync_register_busy()
         if not cancelled:
             self._apply_registration_record(point_id, snapshot_target, record)
         self._pump_registration_queue()
+        # #region agent log
+        log_event(
+            hypothesis_id="D",
+            location="transformcontroller.py:_on_registration_finished",
+            message="registration finished on UI thread",
+            data={
+                "point_id": point_id,
+                "cancelled": cancelled,
+                "pending_count": len(self._registration_queue.queued_ids),
+                "queue_idle": self._registration_queue.is_idle,
+                "elapsed_ms": round((time.perf_counter() - _finish_t0) * 1000.0, 3),
+            },
+        )
+        # #endregion
 
     def _apply_registration_record(
             self,
@@ -1203,7 +1569,7 @@ class TransformController:
         if math.isnan(dx) or math.isnan(dy):
             _logger.info("Alignment for point id %s ignored (NaN peak)", point_id)
             return
-        current = np.asarray(self.GetFixedPoint(index), dtype=np.float64).ravel()[:2]
+        current = _mapped_yx_host(self.GetFixedPoint(index))
         if not np.allclose(current, snapshot_target, rtol=1e-5, atol=1e-3):
             _logger.info("Alignment for point id %s discarded because the point moved", point_id)
             return
@@ -1219,6 +1585,7 @@ class TransformController:
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""
+        self._release_staged_alignment_pair()
         self._registration_source_image = None
         self._registration_target_image = None
         self._registration_align_fn = None
@@ -1328,10 +1695,11 @@ class TransformController:
 
         When ``center`` is set, ``ScaleWarpedAboutSourcePoint`` pins
         ``Transform(center)`` in target space (cursor-centered scale).
-        Queued (busy) points are left unchanged.
+        Queued (busy) points and a nonempty UI selection leave the transform
+        unchanged.
         """
         del space  # Kept for call-site compatibility with Rotate/Translate space routing.
-        if self.busy_point_ids:
+        if self.busy_point_ids or self.has_ui_control_point_selection():
             return
         model = self._TransformModel
         if isinstance(model, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
@@ -1345,6 +1713,29 @@ class TransformController:
             model.ScaleWarped(scale_factor)  # type: ignore[attr-defined]
             return
         raise NotImplementedError("Current transform does not support warped scaling")
+
+    def ScaleFixed(
+            self,
+            scale_factor: float,
+            center: NDArray[np.floating] | None = None,
+            space: Space | None = None) -> None:
+        """Scale target-space control points; optional ``center`` is a target-space pivot.
+
+        ``ScaleFixed`` is origin-relative on mesh/grid models. When ``center`` is
+        set, follow it with ``TranslateFixed`` so the pivot stays put.
+        Queued (busy) points and a nonempty UI selection leave the transform
+        unchanged.
+        """
+        del space  # Kept for call-site compatibility with Rotate/Translate space routing.
+        if self.busy_point_ids or self.has_ui_control_point_selection():
+            return
+        model = self._TransformModel
+        if not isinstance(model, nornir_imageregistration.ITransformRelativeScaling):
+            raise NotImplementedError("Current transform does not support fixed scaling")
+        model.ScaleFixed(scale_factor)
+        if center is not None and isinstance(model, nornir_imageregistration.ITransformTranslation):
+            pivot = np.asarray(center, dtype=np.float64).ravel()[:2]
+            model.TranslateFixed(pivot * (1.0 - float(scale_factor)))
 
     def FlipWarped(self):
         """
@@ -1361,16 +1752,17 @@ class TransformController:
             print("transform does not support add/remove control points")
             return
 
-        OppositePoint = None
-        NewPointPair = []
         if space == Space.Source and not self.ShowWarped:
-            OppositePoint = self.TransformModel.Transform([[ImageY, ImageX]])  # type: ignore[arg-type]
-            NewPointPair = [OppositePoint[0][0], OppositePoint[0][1], ImageY, ImageX]
+            known_space = Space.Source
         else:
-            OppositePoint = self.TransformModel.InverseTransform([[ImageY, ImageX]])  # type: ignore[arg-type]
-            NewPointPair = [ImageY, ImageX, OppositePoint[0][0], OppositePoint[0][1]]
-
-        return self.TransformModel.AddPoint(NewPointPair)  # type: ignore[arg-type]
+            known_space = Space.Target
+        pair = self.map_pair_for_control_point_create(
+            known_space, np.array((ImageY, ImageX), dtype=np.float64))
+        new_point_pair = [
+            float(pair.target[0]), float(pair.target[1]),
+            float(pair.source[0]), float(pair.source[1]),
+        ]
+        return self.TransformModel.AddPoint(new_point_pair)  # type: ignore[arg-type]
 
     def TryDeletePoint(self, ImageX: float, ImageY: float, maxDistance: float, space: Space = Space.Source):
 
@@ -1539,11 +1931,7 @@ class TransformController:
             print(f"No point found for index {np_index}")
             return index  # type: ignore[return-value]
 
-        try:
-            import cupy as cp
-            xp = cp.get_array_module(original_point)
-        except Exception:
-            xp = numpy
+        xp = cp.get_array_module(original_point)
         point = original_point + xp.asarray((ImageDY, ImageDX))
         remove_duplicates = self._remove_duplicates_on_point_edit()
 

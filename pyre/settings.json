@@ -9,41 +9,51 @@
         "control_point_search_radius": 10.0,
         "image_search_paths": [],
         "replacement_paths": {},
-        "stos_browser_folder": "Y:/Volumes/RC2/TEM/Grid32",
+        "stos_browser_folder": "Y:/Volumes/RC2/TEM/Grid16",
         "window_geometry": {
             "Source": {
-                "x": 3840,
-                "y": 0,
-                "width": 1280,
+                "x": -1,
+                "y": 2,
+                "width": 1284,
                 "height": 726,
                 "visible": true
             },
             "Target": {
-                "x": 5120,
-                "y": 0,
-                "width": 1280,
+                "x": 317,
+                "y": 2,
+                "width": 1284,
                 "height": 726,
                 "visible": true
             },
             "Composite": {
-                "x": 3840,
-                "y": 666,
-                "width": 2560,
+                "x": 1,
+                "y": 291,
+                "width": 1597,
                 "height": 726,
                 "visible": true
             },
             "StosBrowser": {
-                "x": 0,
+                "x": 77,
                 "y": 0,
-                "width": 439,
-                "height": 1392,
+                "width": 503,
+                "height": 1017,
                 "visible": false
             }
+        },
+        "source_contrast": {
+            "min": 80.3,
+            "max": 184.1,
+            "gamma": 1.0
+        },
+        "target_contrast": {
+            "min": 59.4,
+            "max": 202.0,
+            "gamma": 1.0
         }
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "Y:/Volumes/RC2/TEM/Grid32\\273-274_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
+        "stos_filename": "Y:/Volumes/RC2/TEM/Grid16\\Manual\\784-782_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
@@ -61,30 +71,30 @@
             "initial_scale_hint": null
         },
         "point_registration": {
-            "alignment_area": 256,
+            "alignment_area": 512,
             "angle_search_range": {
                 "max_angle": 0.0,
-                "angle_step_size": 1.0
+                "angle_step_size": 2.5
             }
         },
         "grid_refine": {
-            "cell_size": 1024,
-            "grid_spacing": 768,
+            "cell_size": 512,
+            "grid_spacing": 384,
             "num_iterations": 5,
-            "max_angle": 5.0,
+            "max_angle": 0.0,
             "angle_step_size": 2.5
         },
         "source_image": {
-            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0273\\TEM\\Leveled\\Images\\032\\0273_TEM_Leveled.png",
-            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0273\\TEM\\Mask\\Images\\032\\0273_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0784\\TEM\\Leveled\\Images\\016\\0784_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0784\\TEM\\Mask\\Images\\016\\0784_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0274\\TEM\\Leveled\\Images\\032\\0274_TEM_Leveled.png",
-            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0274\\TEM\\Mask\\Images\\032\\0274_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0782\\TEM\\Leveled\\Images\\016\\0782_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0782\\TEM\\Mask\\Images\\016\\0782_TEM_Mask.png"
         },
-        "stos_opened_from_browser_folder": "Y:/Volumes/RC2/TEM/Grid32",
+        "stos_opened_from_browser_folder": "Y:/Volumes/RC2/TEM/Grid16",
         "stos_browser_flat_manual": false,
         "stos_file_source": "auto",
-        "stos_browser_basename": "273-274_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
+        "stos_browser_basename": "784-782_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
     }
 }

@@ -74,14 +74,36 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._settings = settings.stos.point_registration
 
         if register_all:
-            self._selected_points.update(range(transform_controller.NumPoints))
+            # #region agent log
+            from pyre.debug_shift_space_profile import log_event, phase_timer
+            log_event(
+                hypothesis_id="B",
+                location="registercontrolpointcommand.py:__init__",
+                message="register_all init",
+                data={"num_points": transform_controller.NumPoints},
+            )
+            with phase_timer(
+                    "B",
+                    "registercontrolpointcommand.py:__init__",
+                    "selected_points_update",
+                    num_points=transform_controller.NumPoints,
+            ):
+                self._selected_points.update(range(transform_controller.NumPoints))
+            with phase_timer(
+                    "B",
+                    "registercontrolpointcommand.py:__init__",
+                    "snapshot_original_points",
+                    num_points=transform_controller.NumPoints,
+            ):
+                self._original_points = transform_controller.points
+            # #endregion
         else:
             self._selected_points.update(command_points)
+            self._original_points = transform_controller.points
 
         if len(self._selected_points) == 0:
             raise RequiresSelectionError('No points selected')
 
-        self._original_points = transform_controller.points
         self._transform_controller = transform_controller
 
     def __str__(self):
@@ -95,22 +117,71 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
-        source = contrasted_permutation_helper(
-            self._image_manager[self._source_image],
-            self._app_settings.ui.source_contrast,
-        )
-        target = contrasted_permutation_helper(
-            self._image_manager[self._target_image],
-            self._app_settings.ui.target_contrast,
+        # #region agent log
+        from pyre.debug_shift_space_profile import (
+            log_event,
+            phase_timer,
+            start_cprofile,
+            stop_cprofile,
         )
         queued = list(self._selected_points)
-        self._transform_controller.enqueue_point_registrations(
-            queued,
-            source_image=source,
-            target_image=target,
-            alignment_area=self.alignment_area,
-            angles_to_search=self.angles_to_search,
+        register_all = len(queued) == self._transform_controller.NumPoints
+        log_event(
+            hypothesis_id="A",
+            location="registercontrolpointcommand.py:execute",
+            message="execute start",
+            data={
+                "queued_count": len(queued),
+                "num_points": self._transform_controller.NumPoints,
+                "register_all": register_all,
+            },
         )
+        if register_all:
+            start_cprofile("register_all_execute")
+        # #endregion
+        with phase_timer(
+                "A",
+                "registercontrolpointcommand.py:execute",
+                "contrasted_permutation_helper_source",
+                queued_count=len(queued),
+        ):
+            source = contrasted_permutation_helper(
+                self._image_manager[self._source_image],
+                self._app_settings.ui.source_contrast,
+            )
+        with phase_timer(
+                "A",
+                "registercontrolpointcommand.py:execute",
+                "contrasted_permutation_helper_target",
+                queued_count=len(queued),
+        ):
+            target = contrasted_permutation_helper(
+                self._image_manager[self._target_image],
+                self._app_settings.ui.target_contrast,
+            )
+        with phase_timer(
+                "C",
+                "registercontrolpointcommand.py:execute",
+                "enqueue_point_registrations",
+                queued_count=len(queued),
+        ):
+            self._transform_controller.enqueue_point_registrations(
+                queued,
+                source_image=source,
+                target_image=target,
+                alignment_area=self.alignment_area,
+                angles_to_search=self.angles_to_search,
+            )
+        # #region agent log
+        if register_all:
+            stop_cprofile("register_all_execute")
+        log_event(
+            hypothesis_id="A",
+            location="registercontrolpointcommand.py:execute",
+            message="execute end",
+            data={"queued_count": len(queued)},
+        )
+        # #endregion
         _logger.info("RegisterControlPointCommand queued %s selected point(s)", len(queued))
         super().execute()
 

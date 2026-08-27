@@ -17,6 +17,7 @@ from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 from pyre.qt_eventmanager import qt_post_to_main
 
 import nornir_imageregistration
+from nornir_imageregistration import cp
 import nornir_imageregistration.transforms.base
 import nornir_imageregistration.transforms.triangulation
 import pyre
@@ -32,6 +33,12 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.perf_debug import timed
 
 _LAZY_TILE_MESH_BUDGET = 8
+
+
+def mesh_overlay_verts_xy(points: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Flip YX control points to XY for mesh-line overlay; host array for DrawTriangles."""
+    xp = cp.get_array_module(points)
+    return nornir_imageregistration.EnsureNumpyArray(xp.fliplr(points))
 
 
 class ImageTransformView(IImageTransformView):
@@ -301,7 +308,8 @@ class ImageTransformView(IImageTransformView):
         if self._image_viewmodel is None or self.transform is None:
             return
         if not self._uses_lazy_mesh_build():
-            self.update_all_tile_buffers(visible_rect=visible_rect)
+            # Static quads are rebuilt during paintGL. Uploading from camera-changed
+            # (outside paintGL) makeCurrent() can raise GL_INVALID_OPERATION and blank the view.
             return
 
         if visible_rect is None:
@@ -490,10 +498,9 @@ class ImageTransformView(IImageTransformView):
                 del self._tile_render_data[grid_coord]
 
         except gl.GLError as e:
-            # If we still get GL errors, it means the context isn't ready yet
-            print(f"GL not ready yet, will retry: {e}")
-            # Schedule a retry with context activation
-            qt_post_to_main(self.update_all_tile_buffers, activate_context=self._activate_context)
+            print(f"GL error updating tile buffers (will rebuild on next paint): {e}")
+            if self._repaint_callback is not None:
+                qt_post_to_main(self._repaint_callback)
 
     def draw_lines(self, draw_in_fixed_space: bool):
         """
@@ -508,13 +515,13 @@ class ImageTransformView(IImageTransformView):
                 return
 
             # Triangles = self.__Transform.WarpedTriangles
-            verts = np.fliplr(self.transform.SourcePoints)  # type: ignore[attr-defined]
+            verts = mesh_overlay_verts_xy(self.transform.SourcePoints)  # type: ignore[attr-defined]
             triangles = self.transform.source_space_trianglulation
         else:
             if not isinstance(self.transform, nornir_imageregistration.transforms.ITriangulatedTargetSpace):
                 return
 
-            verts = np.fliplr(self.transform.TargetPoints)  # type: ignore[attr-defined]
+            verts = mesh_overlay_verts_xy(self.transform.TargetPoints)  # type: ignore[attr-defined]
             triangles = self.transform.target_space_trianglulation
 
         if verts is not None and triangles is not None:

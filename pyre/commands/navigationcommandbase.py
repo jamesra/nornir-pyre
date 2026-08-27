@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QGuiApplication, QMouseEvent, QKeyEvent, QWheelEvent
 import nornir_imageregistration
+from pyre.array_host import yx_host
 
 import abc
 import math
@@ -45,13 +46,42 @@ import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
 
 
 def wheel_applies_warped_transform(controller: object) -> bool:
-    """True when Shift/Ctrl+wheel may scale or rotate the transform.
+    """True when Ctrl+wheel may rotate the transform.
 
-    Queued (busy) control points must stay put, so leftover Shift after
-    Shift+Space zooms the camera instead of ScaleWarped.
+    Queued (busy) control points must stay put, so leftover modifiers after
+    Shift+Space zoom the camera instead of rotating the registration.
     """
     busy = getattr(controller, "busy_point_ids", None)
     return not bool(busy)
+
+
+def wheel_applies_relative_scale(controller: object) -> bool:
+    """True when Shift+wheel may scale the transform.
+
+    Whole-transform scale is only allowed with no UI selection and no queued
+    (busy) points. Otherwise leftover Shift zooms the camera.
+    """
+    if not wheel_applies_warped_transform(controller):
+        return False
+    checker = getattr(controller, "has_ui_control_point_selection", None)
+    if callable(checker):
+        return not checker()
+    return True
+
+
+def wheel_scale_uses_target_points(
+        model: nornir_imageregistration.ITransform | None,
+        view_type: ViewType | None,
+        space: Space) -> bool:
+    """True when Shift+scroll should scale TargetPoints (composite/target mesh-like).
+
+    Rigid CS2D stays on ``ScaleWarpedAboutSourcePoint`` with a source-space pivot.
+    """
+    if model is None or is_rigid_transform(model):
+        return False
+    if not isinstance(model, nornir_imageregistration.ITransformRelativeScaling):
+        return False
+    return view_type == ViewType.Composite or space == Space.Target
 
 
 class NavigationCommandBase(UICommandBase, abc.ABC):
@@ -203,15 +233,16 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         position = np.array(self.camera.ImageCoordsForMouse(cy, cx))
 
         if self._transform_controller.TransformModel is None:
-            return PointPair(target=position, source=position)
+            host_position = yx_host(position)
+            return PointPair(target=host_position, source=host_position)
 
         if self._space == Space.Source:
-            mapped = np.squeeze(self._transform_controller.Transform(position))
+            mapped = yx_host(self._transform_controller.Transform(position))
             return PointPair(target=mapped,
-                             source=position)
+                             source=yx_host(position))
         elif self._space == Space.Target:
-            mapped = np.squeeze(self._transform_controller.InverseTransform(position))
-            return PointPair(target=position,
+            mapped = yx_host(self._transform_controller.InverseTransform(position))
+            return PointPair(target=yx_host(position),
                              source=mapped)
         else:
             raise ValueError("Unknown space")
@@ -299,15 +330,14 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 and isinstance(
                     self._transform_controller.TransformModel,
                     nornir_imageregistration.ITransformRelativeScaling)
-                and wheel_applies_warped_transform(self._transform_controller)
+                and wheel_applies_relative_scale(self._transform_controller)
             )
             if shift_scale and scroll_y != 0.0:
                 scale_delta = (1.0 + (-scroll_y / 50.0))
                 try:
                     point_pair = self.get_world_positions(e)
-                    # ScaleWarpedAboutSourcePoint expects source-space pivot (same as rigid rotate).
-                    source_pivot = np.asarray(point_pair.source, dtype=np.float32)
                     view = self._view_type()
+                    model = self._transform_controller.TransformModel
 
                     self._transform_controller.begin_interactive_edit(
                         self.space,
@@ -315,8 +345,18 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         gesture=gesture_for_wheel_rotate(
                             self.space, self._view_type(), self._transform_controller.type))
                     try:
-                        self._transform_controller.ScaleWarped(
-                            scale_delta, source_pivot, space=self.space)
+                        if wheel_scale_uses_target_points(model, view, self.space):
+                            # Composite glyphs live at TargetPoints; scale about the
+                            # display/target cursor so the overlay grows under the mouse.
+                            target_pivot = yx_host(point_pair.target).astype(np.float32)
+                            self._transform_controller.ScaleFixed(
+                                scale_delta, target_pivot, space=Space.Target)
+                        else:
+                            # ScaleWarpedAboutSourcePoint expects source-space pivot
+                            # (same as rigid rotate).
+                            source_pivot = yx_host(point_pair.source).astype(np.float32)
+                            self._transform_controller.ScaleWarped(
+                                scale_delta, source_pivot, space=self.space)
                         if view == ViewType.Composite:
                             pair_after = self.get_world_positions(e)
                             self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
@@ -346,11 +386,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                         point_pair = self.get_world_positions(e)
                         view = self._view_type()
                         if view == ViewType.Composite:
-                            world_center = np.asarray(point_pair.source, dtype=np.float32)
+                            world_center = yx_host(point_pair.source).astype(np.float32)
                         elif self.space == Space.Source:
-                            world_center = np.asarray(point_pair.source, dtype=np.float32)
+                            world_center = yx_host(point_pair.source).astype(np.float32)
                         else:
-                            world_center = np.asarray(point_pair.target, dtype=np.float32)
+                            world_center = yx_host(point_pair.target).astype(np.float32)
 
                         self._transform_controller.begin_interactive_edit(
                             self.space,

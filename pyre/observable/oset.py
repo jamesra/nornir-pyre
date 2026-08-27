@@ -17,6 +17,7 @@ class SetOperation(enum.IntEnum):
     Intersection = 2  # Return a new set with elements common to the set and all others.
     Difference = 3  # Return a new set with elements in the set that are not in the others.
     SymmetricDifference = 4  # Return a new set with elements in either the set or other but not both.
+    AddOrRemoveGroup = 5  # Union unless every incoming element is already present, then difference.
 
 
 class ObservableSet(set, Generic[T]):
@@ -91,9 +92,8 @@ class ObservableSet(set, Generic[T]):
     def difference_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, removing elements found in others."""
         in_value = frozenset(*s)
-        not_removing = self & in_value
-        removing = self - not_removing
-        self.difference_update(in_value)
+        removing = self & in_value
+        super().difference_update(in_value)
         if len(removing) > 0:
             self._notify_observers(ObservedAction.REMOVE, removing)
 

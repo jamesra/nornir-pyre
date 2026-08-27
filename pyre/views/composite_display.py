@@ -236,6 +236,19 @@ def rebase_composite_camera_after_rigid_gesture(
     camera.lookat = lookat_from_display_position(transform_controller, display_yx)
 
 
+def rebase_composite_camera_to_display(
+        camera: Camera,
+        transform_controller: TransformController,
+        display_yx: NDArray[np.floating],
+) -> None:
+    """Set source-space ``camera.lookat`` so ``Transform(lookat)`` matches ``display_yx``.
+
+    Used when composite display freeze lifts after control-point registration or remesh:
+    keep the on-screen target-display framing still while the warp changes.
+    """
+    camera.lookat = lookat_from_display_position(transform_controller, display_yx)
+
+
 def visible_rectangle_around_lookat(
         lookat_yx: NDArray[np.floating],
         scale: float,

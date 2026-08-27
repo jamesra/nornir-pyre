@@ -186,13 +186,11 @@ def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
     gl.glTexParameteriv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_SWIZZLE_RGBA, swizzle_mask)
     raise_on_error("after glTexParameteriv (swizzle) in create_grayscale_texture")
 
-    # Configure texture parameters
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
-    # Explicit border (0,0,0,1) so out-of-bounds samples are black; avoids bright dot artifacts
-    # when UVs or LOD sampling touch the border (undefined border is driver-dependent).
-    border_color = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
-    gl.glTexParameterfv(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_BORDER_COLOR, border_color)
+    # CLAMP_TO_EDGE on interior 4096-tile boundaries: mip/LOD samples that
+    # stray slightly outside [0,1] repeat the edge texel instead of the black
+    # border that opened Grid16 composite seams (axis-aligned plus after warp).
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_NEAREST)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR)
     raise_on_error("after texture parameter configuration in create_grayscale_texture")
@@ -214,7 +212,7 @@ def create_grayscale_texture(image: NDArray[np.uint8]) -> int:
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_BASE_LEVEL, 0)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAX_LEVEL, num_mip_levels)
         raise_on_error("after mipmap level configuration in create_grayscale_texture")
-    
+
     gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
     raise_on_error("after glGenerateMipmap in create_grayscale_texture")
 
@@ -265,8 +263,8 @@ def create_rgba_texture(image: NDArray[np.uint8]) -> int:
     raise_on_error("after glBindTexture in create_rgba_texture")
 
     # Configure texture parameters
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_BORDER)
-    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_BORDER)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+    gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR_MIPMAP_LINEAR)
     raise_on_error("after texture parameter configuration in create_rgba_texture")
@@ -288,7 +286,7 @@ def create_rgba_texture(image: NDArray[np.uint8]) -> int:
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_BASE_LEVEL, 0)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAX_LEVEL, num_mip_levels)
         raise_on_error("after mipmap level configuration in create_rgba_texture")
-    
+
     gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
     raise_on_error("after glGenerateMipmap in create_rgba_texture")
 

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QMouseEvent
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QAbstractItemView, QApplication
 
 from pyre.qt_eventmanager import init_main_thread_dispatcher
 from pyre.settings.app import AppSettings
@@ -149,6 +149,43 @@ class TestStosFileBrowserNavigation(unittest.TestCase):
             self.assertEqual(len(browser._rows), 2)
             self.assertEqual(browser._rows[browser._current_index].basename, "a.stos")
             self.assertEqual(browser._list_widget.rowCount(), 2)
+
+    def test_set_current_row_keeps_visible_item_in_place(self) -> None:
+        """Selecting an already-visible row must not recenter the table."""
+        browser = self._browser_with_rows(40, current_index=0)
+        browser._populate_list()
+        browser.resize(380, 280)
+        browser.show()
+        self._app.processEvents()
+        table = browser._list_widget
+        top_item = table.item(18, 0)
+        self.assertIsNotNone(top_item)
+        assert top_item is not None
+        table.scrollToItem(top_item, QAbstractItemView.ScrollHint.PositionAtTop)
+        self._app.processEvents()
+        before = table.verticalScrollBar().value()
+        self.assertGreater(before, 0)
+        browser._set_current_row(18)
+        self._app.processEvents()
+        self.assertEqual(table.verticalScrollBar().value(), before)
+
+    def test_load_stos_path_does_not_recenter_visible_row(self) -> None:
+        """Double-click load must leave a visible row at the same scroll offset."""
+        browser = self._browser_with_rows(40, current_index=0)
+        browser._populate_list()
+        browser.resize(380, 280)
+        browser.show()
+        self._app.processEvents()
+        table = browser._list_widget
+        top_item = table.item(18, 0)
+        self.assertIsNotNone(top_item)
+        assert top_item is not None
+        table.scrollToItem(top_item, QAbstractItemView.ScrollHint.PositionAtTop)
+        self._app.processEvents()
+        before = table.verticalScrollBar().value()
+        browser._load_stos_path("/tmp/section_18.stos", 18, browser_basename="section_18.stos")
+        self._app.processEvents()
+        self.assertEqual(table.verticalScrollBar().value(), before)
 
 
 if __name__ == "__main__":

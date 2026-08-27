@@ -15,13 +15,19 @@ from pyre.commands import InstantCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
-from pyre.commands.stos.point_coords import control_point_row_from_pair
+from pyre.commands.stos.point_coords import (
+    control_point_row_from_pair,
+    known_space_for_control_point_create,
+    known_yx_from_pair,
+)
+from pyre.interfaces.viewtype import ViewType
 
 
 class CreateRegisterControlPointCommand(InstantCommandBase):
     """Add a control point at the current mouse pair and queue registration for that point."""
 
     _space: Space
+    _view_type: ViewType | None
     _new_point_position: PointPair
     _selected_points: ObservableSet[int]  # The indices of the selected points
 
@@ -43,6 +49,8 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: "pyre.viewmodels.TransformController" = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
+                 space: Space = Space.Source,
+                 view_type: ViewType | None = None,
                  **kwargs):
         super().__init__(completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
@@ -54,6 +62,8 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._selected_points = selected_points
         self._transform_controller = transform_controller
         self._commandqueue = commandqueue
+        self._space = space
+        self._view_type = view_type
         self._new_point_position = PointPair(source=source_position, target=target_position)
         self._original_points = transform_controller.points
 
@@ -72,7 +82,10 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
 
     def queue_registration_command(self):
 
-        point = self._new_point_position
+        known_space = known_space_for_control_point_create(self._space, self._view_type)
+        known_yx = known_yx_from_pair(self._new_point_position, known_space)
+        point = self._transform_controller.map_pair_for_control_point_create(
+            known_space, known_yx)
         newpoint = control_point_row_from_pair(point)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)
 

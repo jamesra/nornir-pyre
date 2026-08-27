@@ -475,7 +475,7 @@ class StosFileBrowserWindow(QMainWindow):
         return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING + 64)
 
     def _set_current_row(self, index: int) -> None:
-        """Select table row *index* and scroll it into view."""
+        """Select table row *index* without moving it if it is already visible."""
         if index < 0 or index >= self._list_widget.rowCount():
             self._list_widget.clearSelection()
             self._list_widget.setCurrentCell(-1, -1)
@@ -484,7 +484,7 @@ class StosFileBrowserWindow(QMainWindow):
         item = self._list_widget.item(index, 0)
         if item is None:
             return
-        self._list_widget.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        self._list_widget.scrollToItem(item, QAbstractItemView.ScrollHint.EnsureVisible)
 
     def _populate_list(self) -> None:
         """Fill the table from ``_rows`` (names and any scores already on the rows)."""

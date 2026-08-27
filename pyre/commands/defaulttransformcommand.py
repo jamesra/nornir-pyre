@@ -17,7 +17,14 @@ from nornir_imageregistration.transforms import ConvertTransform
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet, SetOperation
-from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair, SelectionEventKey
+from pyre.selection_event_data import (
+    InputEvent,
+    InputModifiers,
+    SelectionEventData,
+    InputSource,
+    PointPair,
+    SelectionEventKey,
+)
 from pyre.interfaces import ICommand, IInstantCommand, StatusChangeCallback
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IControlPointMapManager, \
     IControlPointActionMap, ControlPointManagerKey, IImageManager
@@ -85,6 +92,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _action_to_command: dict  # type: ignore[type-arg]
     _right_pan_active: bool = False
     _pending_empty_left_click: bool = False
+    _pending_shift_glyph_click: bool = False
     _left_press_qt: tuple[float, float] | None = None
 
     log: Logger = logging.Logger("DefaultTransformCommand")
@@ -155,6 +163,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._selected_points = selected_points
         self._right_pan_active = False
         self._pending_empty_left_click = False
+        self._pending_shift_glyph_click = False
         self._left_press_qt = None
         transform_action_map_factory = transform_control_point_action_maps()[
             transform_controller.type]
@@ -324,6 +333,7 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         self._pending_empty_left_click = False
+        self._pending_shift_glyph_click = False
         self._left_press_qt = None
         if (
                 event.buttons() & Qt.MouseButton.LeftButton
@@ -332,10 +342,12 @@ class DefaultTransformCommand(NavigationCommandBase):
             scale = 1 / self.camera.scale if self.camera.scale else 1.0
             hits = self._actionmap.find_interactions(point, scale)  # type: ignore[call-arg]
             self._pending_empty_left_click = len(hits) == 0
+            self._pending_shift_glyph_click = (
+                len(hits) >= 1 and selection_event_data.IsOnlyShiftPressed)
             pos = event.position()
             self._left_press_qt = (float(pos.x()), float(pos.y()))
 
-        if not self._pending_empty_left_click:
+        if not self._pending_empty_left_click and not self._pending_shift_glyph_click:
             self._dispatch_selection_event(selection_event_data)
 
         self._last_mouse_press_event_args = event
@@ -448,8 +460,10 @@ class DefaultTransformCommand(NavigationCommandBase):
                 if new_action.action in (ControlPointAction.BOX_SELECT, ControlPointAction.LASSO_SELECT):
                     command_kwargs['region_origin_qt'] = self._left_press_qt
                     command_kwargs['set_operation'] = (
-                        SetOperation.Union if selection_event_data.IsShiftPressed else SetOperation.Replace
+                        SetOperation.AddOrRemoveGroup if selection_event_data.IsShiftPressed else SetOperation.Replace
                     )
+                if new_action.action in (ControlPointAction.CREATE, ControlPointAction.CREATE_REGISTER):
+                    command_kwargs['view_type'] = self._view_type()
                 new_command = self._action_to_command[new_action.action](parent=self.parent,
                                                                          camera=self.camera,
                                                                          bounds=self._bounds,
@@ -500,7 +514,8 @@ class DefaultTransformCommand(NavigationCommandBase):
             )
 
             self._selection_event_history[selection_event_data.eventkey] = selection_event_data
-            if self._pending_empty_left_click and (event.buttons() & Qt.MouseButton.LeftButton):
+            pending_region = self._pending_empty_left_click or self._pending_shift_glyph_click
+            if pending_region and (event.buttons() & Qt.MouseButton.LeftButton):
                 dx = 0.0
                 dy = 0.0
                 if self._left_press_qt is not None:
@@ -510,6 +525,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                     if (dx * dx + dy * dy) < REGION_DRAG_THRESHOLD_PX * REGION_DRAG_THRESHOLD_PX:
                         return
                 self._pending_empty_left_click = False
+                self._pending_shift_glyph_click = False
 
             # Check for command, if there is no command, scroll the camera
             new_command = self._dispatch_selection_event(selection_event_data, update_cursor=False)
@@ -538,7 +554,9 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     def on_mouse_release(self, event):
         self._right_pan_active = False
+        pending_shift_glyph = self._pending_shift_glyph_click
         self._pending_empty_left_click = False
+        self._pending_shift_glyph_click = False
         _, height = self._sync_camera_geometry()
         cy, cx = self.GetCorrectedMousePosition(event, height)
         self._last_mouse_position = (cy, cx)
@@ -546,6 +564,20 @@ class DefaultTransformCommand(NavigationCommandBase):
         point = self._get_space_point(point_pair)
 
         #        last_selection = self._get_last_event(InputSource.Mouse, InputEvent.Press)
+
+        if pending_shift_glyph:
+            # Release no longer reports the left button; restore it so shift-click still toggles.
+            modifiers = (
+                GetMouseModifiers(event, self._last_mouse_press_event_args)  # type: ignore[arg-type]
+                | InputModifiers.LeftMouseButton
+            )
+            press_event = self._build_selection_event(
+                source=InputSource.Mouse,
+                input_event=InputEvent.Press,
+                modifiers=modifiers,
+                position=point,
+            )
+            self._dispatch_selection_event(press_event)
 
         selection_event_data = self._build_selection_event(
             source=InputSource.Mouse,
