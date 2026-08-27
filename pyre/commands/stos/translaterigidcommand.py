@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import typing
+
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy._typing import NDArray
@@ -33,7 +35,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     _space: Space
     _translate_origin: NDArray[np.floating] | None
-    _original_points: NDArray[np.floating]
+    # Parameter snapshot, not the model. All STOS windows share one model and
+    # Translate mutates it in place, so holding a reference here made cancel a
+    # no-op that committed the gesture.
+    _original_state: dict[str, typing.Any]
 
     @property
     def transform(self) -> IRigidTransform:
@@ -77,7 +82,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         if not isinstance(self._transform_controller.TransformModel, IRigidTransform):
             raise ValueError("Transform controller must have a rigid transform model")
 
-        self._original_points = transform_controller.TransformModel
+        self._original_state = transform_controller.TransformModel.GetRigidState()
 
     def __str__(self):
         return "ManipulateRigidTransformCommand"
@@ -214,6 +219,19 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
             self.camera.lookat = lookat_from_display_position(
                 self._transform_controller, display_yx)
 
+    def _restore_original_state(self) -> None:
+        """Undo the gesture by restoring the parameters captured at construction.
+
+        Restores onto the shared model instance rather than reassigning
+        ``TransformModel``; every STOS view holds that same object, so replacing
+        it would strand them on the abandoned transform.
+        """
+        model = self._transform_controller.TransformModel
+        if not isinstance(model, IRigidTransform):
+            return
+
+        model.SetRigidState(self._original_state)
+
     def cancel(self):
         display_yx: NDArray[np.floating] | None = None
         if self._view_type() == ViewType.Composite:
@@ -222,7 +240,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                 display_yx = display_lookat_for_composite(
                     self.camera, self._transform_controller)
         self._transform_controller.end_interactive_edit()
-        self._transform_controller.TransformModel = self._original_points  # type: ignore[assignment]
+        self._restore_original_state()
         if display_yx is not None:
             self.camera.lookat = lookat_from_display_position(
                 self._transform_controller, display_yx)
