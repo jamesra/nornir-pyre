@@ -346,11 +346,16 @@ def _rigid_tile_quad_render_data(tile_bounding_rect: nornir_imageregistration.Re
 
 def _triangle_orientations(texture_points: NDArray[np.floating],
                            simplices: NDArray[np.integer]) -> NDArray[np.floating]:
-    areas = []
-    for tri in simplices:
-        p = texture_points[tri]
-        areas.append((p[1, 0] - p[0, 0]) * (p[2, 1] - p[0, 1]) - (p[2, 0] - p[0, 0]) * (p[1, 1] - p[0, 1]))
-    return np.asarray(areas, dtype=np.float64)
+    """Twice the signed area of each triangle, as a 2D cross product.
+
+    Runs on every cached-simplices rebuild, so it sits on the UI thread. The
+    arithmetic is deliberately left in the input dtype and widened only at the end,
+    matching what the per-triangle loop this replaced produced bit for bit.
+    """
+    p = texture_points[simplices]  # (triangles, 3, 2)
+    areas = ((p[:, 1, 0] - p[:, 0, 0]) * (p[:, 2, 1] - p[:, 0, 1])
+             - (p[:, 2, 0] - p[:, 0, 0]) * (p[:, 1, 1] - p[:, 0, 1]))
+    return areas.astype(np.float64)
 
 
 def _simplices_compatible_with_points(
