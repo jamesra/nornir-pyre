@@ -321,67 +321,6 @@ def _topology_still_valid(texture_points: NDArray[np.floating],
     return bool(np.all(signs == signs[0]))
 
 
-def _edge_key(i: int, j: int) -> tuple[int, int]:
-    return (i, j) if i < j else (j, i)
-
-
-def _point_in_circumcircle(p: NDArray[np.floating],
-                           a: NDArray[np.floating],
-                           b: NDArray[np.floating],
-                           c: NDArray[np.floating]) -> bool:
-    """Return True if p lies inside the circumcircle of triangle abc."""
-    ax, ay = float(a[0] - p[0]), float(a[1] - p[1])
-    bx, by = float(b[0] - p[0]), float(b[1] - p[1])
-    cx, cy = float(c[0] - p[0]), float(c[1] - p[1])
-    det = (ax * ax + ay * ay) * (bx * cy - cx * by)
-    det -= (bx * bx + by * by) * (ax * cy - cx * ay)
-    det += (cx * cx + cy * cy) * (ax * by - bx * ay)
-    orient = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-    if orient < 0:
-        det = -det
-    return det > 0
-
-
-def _repair_delaunay_by_edge_flips(texture_points: NDArray[np.floating],
-                                   simplices: NDArray[np.integer],
-                                   max_flips: int = 128) -> NDArray[np.integer] | None:
-    """Lawson edge-flip repair on a fixed point set; returns None if repair fails."""
-    if not _simplices_index_in_bounds(simplices, texture_points.shape[0]):
-        return None
-    simp = np.asarray(simplices, dtype=np.intp).copy()
-    flips = 0
-    changed = True
-    while changed and flips < max_flips:
-        changed = False
-        edge_to_tris: dict[tuple[int, int], list[int]] = {}
-        for ti, tri in enumerate(simp):
-            for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
-                edge_to_tris.setdefault(_edge_key(int(a), int(b)), []).append(ti)
-
-        for (i, j), tri_indices in edge_to_tris.items():
-            if len(tri_indices) != 2:
-                continue
-            t0, t1 = tri_indices
-            verts0 = set(int(v) for v in simp[t0])
-            verts1 = set(int(v) for v in simp[t1])
-            opp = list((verts0 ^ verts1) - {i, j})
-            if len(opp) != 2:
-                continue
-            k, l = opp
-            pi, pj, pk, pl = texture_points[i], texture_points[j], texture_points[k], texture_points[l]
-            if not (_point_in_circumcircle(pl, pi, pj, pk) or _point_in_circumcircle(pk, pi, pj, pl)):
-                continue
-            simp[t0] = np.array([k, l, i], dtype=np.intp)
-            simp[t1] = np.array([k, l, j], dtype=np.intp)
-            flips += 1
-            changed = True
-            break
-
-    if not _topology_still_valid(texture_points, simp):
-        return None
-    return simp
-
-
 def _render_data_with_cached_simplices(point_pairs: NDArray[np.floating],
                                        tile_bounding_rect: nornir_imageregistration.Rectangle,
                                        space: Space,
@@ -967,16 +906,17 @@ def build_tile_mesh_cpu(transform: nornir_imageregistration.ITransform,
                     vertarray, indices, cached_entry.cached_simplices, point_count, False,
                     transform)
             except ValueError:
-                repaired = _repair_delaunay_by_edge_flips(texture_points, cached_entry.cached_simplices)
-                if repaired is not None:
-                    try:
-                        vertarray = _render_data_with_cached_simplices(
-                            all_point_pairs, tile_bounding_rect, image_space, repaired)
-                        indices = repaired.flatten().astype(np.uint16)
-                        return _tile_mesh_cpu_entry(
-                            vertarray, indices, repaired, point_count, False, transform)
-                    except ValueError:
-                        pass
+                # The cached topology no longer fits the moved points, so fall through and
+                # retriangulate. A Lawson edge-flip repair used to be attempted here; it was
+                # removed because it lost, badly, to just retriangulating: it succeeded in 4
+                # of 60 single-control-point drags and cost up to 269 ms against ~1 ms for
+                # scipy.spatial.Delaunay on the same points. Even after correcting its two
+                # defects -- flips wrote [k,l,i]/[k,l,j], whose windings disagree, so any odd
+                # number of flips failed the orientation check, and the edge map was rebuilt
+                # from scratch after every flip -- it was still ~5x slower than Delaunay at
+                # every mesh size measured. Both branches re-upload the index buffer anyway,
+                # so preserving the cached simplices bought nothing. (#168)
+                pass
 
     tri = scipy.spatial.Delaunay(texture_points)
     simplices = tri.simplices.copy()
