@@ -1673,15 +1673,21 @@ class TransformController:
             edit_space = Space.Source
         model = self._TransformModel
         if isinstance(model, nornir_imageregistration.IRigidTransform):
+            # Pivots are float64 to match ScaleFixed below. These two sites hand the value
+            # straight to _pin_source_point_under_mutation, which casts to float32 on entry,
+            # so the dtype here is currently unobservable (0 of 200k slice-scale samples) --
+            # unlike ScaleFixed, which multiplies before that boundary and so needs float64
+            # to avoid double rounding. Keeping float64 means the caller stops capping
+            # precision if the rigid transform ever stores more than float32. (#165)
             if edit_space == Space.Source:
                 if center is not None:
-                    source_pivot = np.asarray(center, dtype=np.float32).ravel()[:2]
+                    source_pivot = np.asarray(center, dtype=np.float64).ravel()[:2]
                     model.RotateFixedAboutSourcePoint(rangle, source_pivot)  # type: ignore[attr-defined]
                 else:
                     model.RotateSourcePoints(rangle, None)  # type: ignore[attr-defined]
             else:
                 if center is not None:
-                    source_pivot = np.asarray(center, dtype=np.float32).ravel()[:2]
+                    source_pivot = np.asarray(center, dtype=np.float64).ravel()[:2]
                     model.RotateFixedAboutSourcePoint(rangle, source_pivot)  # type: ignore[attr-defined]
                 else:
                     model.RotateFixed(rangle, None)  # type: ignore[attr-defined]
@@ -1714,7 +1720,7 @@ class TransformController:
         model = self._TransformModel
         if isinstance(model, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
             if center is not None:
-                source_pivot = np.asarray(center, dtype=np.float32).ravel()[:2]
+                source_pivot = np.asarray(center, dtype=np.float64).ravel()[:2]
                 model.ScaleWarpedAboutSourcePoint(scale_factor, source_pivot)  # type: ignore[attr-defined]
             else:
                 model.ScaleWarped(scale_factor)  # type: ignore[attr-defined]
