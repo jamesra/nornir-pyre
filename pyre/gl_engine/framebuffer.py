@@ -1,7 +1,7 @@
 import OpenGL.GL as gl
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 
-from pyre.gl_engine.helpers import raise_on_error, check_for_error
+from pyre.gl_engine.helpers import raise_on_error, check_for_error, delete_gl_object_on_teardown
 
 
 class FrameBuffer:
@@ -124,8 +124,15 @@ class FrameBuffer:
         self._color_valid = False
 
     def __del__(self):
-        """Free our gl resources if we are deleted"""
-        self.free_fbo()
+        """Free our gl resources if we are deleted.
+
+        free_fbo() raises through check_for_error and assumes a live context, which is not
+        guaranteed here; route it through the teardown helper so a stale collection cannot
+        raise out of __del__.
+        """
+        if self._fbo is None and self._fbo_texture is None:
+            return
+        delete_gl_object_on_teardown(self.free_fbo, f"framebuffer {self._fbo}")
 
 
 def blit_framebuffer_color(src_fbo: int, dest_fbo: int, width: int, height: int) -> None:

@@ -1,8 +1,37 @@
 from OpenGL import GL as gl
-from typing import cast
+from typing import Callable, cast
 import numpy as np
 from numpy.typing import NDArray
+from PyQt6.QtGui import QOpenGLContext
 from nornir_imageregistration import in_debug_mode
+
+
+def gl_context_is_current() -> bool:
+    """True when some OpenGL context is current on this thread."""
+    return QOpenGLContext.currentContext() is not None
+
+
+def delete_gl_object_on_teardown(delete: Callable[[], None], description: str) -> bool:
+    """Run a ``glDelete*`` from a ``__del__`` without raising and without hiding a leak.
+
+    ``__del__`` runs at an arbitrary point, often during interpreter or widget teardown when
+    no context is current. A ``glDelete*`` issued then cannot reach the driver, so calling it
+    anyway either raises (which Python turns into "Exception ignored in __del__") or is
+    swallowed, in both cases leaving the object leaked with no record of it.
+
+    :return: True when the delete was issued, False when it was skipped or failed. A False
+        return means the GL object is leaked until its context is destroyed.
+    """
+    if not gl_context_is_current():
+        print(f"Warning: no current OpenGL context during teardown; leaked {description}")
+        return False
+
+    try:
+        delete()
+        return True
+    except Exception as e:
+        print(f"Warning: failed to delete {description} during teardown: {e}")
+        return False
 
 
 def raise_on_error(message: str | None = None, exception: Exception | None = None) -> None:

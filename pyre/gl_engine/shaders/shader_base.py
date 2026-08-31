@@ -3,7 +3,7 @@ from abc import ABC
 from OpenGL import GL as gl
 from OpenGL.GL import shaders as glshaders
 
-from pyre.gl_engine.helpers import check_for_error
+from pyre.gl_engine.helpers import check_for_error, delete_gl_object_on_teardown
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
@@ -47,7 +47,10 @@ class VertexShader:
 
     def __del__(self):
         if self._shader is not None:
-            gl.glDeleteShader(self._shader)
+            shader = self._shader
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteShader(shader), f"vertex shader {shader}")
+            self._shader = None
 
 
 class FragmentShader:
@@ -70,7 +73,10 @@ class FragmentShader:
 
     def __del__(self):
         if self._shader is not None:
-            gl.glDeleteShader(self._shader)
+            shader = self._shader
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteShader(shader), f"fragment shader {shader}")
+            self._shader = None
 
 
 class BaseShader(ABC):
@@ -123,4 +129,7 @@ class BaseShader(ABC):
 
     def __del__(self):
         if self._program is not None:
-            gl.glDeleteProgram(self._program)
+            program = self._program
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteProgram(program), f"shader program {program}")
+            self._program = None

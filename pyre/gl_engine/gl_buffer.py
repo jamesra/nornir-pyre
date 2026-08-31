@@ -4,7 +4,7 @@ from OpenGL import GL as gl
 import numpy as np
 from numpy._typing import NDArray
 
-from pyre.gl_engine.helpers import check_for_error, raise_on_error
+from pyre.gl_engine.helpers import check_for_error, delete_gl_object_on_teardown, raise_on_error
 from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
@@ -118,10 +118,10 @@ class GLBuffer(IBuffer):
 
     def __del__(self):
         if self._buffer is not None:
-            try:
-                gl.glDeleteBuffers(1, [int(self._buffer)])
-            except Exception:
-                pass
+            buffer_name = int(self._buffer)
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteBuffers(1, [buffer_name]),
+                f"vertex buffer {buffer_name}")
             self._buffer = None
 
 
@@ -220,8 +220,8 @@ class GLIndexBuffer(IIndexBuffer):
 
     def __del__(self):
         if self._buffer is not None:
-            try:
-                gl.glDeleteBuffers(1, [int(self._buffer)])
-            except Exception:
-                pass
+            buffer_name = int(self._buffer)
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteBuffers(1, [buffer_name]),
+                f"index buffer {buffer_name}")
             self._buffer = None
