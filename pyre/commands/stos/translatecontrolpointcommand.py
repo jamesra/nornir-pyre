@@ -14,10 +14,11 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
-from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.container import IContainer
 from pyre.selection_event_data import PointPair
+from pyre import common as pyre_common
 from pyre.views.gltiles import is_rigid_transform
 
 
@@ -31,6 +32,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
     _original_points: NDArray[np.floating]
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
+    _window_manager: IWindowManager = Provide[IContainer.window_manager]
 
     @inject
     def __init__(self,
@@ -155,6 +157,16 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
         # Request repaint so control point movement is visible during drag (change listeners are deferred)
         self.parent.update()
+
+        # Peers already receive OnPointMoved and refresh their buffers, but their update()
+        # stays queued while this panel holds the mouse grab, so they render stale until
+        # mouse-up. Repaint them synchronously, as the rigid drag does. Unconditional
+        # because moving a control point can rewrite either space -- MovePoint maps a
+        # source-space drag onto TargetPoints for target-only models -- so there is no
+        # space for which the peers are guaranteed unaffected. Last in the handler, after
+        # the origin and selection are consistent, since the helper pumps the event queue
+        # and a queued motion can re-enter here. (#166)
+        pyre_common.repaint_peer_stos_gl_panels(self._window_manager, exclude_gl_panel=self.parent)
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
