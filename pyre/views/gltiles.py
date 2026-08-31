@@ -97,37 +97,6 @@ def _tile_grid_points(tile_bounding_rect: nornir_imageregistration.Rectangle,
     return warped_corners
 
 
-def _tile_bounding_points(tile_bounding_rect: nornir_imageregistration.Rectangle,
-                          grid_size: tuple[int, int] = (3, 3)) -> NDArray[np.floating]:
-    """
-    :return: Returns a set of point pairs mapping the boundaries of the image tile
-    """
-
-    (y, x) = tile_bounding_rect.BottomLeft
-    h = int(tile_bounding_rect.Height)
-    w = int(tile_bounding_rect.Width)
-
-    warped_corners = [[y, x],
-                      [y, x + w, ],
-                      [y + h, x],
-                      [y + h, x + w]]
-
-    xstep = w // grid_size[1]
-    ystep = h // grid_size[0]
-
-    for ytemp in range(0, h + 1, int(ystep)):
-        warped_corners.append([ytemp + y, 0 + x])
-        warped_corners.append([ytemp + y, w + x])
-
-    for xtemp in range(1, w, int(xstep)):
-        warped_corners.append([0 + y, xtemp + x])
-        warped_corners.append([h + y, xtemp + x])
-
-    warped_corners = np.array(warped_corners, dtype=np.float32)
-
-    return warped_corners
-
-
 def _point_pairs_to_numpy_f64(point_pairs: NDArray[np.floating]) -> NDArray[np.floating]:
     """Host float64 point pairs for scipy.Delaunay / OpenGL mesh build (CuPy -> NumPy)."""
     return nornir_imageregistration.EnsureNumpyArray(point_pairs, dtype=np.float64)
@@ -159,21 +128,6 @@ def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
     ))
 
 
-def _tile_bounding_rect(transform: nornir_imageregistration.ITransform,
-                        tile_bounding_rect: nornir_imageregistration.Rectangle,
-                        forward_transform: bool = True,
-                        grid_size: tuple[int, int] = (3, 3)) -> nornir_imageregistration.Rectangle:
-    """
-    :return: Returns a bounding rectangle built from points placed around the edge of the tile
-    """
-    border_points = _tile_bounding_points(tile_bounding_rect=tile_bounding_rect,
-                                          grid_size=grid_size)
-    border_point_pairs = _find_corresponding_points(transform, border_points,
-                                                    forward_transform=forward_transform)
-    return nornir_imageregistration.spatial.Rectangle.CreateFromBounds(
-        nornir_imageregistration.spatial.BoundsArrayFromPoints(border_point_pairs[:, 0:2]))
-
-
 def _merge_point_pairs_with_transform(points_a: NDArray[np.floating],
                                       transform_points: NDArray[np.floating]) -> NDArray[np.floating]:
     """
@@ -200,35 +154,6 @@ def _merge_point_pairs_with_transform(points_a: NDArray[np.floating],
     if len(points_b) > 0:
         return points_b
     return np.array([])
-
-
-def _build_subtile_point_pairs(transform: nornir_imageregistration.ITransform,
-                               rect: nornir_imageregistration.Rectangle,
-                               forward_transform: bool = True, ) -> NDArray[np.floating]:
-    """Determine transform points for a subregion of the transform"""
-    tile_points = _tile_grid_points(rect)
-    tile_point_pairs = _find_corresponding_points(transform, tile_points,
-                                                  forward_transform=forward_transform)
-    transform_point_pairs = np.concatenate(
-        np.array(transform.GetWarpedPointsInRect(rect.ToArray())),  # type: ignore[attr-defined]
-        2).squeeze()
-    return _merge_point_pairs_with_transform(tile_point_pairs, transform_point_pairs)
-
-
-def _build_tile_point_pairs(transform: nornir_imageregistration.ITransform,
-                            rect: nornir_imageregistration.Rectangle,
-                            forward_transform: bool = True, ) -> NDArray[np.floating]:
-    """
-    Determine transform points the live within the bounding rectangle, adding points around the boundary of the bounding rectangle to the result set.
-    """
-
-    border_points = _tile_bounding_points(rect)
-    border_point_pairs = _find_corresponding_points(transform, border_points,
-                                                    forward_transform=forward_transform)
-    if isinstance(transform, nornir_imageregistration.IControlPoints):
-        return _merge_point_pairs_with_transform(border_point_pairs, transform.points)
-    else:
-        return border_point_pairs
 
 
 def _z_values_for_points_by_texture(texture_points: NDArray[np.floating]) -> NDArray[np.floating]:
