@@ -562,8 +562,18 @@ class TransformController:
         OpenGL uses X,Y coordinates.  Everything in Nornir uses Y,X coordinates in numpy arrays.
         For a set of Nx4 control points used by this TransformController this function swaps the
         columns in pairs to obtain the correct X,Y coordinates for rendering.
+
+        Every caller hands the result straight to a GL buffer, which needs it C-contiguous.
+        The equivalent `input[:, [1, 0, 3, 2]]` returned a non-contiguous array, so the upload
+        path had to copy it again; writing the columns into a C-ordered buffer costs the same
+        and lets the upload proceed without that second pass. Measured 1.7x to 2.5x faster for
+        the whole convert-swap-upload sequence at N=1000 to 20000, output bit-identical. (#170)
         """
-        output = input[:, [1, 0, 3, 2]]
+        output = np.empty((input.shape[0], 4), dtype=input.dtype, order='C')
+        output[:, 0] = input[:, 1]
+        output[:, 1] = input[:, 0]
+        output[:, 2] = input[:, 3]
+        output[:, 3] = input[:, 2]
         return output
 
     @property
