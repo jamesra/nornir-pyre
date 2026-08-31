@@ -93,8 +93,10 @@ class GLBuffer(IBuffer):
 
     def _update_buffer_data(self, data: NDArray[np.floating]):
         """Update the buffer data, should allow existing VAO's to continue to work."""
-        data = data.flatten()
-        data = np.ascontiguousarray(data)
+        # flatten() always copies, and the ascontiguousarray that followed it had nothing left
+        # to do. Ordered this way the copy only happens when the input is not already
+        # contiguous, and the reshape is then guaranteed to be a view. (#171)
+        data = np.ascontiguousarray(data).reshape(-1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, _gl_buffer_name(self.buffer))
         check_for_error()
 
@@ -195,8 +197,8 @@ class GLIndexBuffer(IIndexBuffer):
 
     def _update_buffer_data(self, data: NDArray[np.integer]):
         """Update the buffer data, should allow existing VAO's to continue to work."""
-        data = data.flatten()
-        data = np.ascontiguousarray(data)
+        # See the note in GLBuffer._update_buffer_data. (#171)
+        data = np.ascontiguousarray(data).reshape(-1)
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, _gl_buffer_name(self.buffer))
         check_for_error()
 
