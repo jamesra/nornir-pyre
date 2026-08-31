@@ -288,25 +288,34 @@ class ContextAwareVAOHelper(ABC):
         This method should be called when the VAO is no longer needed.
         It deletes all VAOs and associated buffers for all contexts.
 
-        Note: This must be called with a valid OpenGL context current.
+        Only the VAO belonging to the currently current context can be deleted. Entries for
+        other live contexts are retained so a later call under those contexts can still
+        release them; clearing them unconditionally leaked the VAO names for the life of
+        the process. Entries for destroyed contexts are dropped without a delete because
+        GL objects die with their context.
         """
-        # Delete all VAOs for all contexts
-        for context, vao_id in list(self._context_vaos.items()):
-            # Only delete if the context is still valid
-            if context and context.isValid():
-                # We can only delete resources when their context is current
-                current_context = QOpenGLContext.currentContext()
-                if current_context == context:
-                    try:
-                        gl.glDeleteVertexArrays(1, [vao_id])
-                        check_for_error(f"after glDeleteVertexArrays for context {context}")
-                    except Exception as e:
-                        print(f"Warning: Error deleting VAO for context {context}: {e}")
+        current_context = QOpenGLContext.currentContext()
+        retained: Dict[QOpenGLContext, int] = {}
 
-        self._context_vaos.clear()
+        for context, vao_id in list(self._context_vaos.items()):
+            if not context or not context.isValid():
+                continue  # Destroyed with its context; nothing left to delete.
+
+            if current_context != context:
+                retained[context] = vao_id
+                continue
+
+            try:
+                gl.glDeleteVertexArrays(1, [vao_id])
+                check_for_error(f"after glDeleteVertexArrays for context {context}")
+            except Exception as e:
+                print(f"Warning: Error deleting VAO for context {context}: {e}")
+                retained[context] = vao_id
+
+        self._context_vaos = retained
 
         # Delete index buffer if we own it
-        if self._index_buffer_id is not None:
+        if self._index_buffer_id is not None and current_context is not None:
             try:
                 gl.glDeleteBuffers(1, [self._index_buffer_id])
                 check_for_error("after glDeleteBuffers for index buffer")
@@ -319,7 +328,9 @@ class ContextAwareVAOHelper(ABC):
         Clean up OpenGL resources when the object is deleted.
 
         This destructor attempts to clean up VAOs, but may not be able to
-        delete resources if the appropriate context is not current.
+        delete resources if the appropriate context is not current. It runs under whatever
+        context happens to be current at collection time, so cleanup() must never delete a
+        name belonging to a different context -- it only deletes under a matching context.
         """
         # Try to clean up, but don't raise exceptions in __del__
         try:
