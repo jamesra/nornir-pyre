@@ -50,11 +50,18 @@ def composite_legend_rich_text() -> str:
     )
 
 
-def _as_numpy_f64(values: NDArray[np.floating] | object) -> NDArray[np.floating]:
-    """Convert transform output to host float64 for Camera and Qt paths."""
+def _as_numpy_f64(values: NDArray[np.floating] | object, *,
+                  copy: bool = False) -> NDArray[np.floating]:
+    """Convert transform output to host float64 for Camera and Qt paths.
+
+    Pass ``copy=True`` when the caller mutates the result. The conversion alone returns a
+    view when *values* is already host float64, so mutating it would reach through into
+    live transform storage.
+    """
     if hasattr(values, "get"):
         values = values.get()  # type: ignore[union-attr]
-    return np.asarray(values, dtype=np.float64)
+    # copy=None is NumPy 2's copy-only-if-needed; copy=False would raise when one is needed.
+    return np.array(values, dtype=np.float64, copy=copy or None)
 
 
 def apply_rigid_yx(matrix: NDArray[np.floating], point_yx: NDArray[np.floating]) -> NDArray[np.floating]:
@@ -411,7 +418,10 @@ def composite_control_point_draw_rows(
         return None
     if space != Space.Source:
         return None
-    rows = _as_numpy_f64(transform_controller.points).copy()
+    # points is a live view into the transform, so the result must not alias it. Converting and
+    # copying in one pass replaces `_as_numpy_f64(...).copy()`, which made a second full Nx4 pass
+    # whenever the model dtype was not already float64 -- it is float32 today. (#169)
+    rows = _as_numpy_f64(transform_controller.points, copy=True)
     # Interpolators pass through control points: display position is TargetPoints.
     rows[:, 2:4] = rows[:, 0:2]
     return rows
