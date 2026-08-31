@@ -127,7 +127,12 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
         self._transform_controller.Translate(delta, space=self.space)
 
-        # Update the last position with the new mouse position
+        # Re-derive the origin *after* the mutation rather than reusing world_point. On
+        # composite the drag quantity is target-display space, which Translate just moved
+        # under a stationary cursor, so the next delta must be measured from the new frame;
+        # reusing world_point double-counts each step (measured 2.3x overshoot). On the
+        # standalone panels the drag quantity is the raw camera position, so this is a no-op
+        # and both forms track 1:1. Keep it: dropping it only breaks composite. (#158)
         point_pair = self.get_world_positions(event)
         self._translate_origin = self._world_point_for_translate(point_pair)
 
