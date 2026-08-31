@@ -66,6 +66,23 @@ class ImageTransformView(IImageTransformView):
 
     _gl_funcs: QOpenGLFunctions
     _repaint_callback: Callable[[], None] | None = None
+    # A continuation came due while no callback was wired, so the budgeted mesh is
+    # unfinished with nothing scheduled to resume it. Cleared by wiring a callback.
+    _lazy_mesh_continuation_dropped: bool = False
+
+    @property
+    def repaint_callback(self) -> Callable[[], None] | None:
+        """Function that asks this view's panel for another frame."""
+        return self._repaint_callback
+
+    @repaint_callback.setter
+    def repaint_callback(self, value: Callable[[], None] | None) -> None:
+        self._repaint_callback = value
+        if value is not None and self._lazy_mesh_continuation_dropped:
+            # Resume a chain that broke before wiring; without this the remaining tiles
+            # wait for an unrelated repaint, which is how a composite FBO renders empty.
+            self._lazy_mesh_continuation_dropped = False
+            self._schedule_lazy_mesh_repaint()
 
     @property
     def gl(self) -> QOpenGLFunctions:
@@ -289,8 +306,13 @@ class ImageTransformView(IImageTransformView):
 
     def _request_lazy_mesh_repaint(self) -> None:
         self._lazy_mesh_pending_repaint = False
-        if self._repaint_callback is not None:
-            self._repaint_callback()
+        if self._repaint_callback is None:
+            # Dropping this silently ends the continuation chain: the pending flag is
+            # already cleared, so nothing reschedules and the remaining tiles never build.
+            # Record it so wiring a callback resumes the build. (#167)
+            self._lazy_mesh_continuation_dropped = True
+            return
+        self._repaint_callback()
 
     def update_visible_tile_meshes(
             self,

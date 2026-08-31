@@ -117,6 +117,24 @@ class CompositeTransformView(IImageTransformView):
         return None if self._source_image_view is None else self._source_image_view.height
 
     @property
+    def repaint_callback(self) -> Callable[[], None] | None:
+        """Function that asks the owning panel for another frame.
+
+        Assigning fans the value out to the sub-views. They are created with whatever
+        value is current, which is None when the constructor builds them from
+        already-registered viewmodels, so without this the source and target FBOs keep a
+        None callback and silently drop their budgeted-mesh continuations. (#167)
+        """
+        return self._repaint_callback
+
+    @repaint_callback.setter
+    def repaint_callback(self, value: Callable[[], None] | None) -> None:
+        self._repaint_callback = value
+        for sub_view in (self._source_image_view, self._target_image_view):
+            if sub_view is not None:
+                sub_view.repaint_callback = value
+
+    @property
     def transform(self) -> nornir_imageregistration.ITransform:
         return self._transform_controller.TransformModel
 
@@ -238,7 +256,7 @@ class CompositeTransformView(IImageTransformView):
             # Only the source FBO needs a deformable mesh; target stays native quads.
             warp_into_target_display=(space_mapping == Space.Source),
         )
-        view._repaint_callback = self._repaint_callback
+        view.repaint_callback = self._repaint_callback
 
         if space_mapping == Space.Source:
             self._source_image_view = view

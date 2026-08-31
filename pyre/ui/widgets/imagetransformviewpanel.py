@@ -649,13 +649,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def _wire_tile_mesh_repaint(self, view: object) -> None:
         """Connect lazy mesh continuation callbacks to this panel's repaint."""
         repaint = self._request_image_repaint
-        if hasattr(view, '_repaint_callback'):
-            view._repaint_callback = repaint  # type: ignore[attr-defined]
-        if isinstance(view, CompositeTransformView):
-            view._repaint_callback = repaint
-            for sub_view in (view._source_image_view, view._target_image_view):
-                if sub_view is not None:
-                    sub_view._repaint_callback = repaint
+        # CompositeTransformView fans the assignment out to its sub-views itself, so this
+        # no longer reaches into their private attributes to repair a stale capture. (#167)
+        if hasattr(view, 'repaint_callback'):
+            view.repaint_callback = repaint  # type: ignore[attr-defined]
 
     def _update_visible_tile_meshes(self) -> None:
         """Prefetch tile meshes for the current camera viewport."""
