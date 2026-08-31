@@ -211,6 +211,25 @@ class TransformControllerView:
         if self._selection_mask is not None:
             self._apply_selection_texture(0)
 
+    @staticmethod
+    def _control_point_buffer_is_current(buf_points: NDArray[np.floating] | None,
+                                         tc_points: NDArray[np.floating]) -> bool:
+        """True when the GL control-point buffer already holds *tc_points*.
+
+        The buffer stores XY-swapped rows (see `PointView.points`) while the controller
+        reports YX. `swap_columns_to_XY` is its own inverse, so applying it to the buffer
+        brings both sides into YX. Comparing the two spaces directly, as this check used to,
+        agreed only when every point had y == x, so an unchanged transform still re-uploaded
+        the entire control-point buffer. (#160)
+        """
+        if buf_points is None or buf_points.ndim != 2 or buf_points.shape[1] != 4:
+            return False
+        # Length is checked before allclose: the buffer may be a stale empty.
+        if buf_points.shape[0] != tc_points.shape[0]:
+            return False
+        buf_yx = TransformController.swap_columns_to_XY(buf_points)
+        return bool(np.allclose(buf_yx, tc_points))
+
     def _OnTransformChange(self, controller: TransformController | None = None, *args, **kwargs):
         if self._controlpoint_view is None:
             return
@@ -220,11 +239,13 @@ class TransformControllerView:
 
         tc_points = self._transform_controller.points  # type: ignore[union-attr]
         buf_points = self._controlpoint_view.points
-        # Skip allclose when lengths differ (avoids shape-mismatch; buffer may be stale empty)
-        if buf_points.shape[0] == tc_points.shape[0] and np.allclose(buf_points, tc_points):
-            return
 
         reset_selection = len(self._controlpoint_view.texture_index) != self._controlpoint_view.points.shape[0]
+
+        # Uploading is what re-aligns the texture buffer with the point count, so a pending
+        # reset must not be skipped even when the positions themselves are unchanged.
+        if not reset_selection and self._control_point_buffer_is_current(buf_points, tc_points):
+            return
 
         self._controlpoint_view.points = self._transform_controller.points  # type: ignore[union-attr]
 
