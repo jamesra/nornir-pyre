@@ -3,17 +3,29 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy.typing import NDArray
-import wx
-
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
+from PyQt6.QtCore import Qt, QTimer
 import nornir_imageregistration
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback, ICommand
+from pyre.interfaces import StatusChangeCallback, ICommand
 from pyre.commands import NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
+
+
+def _to_host_scalar(v):
+    if nornir_imageregistration.HasCupy():
+        try:
+            import cupy as cp
+            if isinstance(v, cp.ndarray):
+                return float(v.item())
+        except Exception:
+            pass
+    return float(v)
 
 
 class CreateControlPointCommand(NavigationCommandBase):
@@ -29,14 +41,14 @@ class CreateControlPointCommand(NavigationCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: pyre.ui.Camera,
                  bounds: nornir_imageregistration.Rectangle,
                  space: Space,  # Space we are moving the points in, source or target side
                  commandqueue: ICommandQueue,
                  selected_points: ObservableSet[int],  # The indices of the selected points
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  **kwargs):
         """
 
@@ -54,7 +66,7 @@ class CreateControlPointCommand(NavigationCommandBase):
                          bounds=bounds,
                          space=space,
                          commandqueue=commandqueue,
-                         completed_func=completed_func)
+                         completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
         self._selected_points = selected_points
@@ -63,29 +75,29 @@ class CreateControlPointCommand(NavigationCommandBase):
         self._original_points = transform_controller.points
 
     def on_activate(self):
-        wx.CallAfter(self.queue_translate_command)
+        QTimer.singleShot(0, self.queue_translate_command)
 
     def __str__(self):
         return "CreateControlPointCommand"
 
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
-        self._left_mouse_down = event.LeftIsDown()
+        self._left_mouse_down = bool(event.buttons() & Qt.MouseButton.LeftButton)
         super().on_mouse_press(event)
 
-    def on_mouse_release(self, event: wx.MouseEvent):
+    def on_mouse_release(self, event: QMouseEvent):
         """Called when the mouse is released"""
-        self._left_mouse_down = event.LeftIsDown()
+        self._left_mouse_down = bool(event.buttons() & Qt.MouseButton.LeftButton)
         super().on_mouse_release(event)
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse is dragged"""
         super().on_mouse_motion(event)
 
-    def on_key_down(self, event: wx.KeyEvent):
+    def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
-        keycode = event.GetKeyCode()
-        if keycode == wx.WXK_SPACE:
+        keycode = event.key()
+        if keycode == Qt.Key.Key_Escape:
             self.cancel()
             # self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         else:
@@ -93,11 +105,11 @@ class CreateControlPointCommand(NavigationCommandBase):
 
         return
 
-    def on_mouse_scroll(self, event: wx.MouseEvent):
+    def on_mouse_scroll(self, event: QWheelEvent):
         """Called when the mouse wheel is scrolled"""
         super().on_mouse_scroll(event)
 
-    def on_key_up(self, event: wx.KeyEvent):
+    def on_key_up(self, event: QKeyEvent):
         """Called when a key is released"""
         super().on_key_up(event)
 
@@ -112,8 +124,13 @@ class CreateControlPointCommand(NavigationCommandBase):
 
         point = self._new_point_position
         # point = self._new_point_position.source if self.space == Space.Source else self._new_point_position.target
-        newpoint = np.array([point.target[0], point.target[1], point.source[0], point.source[1]], dtype=np.float32)
-        index = self._transform_controller.TransformModel.AddPoint(newpoint)
+        newpoint = np.array([
+            _to_host_scalar(point.target[0]),
+            _to_host_scalar(point.target[1]),
+            _to_host_scalar(point.source[0]),
+            _to_host_scalar(point.source[1]),
+        ], dtype=np.float32)
+        index = self._transform_controller.TransformModel.AddPoint(newpoint)  # type: ignore[union-attr]
 
         # Ensure only the new point is selected
         self._selected_points.clear()
@@ -122,7 +139,7 @@ class CreateControlPointCommand(NavigationCommandBase):
         # Queue up a translate command to move the point to the new position if the LMB is still down
         # TODO: Check if shift is held down, and run auto-align if it is
         if self._left_mouse_down:
-            translate_command = pyre.commands.stos.TranslateControlPointCommand(parent=self.parent,
+            translate_command = pyre.commands.stos.TranslateControlPointCommand(parent=self.parent,  # type: ignore[attr-defined]
                                                                                 transform_controller=self._transform_controller,
                                                                                 camera=self.camera,
                                                                                 bounds=self._bounds,

@@ -8,11 +8,13 @@ import nornir_imageregistration
 import nornir_imageregistration.spatial
 import pyre.state as state
 
-try:
-    import wx
-except:
-    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal
+from PyQt6.QtGui import QWheelEvent, QMouseEvent, QKeyEvent
 
+from dependency_injector.wiring import Provide, inject
+from pyre.container import IContainer
+from pyre.controllers.transformcontroller import TransformController
 from pyre.ui.widgets import imagetransformpanelbase
 import nornir_imageregistration.transforms.utils as utils
 import OpenGL.GL as gl
@@ -50,95 +52,138 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def Command(self, value):
         self._command = value
 
-    def __init__(self, parent, window_id=-1, imageTransformViewList=None, **kwargs):
+    @inject
+    def __init__(self,
+                 parent,
+                 imageTransformViewList=None,
+                 transform_controller: TransformController = Provide[IContainer.transform_controller],
+                 **kwargs):
         '''
         Constructor
         '''
         if imageTransformViewList is None:
             imageTransformViewList = []
 
-        super(MosaicTransformPanel, self).__init__(parent, window_id, **kwargs)
+        super(MosaicTransformPanel, self).__init__(parent, transform_controller=transform_controller, **kwargs)
 
-        state.currentMosaicConfig.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
+        mosaic_config = state.get_current_mosaic_config()
+        if mosaic_config is not None:
+            mosaic_config.AddOnMosaicChangeEventListener(self.OnMosaicChanged)
         self._imageTransformViewList = imageTransformViewList
 
         self.LastMousePosition = None
 
         self._bind_mouse_events()
 
-        self.AddStatusBar()
+        self.addStatusBar()
 
         self.Command = None
 
+    def on_mouse_enter(self, event):
+        """Keep focus on the mosaic panel so WASD / Page Up–Down reach keyPressEvent."""
+        self.setFocus()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if self.camera is None:
+            super().keyPressEvent(event)
+            return
+        keycode = event.key()
+        symbol = ''
+        if 32 <= int(keycode) <= 126:
+            symbol = chr(int(keycode)).lower()
+        handled = False
+        if symbol == 'a':
+            self.camera.translate((0.0, -0.05 * self.camera.visible_world_width))  # type: ignore[union-attr]
+            handled = True
+        elif symbol == 'd':
+            self.camera.translate((0.0, 0.05 * self.camera.visible_world_width))  # type: ignore[union-attr]
+            handled = True
+        elif symbol == 'w':
+            self.camera.translate((0.05 * self.camera.visible_world_height, 0))  # type: ignore[union-attr]
+            handled = True
+        elif symbol == 's':
+            self.camera.translate((-0.05 * self.camera.visible_world_height, 0))  # type: ignore[union-attr]
+            handled = True
+        elif keycode == Qt.Key.Key_PageUp:
+            self.camera.scale *= 0.9  # type: ignore[union-attr]
+            handled = True
+        elif keycode == Qt.Key.Key_PageDown:
+            self.camera.scale *= 1.1  # type: ignore[union-attr]
+            handled = True
+        if handled:
+            self.statusBar.update_status_bar(self.LastMousePosition)  # type: ignore[union-attr]
+            self.glcanvas.update()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def OnMosaicChanged(self):
-        self.ImageTransformViewList = state.currentMosaicConfig.ImageTransformViewList
+        mosaic_config = state.get_current_mosaic_config()
+        if mosaic_config is not None:
+            self.ImageTransformViewList = mosaic_config.ImageTransformViewList
         self.center_camera()
 
     def _bind_mouse_events(self):
-        self.glcanvas.Bind(wx.EVT_MOUSEWHEEL, self.on_mouse_scroll)
-        self.glcanvas.Bind(wx.EVT_MOTION, self.on_mouse_drag)
-        self.glcanvas.Bind(wx.EVT_LEFT_DOWN, self.on_mouse_press)
-        self.glcanvas.Bind(wx.EVT_MIDDLE_DOWN, self.on_mouse_press)
-        self.glcanvas.Bind(wx.EVT_RIGHT_DOWN, self.on_mouse_press)
+        # Connect mouse events to the glcanvas
+        self.glcanvas.wheelEvent = self.on_mouse_scroll  # type: ignore[method-assign]
+        self.glcanvas.mouseMoveEvent = self.on_mouse_drag  # type: ignore[method-assign]
+        self.glcanvas.mousePressEvent = self.on_mouse_press  # type: ignore[method-assign]
 
-    def AddStatusBar(self):
-        self.statusBar = pyre.ui.widgets.camerastatusbar.CameraStatusBar(self,
+    def addStatusBar(self):
+        self.statusBar = pyre.ui.widgets.camerastatusbar.CameraStatusBar(self,  # type: ignore[attr-defined]
                                                                          self.camera,
                                                                          self.glcanvas)
-        self.sizer.Add(self.statusBar, flag=wx.BOTTOM | wx.EXPAND)
+        self._layout.addWidget(self.statusBar)  # type: ignore[union-attr]
 
     def center_camera(self):
         '''Center the camera at whatever interesting thing this class displays
         '''
-
         transforms = _get_transforms(self.ImageTransformViewList)
         bbox = utils.FixedBoundingBox(transforms)
-        bbox_rect = nornir_imageregistration.spatial.Rectangle.CreateFromBounds(bbox)
-        self.camera.lookat = bbox_rect.Center
-        self.camera.scale = bbox_rect.Width
+        bbox_rect = nornir_imageregistration.spatial.Rectangle.CreateFromBounds(bbox)  # type: ignore[arg-type]
+        self.camera.lookat = bbox_rect.Center  # type: ignore[union-attr]
+        self.camera.scale = bbox_rect.Width  # type: ignore[union-attr]
 
-    def draw_objects(self):
+    def draw(self):
+        self.camera.focus(self.width(), self.height())  # type: ignore[union-attr]
 
-        self.camera.focus(self.width, self.height)
+        pointScale = self.camera.scale / self.height()  # type: ignore[union-attr]
 
-        pointScale = self.camera.scale / self.height
+        pyre.views.SetDrawMosaicState()  # type: ignore[call-arg]
 
-        pyre.views.SetDrawMosaicState()
-
-        bounding_box = self.camera.VisibleImageBoundingBox
+        bounding_box = self.camera.VisibleImageBoundingBox  # type: ignore[union-attr]
 
         for itv in self.ImageTransformViewList:
             itv.draw(ShowWarped=True, bounding_box=bounding_box, glFunc=gl.GL_FUNC_ADD)
 
-        pyre.views.ClearDrawTextureState()
+        pyre.views.ClearDrawTextureState()  # type: ignore[call-arg]
 
         for itv in self.ImageTransformViewList:
-            itv.draw_points(SelectedIndex=None, BoundingBox=self.camera.VisibleImageBoundingBox, FixedSpace=True,
+            itv.draw_points(SelectedIndex=None, BoundingBox=self.camera.VisibleImageBoundingBox, FixedSpace=True,  # type: ignore[union-attr]
                             ScaleFactor=pointScale)
 
-        if not self.Command is None:
+        if self.Command is not None:
             self.Command.draw()
 
-    def on_mouse_press(self, e):
-        (y, x) = self.GetCorrectedMousePosition(e)
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
+    def on_mouse_press(self, event: QMouseEvent):
+        (y, x) = self.getCorrectedMousePosition(event)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
 
         if ImageX is None or ImageY is None:
             return
 
-        if e.LeftIsDown():
-            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.canvas, self.on_rectange_command_completed,
-                                                                      self.camera, (ImageY, ImageX), )
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.Command = pyre.ui.rectangle_command.RectangleCommand(self.glcanvas, self.on_rectangle_command_completed,  # type: ignore[attr-defined]
+                                                                      self.camera, (ImageY, ImageX))
 
-        if e.MiddleIsDown():
+        if event.button() == Qt.MouseButton.MiddleButton:
             self.center_camera()
 
-    def on_mouse_drag(self, e):
+    def on_mouse_drag(self, event: QMouseEvent):
+        (y, x) = self.getCorrectedMousePosition(event)
 
-        (y, x) = self.GetCorrectedMousePosition(e)
-
-        if e.LeftIsDown() and not self.Command is None:
-            self.Command.on_mouse_drag(e)
+        if event.buttons() & Qt.MouseButton.LeftButton and self.Command is not None:
+            self.Command.on_mouse_motion(event)
 
         if self.LastMousePosition is None:
             self.LastMousePosition = (y, x)
@@ -149,46 +194,50 @@ class MosaicTransformPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
         self.LastMousePosition = (y, x)
 
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
         if ImageX is None:
             return
 
-        ImageDX = (float(dx) / self.width) * self.camera.visible_world_width
-        ImageDY = (float(dy) / self.height) * self.camera.visible_world_height
+        ImageDX = (float(dx) / self.width()) * self.camera.visible_world_width  # type: ignore[union-attr]
+        ImageDY = (float(dy) / self.height()) * self.camera.visible_world_height  # type: ignore[union-attr]
 
-        if e.RightIsDown():
-            self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
+        if event.buttons() & Qt.MouseButton.RightButton:
+            self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)  # type: ignore[union-attr]
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 
-        self.canvas.Refresh()
+        self.glcanvas.update()
 
-    def on_mouse_scroll(self, e):
-
+    def on_mouse_scroll(self, event: QWheelEvent):
         if self.camera is None:
             return
 
-        scroll_y = e.GetWheelRotation() / 120.0
+        # QT wheel events use delta/120 to get the number of steps
+        scroll_y = event.angleDelta().y() / 120.0
 
-        # We rotate when command is down
-        if e.CmdDown():
-            angle = float(abs(scroll_y) / 4.0) ** 2.0
-
-            if angle > 15.0:
-                angle = 15.0
-
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            angle = float(abs(scroll_y) * 2) ** 2.0
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                angle = float(abs(scroll_y) / 2) ** 2.0
             rangle = (angle / 180.0) * 3.14159
             if scroll_y < 0:
                 rangle = -rangle
-
+            try:
+                height = self.glcanvas.height()
+                width = self.glcanvas.width()
+                center_y, center_x = height / 2.0, width / 2.0
+                world_center = self.camera.ImageCoordsForMouse(center_y, center_x)  # type: ignore[union-attr]
+                self.transform_controller.Rotate(rangle, world_center)
+            except NotImplementedError:
+                pass
         else:
             zdelta = (1 + (-scroll_y / 20.0))
-            self.camera.scale *= zdelta
+            self.camera.scale *= zdelta  # type: ignore[union-attr]
 
         self.statusBar.update_status_bar(self.LastMousePosition)
 
-        self.canvas.Refresh()
+        self.glcanvas.update()
 
-    def on_rectange_command_completed(self, RectangleCommand):
+    def on_rectangle_command_completed(self, RectangleCommand):
         self.Command = None
         return

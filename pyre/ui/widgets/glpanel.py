@@ -1,24 +1,22 @@
 #!/usr/bin/python
 
-# import OpenGL as gl
-
 from typing import Callable
 
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
 
 import OpenGL.GL as gl
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+from PyQt6.QtCore import Qt, QSize, QPoint, QTimer
+from PyQt6.QtGui import QResizeEvent, QPaintEvent
+from PyQt6.QtGui import QSurfaceFormat, QOpenGLContext
 
 from pyre.interfaces.managers.gl_context_manager import IGLContextManager
 from pyre.container import IContainer
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
 
-from nornir_imageregistration import in_debug_mode
-
-try:
-    import wx
-    import wx.glcanvas
-
-except:
-    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
+import nornir_imageregistration
 
 
 def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
@@ -26,218 +24,264 @@ def cb_dbg_msg(source, msg_type, msg_id, severity, length, raw, user):
     print(f'debug: {source}, {msg_type}, {msg_id}, {severity}, {msg}')
 
 
-# DEBUG_CALLBACK_TYPE = gl.GLDEBUGPROC(None, c_uint, c_uint, c_uint, c_uint, c_size_t, POINTER(c_char), c_void_p)
-
 # Create a ctypes callback instance
 debug_callback_func = gl.GLDEBUGPROC(cb_dbg_msg)
 
 
-class GLPanel(wx.glcanvas.GLCanvas):
-    """A wxPython panel that contains an OpenGL canvas. and a BoxSizer"""
+class GLPanel(QOpenGLWidget):
+    """A QT widget that contains an OpenGL canvas."""
+    # Add this as a class variable to store the shared context
+    SharedContext: QOpenGLContext | None = None
 
     _glinitialized: bool = False
-    # canvas: wx.glcanvas.GLCanvas
-    sizer = wx.BoxSizer
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
-
-    SharedGLContext = None  # type: wx.glcanvas.GLContext
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
+    _gl_funcs: QOpenGLFunctions | None = None
 
-    @inject
-    def __init__(self,
-                 parent: wx.Window,
-                 draw_method: Callable[[], None],
-                 window_id: int = wx.ID_ANY,
-                 pos: wx.Point = wx.DefaultPosition,
-                 size: wx.Size = wx.DefaultSize,
-                 style=0,
-                 **kwargs):
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """Get the OpenGL functions for this context"""
+        if not self._glinitialized:
+            raise RuntimeError("OpenGL functions not initialized")
+        return self._gl_funcs  # type: ignore[return-value]
+
+    @classmethod
+    def initialize_shared_context(cls):
+        if cls.SharedContext is None:
+            # Create shared context
+            cls.SharedContext = QOpenGLContext()
+            cls.SharedContext.setFormat(QSurfaceFormat.defaultFormat())
+            cls.SharedContext.create()
+
+        return cls.SharedContext
+
+    def __init__(self, parent, draw_method, pos=QPoint(), size=QSize(), **kwargs):
+        # Initialize shared context if not already done
         self._draw_method = draw_method
-        # Forcing a no full repaint to stop flickering
-        style = style | wx.NO_FULL_REPAINT_ON_RESIZE | wx.WANTS_CHARS
-        # call super function
-        disp_attrs = wx.glcanvas.GLAttributes()
-        disp_attrs.PlatformDefaults().DoubleBuffer().RGBA().Depth(16).EndList()
-        super(GLPanel, self).__init__(parent=parent, dispAttrs=disp_attrs,
-                                      id=window_id, pos=pos, size=size,
-                                      style=style, **kwargs)
+        super(GLPanel, self).__init__(parent=parent, **kwargs)
+        self.__class__.initialize_shared_context()
 
-        # init gl canvas data
-        # Create context
-        # self.canvas = wx.glcanvas.GLCanvas(self, disp_attrs, -1)
+        # Set format
+        self.setFormat(QSurfaceFormat.defaultFormat())
 
-        context_attrs = wx.glcanvas.GLContextAttrs()
-
-        if in_debug_mode():
-            context_attrs.PlatformDefaults().CoreProfile().OGLVersion(4, 5).ForwardCompatible().DebugCtx().EndList()
-
-        context = wx.glcanvas.GLContext(self, GLPanel.SharedGLContext, context_attrs)
-        add_listener = False
-        if GLPanel.SharedGLContext is None:
-            # Install our debug message callback
-            GLPanel.SharedGLContext = context
-            add_listener = True
-
-        self.context = context
-        self.SetCurrent(self.context)
-
-        if add_listener:
-            gl.glDebugMessageCallback(debug_callback_func, None)
-
-            if in_debug_mode():
-                gl.glEnable(gl.GL_DEBUG_OUTPUT)
-
-        #    GLPanel.pygletcontext = gl.Context(gl.current_context)
-
-        # GLPanel.wxcontext = self.canvas.GetContext()
-        # else:
-        # self.canvas = wx.glcanvas.GLCanvasWithContext(self, shared=GLPanel.wxcontext, attribList=attribList)
-
-        # Create the canvas
-
-        # self.sizer = wx.BoxSizer(wx.VERTICAL)
+        # # Create context that shares with SharedContext
+        # context = QOpenGLContext(self)
+        # context.setFormat(self.format())
+        # context.setShareContext(GLPanel.SharedContext)
+        # context.create()
         #
-        # self.sizer.Add(self.canvas, 1, wx.EXPAND)
-        # self.SetSizer(self.sizer)
-        # self.sizer.Fit(self)
-        # self.Layout()
+        # # Set this context for the widget
+        # self.setContext(context)
 
-        # bind events
-        self.Bind(wx.EVT_ERASE_BACKGROUND, self.processEraseBackgroundEvent)
-        self.Bind(wx.EVT_SIZE, self.processSizeEvent)
-        self.Bind(wx.EVT_SIZING, self.processSizeEvent)
-        self.Bind(wx.EVT_PAINT, self.processPaintEvent)
+        # Rest of your initialization code...
 
-        # self.Bind(wx.EVT_SIZE, self.processSizeEvent)
+        # Set focus policy to accept keyboard input
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        # Send an event that a context was created.
-        wx.CallAfter(self.OnInitGL)
-        # self.Bind(wx_EVT_GL_CONTEXT_CREATED, self.OnInitGL)
+        # Set position and size if provided
+        if pos != QPoint():
+            self.move(pos)
+        if size != QSize():
+            self.resize(size)
 
-        # context_created_event = wxGLContextCreatedEvent(context=context)
-        # wx.PostEvent(self, context_created_event)
+    #
+    # def setContext(self, context):
+    #     """Set the OpenGL context for this widget"""
+    #     self.context = context
+    #
+    #     # If the widget is already initialized, make sure to makeCurrent() with the new context
+    #     if self.isValid():
+    #         self.makeCurrent()
 
-    # ==========================================================================
-    # Canvas Proxy Methods
-    # ==========================================================================
     def GetGLExtents(self):
         """Get the extents of the OpenGL canvas."""
-        return self.GetClientSize()
+        return self.size()
 
-    # def SwapBuffers(self):
-    #    """Swap the OpenGL buffers."""
-    #    self.canvas.SwapBuffers()
-
-    # ==========================================================================
-    # wxPython Window Handlers
-    # ==========================================================================
-    def processEraseBackgroundEvent(self, event):
-        """Process the erase background event."""
-        pass  # Do nothing, to avoid flashing on MSWin
-
-    def processSizeEvent(self, event):
-        """Process the resize event."""
-        # Make sure the frame is shown before calling SetCurrent.
-        self.Show()
-        self.SetCurrent(self.context)
-        size = self.GetGLExtents()
-        self.width, self.height = size.width, size.height
-        self.OnReshape(size.width, size.height)
-        self.Refresh(False)
-
-        event.Skip()
-
-    def processPaintEvent(self, event):
-        """Process the drawing event."""
-        # self.canvas.SetCurrent(GLPanel.SharedGLContext)
-        self.OnDraw()
-        event.Skip()
-
-    def Destroy(self):
-        # call the super method
-        super(GLPanel, self).Destroy()
-
-    # def OnContextCreated(self, event):
-    #     """Called when our custom wx_EVT_GL_CONTEXT_CREATED event is received"""
-    #     self.OnInitGL()
-    #     event.Skip()
-
-    # ==========================================================================
-    # GLFrame OpenGL Event Handlers
-    # ==========================================================================
-    def OnInitGL(self):
+    def initializeGL(self):
         """
-        Initialize OpenGL for use in the window.  This is invoked by the
-        wx.EVT_GL_CONTEXT_CREATED event.  This call notifies the GLContextManager
-        after it has completed its own initialization.
+        Initialize OpenGL for use in the window.
+        This is called automatically by QOpenGLWidget when the widget is first shown.
+        All OpenGL initialization should happen here to avoid race conditions.
         """
         if self._glinitialized:
             return
 
-        #         GLPanel.pygletcontext = gl.Context(gl.current_context)
-        #         GLPanel.pygletcontext.canvas = self
-        #
-        #         GLPanel.pygletcontext.set_current()
+        # In debug mode, validate that we have a valid OpenGL context
+        if nornir_imageregistration.in_debug_mode():
+            context = self.context()
+            if context is None:
+                raise RuntimeError("initializeGL called but context() is None")
+            
+            if not context.isValid():
+                raise RuntimeError("initializeGL called but context is not valid")
+            
+            # QOpenGLWidget should already have made the context current when initializeGL is called
+            # Check if it's already current first
+            current_context = QOpenGLContext.currentContext()
+            if current_context != context:
+                # Try to make it current if it's not
+                if not self.makeCurrent():
+                    raise RuntimeError(
+                        f"initializeGL: Failed to make context current. "
+                        f"Widget visible: {self.isVisible()}, "
+                        f"Context valid: {context.isValid()}, "
+                        f"Current context: {current_context}"
+                    )
+                # Verify it's now current
+                current_context = QOpenGLContext.currentContext()
+                if current_context != context:
+                    raise RuntimeError(
+                        f"initializeGL: Context mismatch after makeCurrent(). "
+                        f"Expected {context}, got {current_context}"
+                    )
+            
+            # Verify we can query OpenGL state (basic validation)
+            try:
+                # Try a simple OpenGL query to ensure the context is functional
+                version = gl.glGetString(gl.GL_VERSION)
+                if version is None:
+                    raise RuntimeError("initializeGL: Failed to query OpenGL version - context may not be functional")
+            except Exception as e:
+                raise RuntimeError(f"initializeGL: OpenGL context validation failed: {e}") from e
 
-        # Set the current context as our context.  This is expected by create_objects
-        self.SetCurrent(self.context)
+        # Initialize OpenGL functions first
+        self._gl_funcs = QOpenGLFunctions()
+        self._gl_funcs.initializeOpenGLFunctions()
 
-        # Notify the context manager that a new context has been created
-        self._glcontextmanager.add_context(self.context)
+        # Create shared context if it doesn't exist
+        if GLPanel.SharedContext is None:
+            GLPanel.SharedContext = self.initialize_shared_context()
 
-        # allow inheritors the chance to create their objects
-        # self.create_objects()
+            # Install debug message callback only when KHR_debug is available (core in GL 4.3+).
+            # 4.1 core contexts often reject GL_DEBUG_OUTPUT with GL_INVALID_ENUM.
+            if nornir_imageregistration.in_debug_mode():
+                while gl.glGetError():
+                    pass
+                try:
+                    major = int(gl.glGetIntegerv(gl.GL_MAJOR_VERSION)[0])
+                    minor = int(gl.glGetIntegerv(gl.GL_MINOR_VERSION)[0])
+                except (TypeError, ValueError, IndexError):
+                    major, minor = 0, 0
+                if major > 4 or (major == 4 and minor >= 3):
+                    self._gl_funcs.glDebugMessageCallback(debug_callback_func, None)  # type: ignore[attr-defined,union-attr]
+                    self._gl_funcs.glEnable(gl.GL_DEBUG_OUTPUT)
+                    check_for_error("after GL debug output setup")
+
+        # Set share context and notify the context manager
+        self.context().setShareContext(GLPanel.SharedContext)  # type: ignore[union-attr]
+        self._glcontextmanager.add_context(self.context(), self)  # type: ignore[arg-type]
 
         self._glinitialized = True
+        print(f"OpenGL initialized for widget {self}")
 
-    def OnReshape(self, width: int, height: int):
+    def resizeGL(self, width: int, height: int):
         """Reshape the OpenGL viewport based on the dimensions of the window."""
-
-        # Zero values occasionally appear during window setup.  Ignore these until real values appear
+        # Zero values occasionally appear during window setup. Ignore these until real values appear
         if width == 0 or height == 0:
-            return
-
-        self.SetCurrent(self.context)
-        gl.glViewport(0, 0, width, height)
-        # self.update_object_resize()
-
-    def activate_context(self):
-        """Set this widgets GL context as the current context"""
-        self.SetCurrent(self.context)
-
-    def clear(self):
-        gl.glClearDepth(10000.0)
-        gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-
-    def OnDraw(self, *args, **kwargs):
-        """Draw the window."""
-        # clear the context
-        if not self.IsShown():
             return
 
         if not self._glinitialized:
             return
 
+        # Get the device pixel ratio to account for high-DPI displays
+        pixel_ratio = self.devicePixelRatio()
+
+        # Scale the viewport dimensions by the pixel ratio
+        physical_width = int(width * pixel_ratio)
+        physical_height = int(height * pixel_ratio)
+
+        # Scale the viewport dimensions by the pixel ratio
+        viewport_dims = self.gl_funcs.glGetIntegerv(gl.GL_MAX_VIEWPORT_DIMS)
+
+        max_width, max_height = viewport_dims  # type: ignore[misc]
+
+        physical_width = max(1, min(physical_width, max_width))
+        physical_height = max(1, min(physical_height, max_height))
+
+        # Update the viewport with the physical pixel dimensions
+        self.gl_funcs.glViewport(0, 0, physical_width, physical_height)
+        check_for_error("after glViewport in resizeGL")
+
+    def paintGL(self):
+        """Draw the window."""
+        # Don't check isVisible() - Qt calls paintGL when needed
+        # The visibility check was preventing rendering even when windows were shown
+
+        if not self._glinitialized:
+            return
+
+        if self._gl_funcs is None:
+            return
+
+        # Clear any stale errors from previous frame so we don't report or carry them
+        while gl.glGetError() != gl.GL_NO_ERROR:
+            pass
+
+        # Activate context and verify it's current
         self.activate_context()
+        raise_on_error("after activate_context in paintGL")
+        
+        # Verify context is actually current
+        current_context = QOpenGLContext.currentContext()
+        raise_on_error("after get current context in paintGL")
+        if not current_context or current_context != self.context():
+            print(f"WARNING: Context not current in paintGL. Expected {self.context()}, got {current_context}")
+            return
 
-        # This should be set by OnReshape, but it is not being called for some reason
-        self.width, self.height = self.GetClientSize()
-        extents = self.GetGLExtents()
-        gl.glViewport(0, 0, extents[0], extents[1])
+        # # This should be set by resizeGL, but ensure it's correct
+        # extents = self.GetGLExtents()
+        # pixel_ratio = self.devicePixelRatio()
 
-        # self.canvas.SetCurrent(GLPanel.SharedGLContext)
-        gl.glClearDepth(10000.0)
-        gl.glClearColor(0, 0.1, 0, 1)
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        gl.glEnable(gl.GL_BLEND)
-        gl.glEnable(gl.GL_POLYGON_OFFSET_FILL)
-        gl.glEnable(gl.GL_DEPTH_TEST)
-        gl.glDepthFunc(gl.GL_LESS)
-        # gl.glDisable(gl.GL_DEPTH_TEST)
-        gl.glDisable(gl.GL_CULL_FACE)
-        # draw objects
-        # self.draw_objects()
+        # physical_width = int(extents.width() * pixel_ratio)
+        # physical_height = int(extents.height() * pixel_ratio)
+
+        # Create/get OpenGL functions for this context
+
+
+        # Use the QOpenGLFunctions interface directly
+        # Note: Some of these might not be valid in all OpenGL contexts
+        # Use try/except to handle gracefully
+
+        self._gl_funcs.glEnable(gl.GL_BLEND)
+        raise_on_error("after glEnable(GL_BLEND)")
+        # GL_POLYGON_OFFSET_FILL - enable polygon offset fill (not a capability enum issue, but check for errors)
+        self._gl_funcs.glEnable(gl.GL_POLYGON_OFFSET_FILL)
+        raise_on_error("after glEnable(GL_POLYGON_OFFSET_FILL)")
+        self._gl_funcs.glEnable(gl.GL_DEPTH_TEST)
+        raise_on_error("after glEnable(GL_DEPTH_TEST)")
+        self._gl_funcs.glDepthFunc(gl.GL_LESS)
+        raise_on_error("after glDepthFunc")
+        self._gl_funcs.glDisable(gl.GL_CULL_FACE)
+        raise_on_error("after glDisable(GL_CULL_FACE)")
+
+        self.clear()
+        raise_on_error("after clear()")
+
+        # draw objects - wrap in error handling 
         self._draw_method()
-        # update screen
-        self.SwapBuffers()
+
+        # Reset GL state so Qt's swapBuffers() does not see an invalid state (avoids GL_INVALID_ENUM on some drivers).
+        # QOpenGLWidget renders to defaultFramebufferObject(), not FBO 0; binding 0 here can show a blank widget.
+        gl.glBindVertexArray(0)
+        gl.glUseProgram(0)
+        dfb = int(self.defaultFramebufferObject())
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, dfb)
+
+        # Pinpoint whether GL_INVALID_ENUM is from our draw or from Qt (e.g. swapBuffers) after we return
+        check_for_error("at end of paintGL after draw")
+
+    def activate_context(self):
+        """Set this widgets GL context as the current context"""
+        # Log and clear any stale GL errors (e.g. GL_INVALID_ENUM from driver/Qt) instead of raising,
+        # so callbacks (e.g. OnTransformChanged -> update_all_tile_buffers) do not crash the app.
+        check_for_error("before makeCurrent in activate_context")
+        self.makeCurrent()
+        check_for_error("after makeCurrent in activate_context")
+
+    def clear(self): 
+        self._gl_funcs.glClearDepthf(1)  # type: ignore[union-attr]
+        check_for_error("after glClearDepthf in clear()")
+        self._gl_funcs.glClearColor(0, 0.1, 0, 1)  # type: ignore[union-attr]
+        check_for_error("after glClearColor in clear()")
+        self._gl_funcs.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)  # type: ignore[operator,union-attr]
+        check_for_error("after glClear in clear()")

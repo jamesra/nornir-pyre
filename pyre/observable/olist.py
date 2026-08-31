@@ -4,18 +4,18 @@ from typing import Sequence, TypeVar, Generic, Callable, Iterable
 
 T = TypeVar('T')
 
-"""The observer function signature.  It does its best to notify which action was taken and which indicies were affected if relevant"""
+"""The observer function signature.  It does its best to notify which action was taken and which indices were affected if relevant"""
 ListObserverCallable = Callable[['ObservableList[T]', ObservedAction, Iterable[int] | None], None]
 
 
 class ObservableList(list, Generic[T]):
     """A python list that notifies observers when it is modified"""
-    _call_wrapper: Callable = None
+    _call_wrapper: Callable | None = None
 
-    def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable = None):
+    def __init__(self, initial_list: Sequence[T] | None = None, call_wrapper: Callable | None = None):
         """
                 :param initial_list: Populates the list with initial values
-                :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+                :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread
                 """
         super().__init__(initial_list if initial_list is not None else [])
         self._observers: list[ListObserverCallable[T]] = []

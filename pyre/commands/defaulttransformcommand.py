@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import logging
 
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QCursor
 from dependency_injector.wiring import Provide, inject
 from dependency_injector.providers import Dict, Factory
 from logging import Logger
 
 import nornir_imageregistration
 from nornir_imageregistration.transforms import IControlPointEdit, IControlPoints
+from nornir_imageregistration.transforms.transform_type import TransformType
+from nornir_imageregistration.transforms import ConvertTransform
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces import ControlPointAction, SetSelectionCallable
 from pyre.observable import ObservableSet
 from pyre.selection_event_data import InputEvent, SelectionEventData, InputSource, PointPair, SelectionEventKey
-from pyre.command_interfaces import ICommand, IInstantCommand
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import ICommand, IInstantCommand, StatusChangeCallback
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IControlPointMapManager, \
-    IControlPointActionMap, ControlPointManagerKey
+    IControlPointActionMap, ControlPointManagerKey, IImageManager
+from pyre.interfaces.viewtype import ViewType
 from pyre.controllers import TransformController
 import pyre.views.pointview
 from pyre.space import Space
@@ -24,6 +28,27 @@ from pyre.commands.navigationcommandbase import NavigationCommandBase
 from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
+from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action, fixed_image_manipulation_locked
+from pyre.views.composite_display import lookat_delta_from_display_delta
+from pyre.views.gltiles import is_rigid_transform
+
+DEFAULT_CURSOR_SHAPES: dict[ControlPointAction, Qt.CursorShape] = {
+    ControlPointAction.NONE: Qt.CursorShape.ArrowCursor,
+    ControlPointAction.CREATE: Qt.CursorShape.CrossCursor,
+    ControlPointAction.CREATE_REGISTER: Qt.CursorShape.CrossCursor,
+    ControlPointAction.DELETE: Qt.CursorShape.ForbiddenCursor,
+    ControlPointAction.TRANSLATE: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.REGISTER: Qt.CursorShape.WhatsThisCursor,
+    ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: Qt.CursorShape.OpenHandCursor,
+    ControlPointAction.TRANSLATE_ALL: Qt.CursorShape.CrossCursor,
+    ControlPointAction.CALL_TO_MOUSE: Qt.CursorShape.CrossCursor,
+}
+
+
+def _build_default_cursor_action_map() -> dict[ControlPointAction, QCursor]:
+    # QCursor creation requires a live QGuiApplication, so keep it lazy.
+    return {action: QCursor(shape) for action, shape in DEFAULT_CURSOR_SHAPES.items()}
 
 
 class DefaultTransformCommand(NavigationCommandBase):
@@ -32,7 +57,7 @@ class DefaultTransformCommand(NavigationCommandBase):
      1. Navigating around the view of the images.
      2. Selecting control points
     """
-    _executed: bool | None = None
+    _executed: bool = False
 
     config = Provide[IContainer.config]
 
@@ -40,15 +65,16 @@ class DefaultTransformCommand(NavigationCommandBase):
     _actionmap: IControlPointActionMap
     _space: Space
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
-    _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.control_point_map_manager]
+    _image_manager: IImageManager = Provide[IContainer.image_manager]
     _commandqueue: ICommandQueue
     # _action_command_map: dict[ControlPointAction, ICommand]
     _selected_points: ObservableSet[int]
-    cursor_action_map: dict[ControlPointAction, wx.Cursor]
+    cursor_action_map: dict[ControlPointAction, QCursor]
     _setselection: SetSelectionCallable | None
-    _last_mouse_press_event_args: wx.MouseEvent | None = None
+    _last_mouse_press_event_args: QMouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
-    _action_to_command: Dict[ControlPointAction, Factory]
+    _action_to_command: dict  # type: ignore[type-arg]
 
     log: Logger = logging.Logger("DefaultTransformCommand")
 
@@ -80,7 +106,7 @@ class DefaultTransformCommand(NavigationCommandBase):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: pyre.ui.Camera,
                  bounds: nornir_imageregistration.Rectangle,
                  space: Space,
@@ -90,7 +116,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
                  transform_control_point_action_maps=Provide[IContainer.transform_action_map].provider,
-                 transform_type_to_action_command_map=Provide[IContainer.action_command_map]
+                 transform_type_to_action_command_map=Provide[IContainer.action_command_map],
                  ):
         """
 
@@ -107,25 +133,13 @@ class DefaultTransformCommand(NavigationCommandBase):
                          space=space, commandqueue=commandqueue,
                          completed_func=completed_func)
 
-        self.cursor_action_map = {
-            ControlPointAction.NONE: wx.Cursor(wx.CURSOR_DEFAULT),
-            ControlPointAction.CREATE: wx.Cursor(wx.CURSOR_PENCIL),
-            ControlPointAction.DELETE: wx.Cursor(wx.CURSOR_NO_ENTRY),
-            ControlPointAction.TRANSLATE: wx.Cursor(wx.CURSOR_HAND),
-            ControlPointAction.REGISTER: wx.Cursor(wx.CURSOR_MAGNIFIER),
-            ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(wx.CURSOR_HAND),
-            ControlPointAction.DELETE | ControlPointAction.TRANSLATE | ControlPointAction.REGISTER: wx.Cursor(
-                wx.CURSOR_HAND),
-            ControlPointAction.TRANSLATE_ALL: wx.Cursor(wx.CURSOR_CROSS),
-            ControlPointAction.CALL_TO_MOUSE: wx.Cursor(wx.CURSOR_BULLSEYE),
-        }
+        self.cursor_action_map = _build_default_cursor_action_map()
 
+        self._action_command_map_by_type = transform_type_to_action_command_map
+        self._get_transform_action_map_dict = transform_control_point_action_maps
         self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
-        # self._action_command_map = pyre.commands.container_overrides.action_command_map[transform_controller.type]
         self._selection_event_history = {}
-        # self._action_command_map = action_command_map[transform_controller.type]
         self._commandqueue = commandqueue
-        self._executed = False
         self._space = space
         self._selected_points = selected_points
         transform_action_map_factory = transform_control_point_action_maps()[
@@ -133,15 +147,13 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         if isinstance(transform_controller.TransformModel, IControlPoints):
             controlpointmapkey = ControlPointManagerKey(transform_controller, space)
-            print(f'Key: {controlpointmapkey} Space: {space}')
-
-            self._controlpointmap = DefaultTransformCommand._controlpointmap_manager.getorcreate(controlpointmapkey)
+            self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
             self._actionmap = transform_action_map_factory(self._controlpointmap)
         else:
-            self._actionmap = transform_action_map_factory()
+            self._actionmap = transform_action_map_factory()  # type: ignore[call-arg]
 
         # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
-
+  
     # def _on_transform_controller_changed(self, *args, **kwargs):
     #     self._action_command_map = pyre.commands.container_overrides.action_command_map[self._transform_controller.type]
 
@@ -176,25 +188,49 @@ class DefaultTransformCommand(NavigationCommandBase):
     def can_execute(self) -> bool:
         return True
 
-    def _get_last_event(self, input_source: InputSource, input_event: InputEvent) -> SelectionEventData | None:
-        key = SelectionEventKey(input_source, input_event)
-        return self._selection_event_history.get(key, None)
+    def _get_space_point(self, point_pair: PointPair):
+        return point_pair.source if self.space == Space.Source else point_pair.target
+
+    def _build_selection_event(
+        self,
+        *,
+        source: InputSource,
+        input_event: InputEvent,
+        modifiers,
+        position,
+        keycode: int | None = None,
+    ) -> SelectionEventData:
+        return SelectionEventData(
+            camera=self.camera,
+            source=source,
+            input=input_event,
+            modifiers=modifiers,
+            position=position,
+            keycode=keycode,
+            existing_selections=self._selected_points,
+        )
+
+    def _dispatch_selection_event(
+        self, selection_event_data: SelectionEventData, *, update_cursor: bool = True
+    ) -> bool:
+        new_command = self.check_for_new_command(selection_event_data)
+        if not new_command and update_cursor:
+            self._update_cursor_for_possible_actions(selection_event_data)
+
+        return new_command
 
     def on_key_down(self, event):
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],
                                target=self._mouse_position_history[Space.Target])
-        point = point_pair.source if self.space == Space.Source else point_pair.target
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Keyboard,
-                                                  input=InputEvent.Press,
-                                                  modifiers=GetKeyModifiers(event),
-                                                  position=point,
-                                                  keycode=event.GetKeyCode(),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Keyboard,
+            input_event=InputEvent.Press,
+            modifiers=GetKeyModifiers(event),
+            position=self._get_space_point(point_pair),
+            keycode=event.key(),
+        )
+        self._dispatch_selection_event(selection_event_data)
 
         super().on_key_down(event)
 
@@ -206,51 +242,134 @@ class DefaultTransformCommand(NavigationCommandBase):
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],
                                target=self._mouse_position_history[Space.Target])
-        point = point_pair.source if self.space == Space.Source else point_pair.target
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Keyboard,
-                                                  input=InputEvent.Release,
-                                                  modifiers=GetKeyModifiers(event),
-                                                  position=point,
-                                                  keycode=event.GetKeyCode(),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Keyboard,
+            input_event=InputEvent.Release,
+            modifiers=GetKeyModifiers(event),
+            position=self._get_space_point(point_pair),
+            keycode=event.key(),
+        )
+        self._dispatch_selection_event(selection_event_data)
 
         super().on_key_up(event)
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return
 
-    def on_mouse_press(self, event: wx.MouseEvent):
+    def on_mouse_press(self, event: QMouseEvent):
         """Determine the command for the mouse action, if any"""
-        self.parent.SetFocus()
+        self.parent.setFocus()
         point_pair = self.get_world_positions(event)
 
         # Update the mouse position history
         self._mouse_position_history[Space.Source] = point_pair.source
         self._mouse_position_history[Space.Target] = point_pair.target
 
-        point = point_pair.source if self.space == Space.Source else point_pair.target
+        point = self._get_space_point(point_pair)
 
-        last_selection_event = self._get_last_event(InputSource.Mouse, InputEvent.Release)
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Mouse,
-                                                  input=InputEvent.Press,
-                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
-                                                  position=point,
-                                                  existing_selections=self._selected_points)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Mouse,
+            input_event=InputEvent.Press,
+            modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+            position=point,
+        )
 
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        self._dispatch_selection_event(selection_event_data)
 
-        self._last_mouse_press_event_args = event.Clone()
+        self._last_mouse_press_event_args = event
+
+    def _point_edit_requires_mesh_conversion(self, action: ControlPointAction) -> bool:
+        t = self._transform_controller.type
+        if action in (ControlPointAction.CREATE, ControlPointAction.CREATE_REGISTER):
+            return t in (TransformType.GRID, TransformType.RIGID)
+        if action == ControlPointAction.DELETE:
+            return t == TransformType.GRID
+        return False
+
+    def _mesh_conversion_prompt(self, action: ControlPointAction) -> tuple[str, str]:
+        if action == ControlPointAction.DELETE:
+            return (
+                "Convert to mesh transform?",
+                "Refined grid transforms do not support removing control points in the view.\n\n"
+                "Convert this transform to a mesh transform so points can be removed?",
+            )
+        return (
+            "Convert to mesh transform?",
+            "This transform type does not support adding control points in the view.\n\n"
+            "Convert this transform to a mesh transform so points can be added?",
+        )
+
+    def _mesh_conversion_kwargs(self) -> dict:
+        kwargs: dict = {}
+        try:
+            source_image = self._image_manager[ViewType.Source]
+            kwargs["source_image_shape"] = source_image.shape
+        except Exception:
+            pass
+        return kwargs
+
+    def _convert_current_transform_to_mesh(self) -> bool:
+        current = self._transform_controller.TransformModel
+        if current.type == TransformType.MESH:
+            return True
+        try:
+            converted = ConvertTransform(current, TransformType.MESH, **self._mesh_conversion_kwargs())
+            self._transform_controller.TransformModel = converted
+            return True
+        except Exception as e:
+            self.log.exception("Convert to mesh transform failed")
+            QMessageBox.warning(
+                self.parent,
+                "Convert transform",
+                f"Unable to convert transform to mesh: {e}",
+            )
+            return False
+
+    def _rebind_maps_for_current_transform_type(self) -> None:
+        tc = self._transform_controller
+        self._action_to_command = self._action_command_map_by_type[tc.type]
+        map_factory = self._get_transform_action_map_dict()[tc.type]
+        if isinstance(tc.TransformModel, IControlPoints):
+            controlpointmapkey = ControlPointManagerKey(tc, self._space)
+            self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
+            self._actionmap = map_factory(self._controlpointmap)
+        else:
+            self._actionmap = map_factory()  # type: ignore[call-arg]
 
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
+        if self.status != pyre.CommandStatus.Active:
+            return False
+
         new_action = self._actionmap.get_action(selection_event_data)
+
+        if self._point_edit_requires_mesh_conversion(new_action.action):
+            title, message = self._mesh_conversion_prompt(new_action.action)
+            reply = QMessageBox.question(
+                self.parent,
+                title,
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+            if not self._convert_current_transform_to_mesh():
+                return False
+            self._rebind_maps_for_current_transform_type()
+            new_action = self._actionmap.get_action(selection_event_data)
+
+        if blocks_layer_translate_action(
+                self._transform_controller.type, self.space, new_action.action, self._view_type()):
+            return False
+
+        if blocks_control_point_translate_action(
+                self._transform_controller.TransformModel,
+                self.space,
+                new_action.action,
+                self._view_type()):
+            return False
+
         if new_action.action not in self._action_to_command:
             self.log.error(
                 f'Action {new_action.action} not in action to command map for {self._transform_controller.type} transforms')
@@ -284,38 +403,49 @@ class DefaultTransformCommand(NavigationCommandBase):
         """For a command we want to make sure that the point under the mouse is passed with the selected points.
         This was needed for commands triggered by the right-mouse button that did not cause the selection check"""
         new_selections = self._actionmap.find_interactions(selection_event_data.position,
-                                                           1 / self.camera.scale)
+                                                           1 / self.camera.scale)  # type: ignore[call-arg]
         self.selected_points.update(new_selections)
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def on_mouse_motion(self, event: QMouseEvent):
+        # Use current parent size so mouse coords and cursor updates are correct after resize (e.g. composite).
+        self._width, self._height = self.parent.size().width(), self.parent.size().height()
         point_pair = self.get_world_positions(event)
         try:
-            point = point_pair.source if self.space == Space.Source else point_pair.target
+            point = self._get_space_point(point_pair)
 
-            selection_event_data = SelectionEventData(camera=self.camera,
-                                                      source=InputSource.Mouse,
-                                                      input=InputEvent.Drag,
-                                                      modifiers=GetMouseModifiers(event,
-                                                                                  self._last_mouse_press_event_args),
-                                                      position=point,
-                                                      existing_selections=self._selected_points)
+            selection_event_data = self._build_selection_event(
+                source=InputSource.Mouse,
+                input_event=InputEvent.Drag,
+                modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+                position=point,
+            )
 
             self._selection_event_history[selection_event_data.eventkey] = selection_event_data
             # Check for command, if there is no command, scroll the camera
-            new_command = self.check_for_new_command(selection_event_data)
+            new_command = self._dispatch_selection_event(selection_event_data, update_cursor=False)
             if new_command:
                 return
 
             # Todo: Make these commands as well
-            if event.LeftIsDown():
+            if event.buttons() & Qt.MouseButton.LeftButton:
                 # Draw a rectangle to select point
                 pass
-            elif event.RightIsDown():
-                old_point = self._mouse_position_history[self.space]
-                dy, dx = self._mouse_position_history[self.space] - point
-                if nornir_imageregistration.in_debug_mode():
-                    print(f'x:{point[1]} y:{point[0]} hx:{old_point[1]} hy:{old_point[0]} dx:{dx} dy:{dy}')
-                self.camera.translate((dy, dx))
+            elif event.buttons() & Qt.MouseButton.RightButton:
+                view = self._view_type()
+                model = self._transform_controller.TransformModel
+                if (
+                        view == ViewType.Composite
+                        and model is not None
+                        and is_rigid_transform(model)
+                ):
+                    delta_display = (
+                        self._mouse_position_history[Space.Target] - point_pair.target
+                    )
+                    delta_lookat = lookat_delta_from_display_delta(model, delta_display)
+                    self.camera.translate(delta_lookat)
+                else:
+                    dy, dx = self._mouse_position_history[self.space] - point
+                    self.camera.translate((dy, dx))
 
                 # Update the point pair to account for camera motion
                 point_pair = self.get_world_positions(event)
@@ -326,7 +456,7 @@ class DefaultTransformCommand(NavigationCommandBase):
             # Ensure we update the mouse position history
             self._mouse_position_history[Space.Source] = point_pair.source
             self._mouse_position_history[Space.Target] = point_pair.target
-            self._last_mouse_press_event_args = event.Clone()
+            self._last_mouse_press_event_args = event
         return
 
     def _update_cursor_for_possible_actions(self, selection_event_data: SelectionEventData):
@@ -336,24 +466,22 @@ class DefaultTransformCommand(NavigationCommandBase):
         # print(f'possible actions: {possible_actions}')
         if possible_actions.action in self.cursor_action_map:
             cursor = self.cursor_action_map[possible_actions.action]
-            wx.SetCursor(cursor)
+            self.parent.setCursor(cursor)
 
     def on_mouse_release(self, event):
         point_pair = self.get_world_positions(event)
-        point = point_pair.source if self.space == Space.Source else point_pair.target
+        point = self._get_space_point(point_pair)
 
         #        last_selection = self._get_last_event(InputSource.Mouse, InputEvent.Press)
 
-        selection_event_data = SelectionEventData(camera=self.camera,
-                                                  source=InputSource.Mouse,
-                                                  input=InputEvent.Release,
-                                                  position=point,
-                                                  modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),
-                                                  existing_selections=self._selected_points)
-        new_command = self.check_for_new_command(selection_event_data)
-        if not new_command:
-            self._update_cursor_for_possible_actions(selection_event_data)
+        selection_event_data = self._build_selection_event(
+            source=InputSource.Mouse,
+            input_event=InputEvent.Release,
+            modifiers=GetMouseModifiers(event, self._last_mouse_press_event_args),  # type: ignore[arg-type]
+            position=point,
+        )
+        self._dispatch_selection_event(selection_event_data)
 
-        self._last_mouse_press_event_args = event.Clone()
+        self._last_mouse_press_event_args = event
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         return

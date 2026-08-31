@@ -38,7 +38,7 @@ class VertexArrayLayout:
         if common_type is None:
             raise ValueError("Attributes have different types")
 
-        return get_dtype_for_gl_type(common_type)
+        return np.dtype(get_dtype_for_gl_type(common_type))
 
     @property
     def stride(self) -> int:

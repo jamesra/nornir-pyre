@@ -19,6 +19,8 @@ class ImageLoadResult(NamedTuple):
     image_original_fullpath: str  # Path to the original image file, this will be different if a path was substituted
     mask_fullpath: str | None  # Path to the mask file
     mask_original_fullpath: str | None  # Path to the original mask file, this will be different if a path was substituted
+    image_converted_from_color: bool = False  # RGB/RGBA (etc.) converted to grayscale via luminance
+    mask_converted_from_color: bool = False
 
     @property
     def image_dirname(self) -> str:
@@ -27,18 +29,18 @@ class ImageLoadResult(NamedTuple):
 
     @property
     def original_image_dirname(self) -> str:
-        """Original path to image before path substition applied"""
+        """Original path to image before path substitution applied"""
         return os.path.dirname(self.image_original_fullpath)
 
     @property
     def mask_dirname(self) -> str | None:
         """Path to mask directory containing loaded mask"""
-        return os.path.dirname(self.mask_fullpath)
+        return os.path.dirname(self.mask_fullpath) if self.mask_fullpath else None
 
     @property
     def original_mask_dirname(self) -> str | None:
-        """Original path to mask before path substition applied"""
-        return os.path.dirname(self.mask_original_fullpath)
+        """Original path to mask before path substitution applied"""
+        return os.path.dirname(self.mask_original_fullpath) if self.mask_original_fullpath else None
 
     @property
     def image_basename(self) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
+from OpenGL import GL as gl
 
 import nornir_imageregistration
 from pyre.gl_engine import GLBuffer
@@ -17,19 +18,19 @@ class TransformGLViewModel:
 
     @property
     def TransformModel(self) -> nornir_imageregistration.ITransform:
-        """The transform this controller is editting"""
+        """The transform this controller is editing"""
         return self._transform_model
 
     @TransformModel.setter
     def TransformModel(self, value: nornir_imageregistration.ITransform):
         if self._transform_model is not None:
-            self._transform_model.RemoveOnChangeEventListener(self.OnTransformChanged)
+            self._transform_model.RemoveOnChangeEventListener(self.OnTransformChanged)  # type: ignore[attr-defined]
 
         self._transform_model = value
 
         if value is not None:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
-            self._transform_model.AddOnChangeEventListener(self.OnTransformChanged)
+            self._transform_model.AddOnChangeEventListener(self.OnTransformChanged)  # type: ignore[attr-defined]
 
         self._OnTransformChange()
 
@@ -60,21 +61,22 @@ class TransformGLViewModel:
 
     def _OnTransformChange(self):
         if self._transform_model is None:
-            self._point_buffer.points = np.zeros((0, 4), dtype=np.float32)
+            self._point_buffer.points = np.zeros((0, 4), dtype=np.float32)  # type: ignore[attr-defined]
             return
 
-        self._point_buffer.points = self._transform_controller.points
+        self._point_buffer.points = self._transform_controller.points  # type: ignore[attr-defined]
 
     @property
     def selected(self):
-        return self._texture_index_buffer.data.astype(bool)
+        return self._texture_index_buffer.data.astype(bool)  # type: ignore[union-attr]
 
     @selected.setter
-    def selected(self, value: NDArray[bool]):
+    def selected(self, value: NDArray[np.bool_]):
         if value is None:
-            value = np.zeros(self._point_buffer.data.shape[0], dtype=np.uint16)
+            value = np.zeros(self._point_buffer.data.shape[0], dtype=np.uint16)  # type: ignore[union-attr]
 
-        if len(value) != self._point_buffer.data.shape[0]:
+        if len(value) != self._point_buffer.data.shape[0]:  # type: ignore[union-attr]
             raise ValueError("Selection array must have the same number of elements as the point buffer")
 
-        self._texture_index_buffer.data = value
+        self._texture_index_buffer.data = value  # type: ignore[assignment]
+

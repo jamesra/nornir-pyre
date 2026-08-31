@@ -1,19 +1,13 @@
-import enum
-
-from pyre.settings import AppSettings, UISettings
-from dependency_injector.wiring import Provide, providers, inject
-from dependency_injector import containers
+from dependency_injector.wiring import Provide, inject
 from nornir_imageregistration import PointLike
-from typing import Callable
-from pyre.command_interfaces import ICommand
 from pyre.selection_event_data import InputModifiers, SelectionEventData, InputEvent
 from pyre.settings import UISettings
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.interfaces.managers.command_manager import IControlPointActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
-
-import wx  # Need to map this to localized keycodes if another ui library is used
+from pyre.commands.stos.actionmaphelpers import find_control_point_interactions, resolve_space_register_action
+from pyre.settings import AppSettings
 
 
 class TriangulationTransformActionMap(IControlPointActionMap):
@@ -37,14 +31,14 @@ class TriangulationTransformActionMap(IControlPointActionMap):
         self.control_point_map = control_point_map
 
     def has_potential_interactions(self, world_position: PointLike) -> bool:
-        return len(self.find_potential_interactions(world_position, self.search_radius)) > 0
+        return bool(self.find_interactions(world_position, 1.0))
 
     def find_interactions(self, world_position: PointLike, scale: float) -> set[int]:
-        return self.control_point_map.find_nearest_within(world_position, self.search_radius * scale)
+        return find_control_point_interactions(self.control_point_map, world_position, self.search_radius, scale)
 
     def can_delete(self, event: SelectionEventData, interactions: set[int]) -> bool:
         """Return true if the transform will have enough control points remaining if all selected points are deleted"""
-        unique_selections = event.existing_selections | interactions
+        unique_selections = (event.existing_selections or set()) | interactions
         num_selected = len(unique_selections)
         return self.control_point_map.points.shape[0] - num_selected >= 3
 
@@ -61,7 +55,7 @@ class TriangulationTransformActionMap(IControlPointActionMap):
             if len(interactions) == 0:
                 if event.IsOnlyShiftPressed:
                     actions = ControlPointAction.CREATE
-                elif event.IsOnlyAltPressed and len(event.existing_selections) == 1:
+                elif event.IsOnlyAltPressed and len(event.existing_selections or set()) == 1:
                     actions = ControlPointAction.CALL_TO_MOUSE
                 elif event.IsKeyChordPressed(InputModifiers.AltKey | InputModifiers.ShiftKey):
                     actions = ControlPointAction.CREATE_REGISTER
@@ -72,7 +66,9 @@ class TriangulationTransformActionMap(IControlPointActionMap):
 
                 return ControlPointActionResult(actions, interactions)
             elif len(interactions) >= 1:
-                if event.IsLeftMousePressed:
+                if event.IsOnlyShiftPressed and self.can_delete(event, interactions):
+                    actions |= ControlPointAction.DELETE
+                elif event.IsLeftMousePressed:
                     if event.IsKeyChordPressed(InputModifiers.ShiftKey | InputModifiers.AltKey):
                         actions |= ControlPointAction.REGISTER
                     elif event.IsOnlyCtrlPressed:
@@ -94,20 +90,16 @@ class TriangulationTransformActionMap(IControlPointActionMap):
         """
         interactions = self.find_interactions(event.position, 1 / event.camera.scale)
 
-        if event.IsKeyboardInput and event.input == InputEvent.Press:
-            if event.keycode == wx.WXK_SPACE:
-                # If SHIFT is held down, align everything.  Otherwise align the selected point
-                if event.IsShiftPressed:
-                    return ControlPointActionResult(ControlPointAction.REGISTER_ALL, interactions)
-                else:
-                    return ControlPointActionResult(ControlPointAction.REGISTER, interactions)
+        register_action = resolve_space_register_action(event, interactions)
+        if register_action is not None:
+            return register_action
 
         # Check for creating a point
         if event.IsMouseInput or event.IsKeyboardInput:
             if event.input == InputEvent.Press:
                 if len(interactions) == 0:
                     if event.IsLeftMousePressed:
-                        if event.IsOnlyAltPressed and len(event.existing_selections) == 1:
+                        if event.IsOnlyAltPressed and len(event.existing_selections or set()) == 1:
                             return ControlPointActionResult(ControlPointAction.CALL_TO_MOUSE, interactions)
                         elif event.IsOnlyShiftPressed:
                             return ControlPointActionResult(ControlPointAction.CREATE, interactions)

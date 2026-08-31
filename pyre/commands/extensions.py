@@ -1,49 +1,75 @@
-"""Helper functions for converting wxPython events to Pyre InputEvents."""
+"""Helper functions for converting Qt events to Pyre InputEvents."""
 
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QMouseEvent, QKeyEvent, QWheelEvent
 from pyre.selection_event_data import InputEvent, InputModifiers
 
+# Roughly one mouse-wheel notch when platforms report pixelDelta instead of angleDelta.
+_PIXEL_DELTA_PER_NOTCH = 15.0
 
-def GetKeyModifiers(event: wx.MouseEvent) -> InputModifiers:
+
+def wheel_scroll_steps(event: QWheelEvent) -> float:
+    """Return wheel motion in standard-notch units (1.0 ≈ one detent).
+
+    Qt may leave angleDelta at zero for high-resolution / modifier wheel events on
+    Windows; fall back to pixelDelta in that case.
+    """
+    angle_y = event.angleDelta().y()
+    if angle_y != 0:
+        return angle_y / 120.0
+    pixel_y = event.pixelDelta().y()
+    if pixel_y != 0:
+        return pixel_y / _PIXEL_DELTA_PER_NOTCH
+    return 0.0
+
+
+def GetKeyModifiers(event: QMouseEvent | QKeyEvent | QWheelEvent) -> InputModifiers:
     modifiers = InputModifiers.NoModifiers
-    if event.ShiftDown():
+    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
         modifiers |= InputModifiers.ShiftKey
-    if event.ControlDown():
+    if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
         modifiers |= InputModifiers.ControlKey
-    if event.AltDown():
+    if event.modifiers() & Qt.KeyboardModifier.AltModifier:
         modifiers |= InputModifiers.AltKey
-    if event.MetaDown():
+    if event.modifiers() & Qt.KeyboardModifier.MetaModifier:
         modifiers |= InputModifiers.MetaKey
     return modifiers
 
 
-def GetMouseModifiers(event: wx.MouseEvent, last_mouse_event: wx.MouseEvent = None) -> InputModifiers:
+def GetMouseModifiers(event: QMouseEvent | QWheelEvent, last_mouse_event: QMouseEvent | QWheelEvent | None = None) -> InputModifiers:
     modifiers = GetKeyModifiers(event)
-    if event.LeftIsDown():
-        modifiers |= InputModifiers.LeftMouseButton
-    if event.MiddleIsDown():
-        modifiers |= InputModifiers.MiddleMouseButton
-    if event.RightIsDown():
-        modifiers |= InputModifiers.RightMouseButton
-    if event.Aux1IsDown():
-        modifiers |= InputModifiers.BackMouseButton
-    if event.Aux2IsDown():
-        modifiers |= InputModifiers.ForwardMouseButton
-    if event.GetWheelRotation() > 0:
-        modifiers |= InputEvent.ScrollUp
-    elif event.GetWheelRotation() < 0:
-        modifiers |= InputEvent.ScrollDown
 
-    if last_mouse_event is not None:
-        if event.LeftIsDown() != last_mouse_event.LeftIsDown():
+    # Check mouse buttons only for QMouseEvent
+    if isinstance(event, QMouseEvent):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            modifiers |= InputModifiers.LeftMouseButton
+        if event.buttons() & Qt.MouseButton.MiddleButton:
+            modifiers |= InputModifiers.MiddleMouseButton
+        if event.buttons() & Qt.MouseButton.RightButton:
+            modifiers |= InputModifiers.RightMouseButton
+        if event.buttons() & Qt.MouseButton.BackButton:
+            modifiers |= InputModifiers.BackMouseButton
+        if event.buttons() & Qt.MouseButton.ForwardButton:
+            modifiers |= InputModifiers.ForwardMouseButton
+
+    # Check wheel rotation for QWheelEvent
+    if isinstance(event, QWheelEvent):
+        if event.angleDelta().y() > 0:
+            modifiers |= InputEvent.ScrollUp  # type: ignore[operator]
+        elif event.angleDelta().y() < 0:
+            modifiers |= InputEvent.ScrollDown  # type: ignore[operator]
+
+    # Compare with last event if available
+    if last_mouse_event is not None and isinstance(event, QMouseEvent) and isinstance(last_mouse_event, QMouseEvent):
+        if (event.buttons() & Qt.MouseButton.LeftButton) != (last_mouse_event.buttons() & Qt.MouseButton.LeftButton):
             modifiers |= InputModifiers.LeftMouseButtonChanged
-        if event.MiddleIsDown() != last_mouse_event.MiddleIsDown():
+        if (event.buttons() & Qt.MouseButton.MiddleButton) != (last_mouse_event.buttons() & Qt.MouseButton.MiddleButton):
             modifiers |= InputModifiers.MiddleMouseButtonChanged
-        if event.RightIsDown() != last_mouse_event.RightIsDown():
+        if (event.buttons() & Qt.MouseButton.RightButton) != (last_mouse_event.buttons() & Qt.MouseButton.RightButton):
             modifiers |= InputModifiers.RightMouseButtonChanged
-        if event.Aux1IsDown() != last_mouse_event.Aux1IsDown():
+        if (event.buttons() & Qt.MouseButton.BackButton) != (last_mouse_event.buttons() & Qt.MouseButton.BackButton):
             modifiers |= InputModifiers.BackMouseButtonChanged
-        if event.Aux2IsDown() != last_mouse_event.Aux2IsDown():
+        if (event.buttons() & Qt.MouseButton.ForwardButton) != (last_mouse_event.buttons() & Qt.MouseButton.ForwardButton):
             modifiers |= InputModifiers.ForwardMouseButtonChanged
 
     return modifiers

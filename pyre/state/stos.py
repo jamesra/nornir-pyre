@@ -1,11 +1,14 @@
 import concurrent.futures
 from dataclasses import dataclass
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 import numpy
 import numpy as np
 from numpy.typing import NDArray
-import wx
+from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from nornir_imageregistration import StosFile
 import nornir_imageregistration.transforms
@@ -26,10 +29,36 @@ class StosWindowConfig:
     glcontext_manager: IGLContextManager
     transform_controller: TransformController
     transformglbuffer_manager: ITransformControllerGLBufferManager
-    imageviewmodel_manager: IImageViewModelManager
+    image_viewmodel_manager: IImageViewModelManager
     window_manager: IWindowManager
     image_loader: IImageLoader
     mouse_position_history_manager: IMousePositionHistoryManager
+
+
+def _warn_rgb_like_paths_converted(path_display: str, *, main_color: bool, mask_color: bool) -> None:
+    if not main_color and not mask_color:
+        return
+    bits: list[str] = []
+    if main_color:
+        bits.append("The main image has RGB or RGBA channels.")
+    if mask_color:
+        bits.append("The mask has RGB or RGBA channels.")
+    QMessageBox.warning(
+        None,
+        "Color data converted to grayscale",
+        "\n".join(bits)
+        + f"\n\n{path_display}\n\n"
+          "Each was converted to a single grayscale plane using standard luminance (Rec. 601) weights.",
+    )
+
+
+def _warn_single_file_rgb_like_converted(path_display: str) -> None:
+    QMessageBox.warning(
+        None,
+        "Color data converted to grayscale",
+        f"This file has multiple color channels (RGB or RGBA).\n\n{path_display}\n\n"
+        "It was converted to grayscale using standard luminance (Rec. 601) weights.",
+    )
 
 
 def LoadImage(imageFullPath: str) -> ImageViewModel | None:
@@ -38,14 +67,15 @@ def LoadImage(imageFullPath: str) -> ImageViewModel | None:
         return ImageViewModel(imageFullPath)
     except IOError as e:
         if not os.path.isfile(imageFullPath):
-            print("Image passed to load image does not exist: " + imageFullPath)
+            logger.error("Image passed to load image does not exist: %s", imageFullPath)
         else:
-            print(f"Exception opening {imageFullPath}:\n{e}")
+            logger.exception("Exception opening %s", imageFullPath)
 
         return None
 
 
 def param_to_stosfile(input: str | StosFile) -> StosFile:
+    """Return a StosFile from a path string or pass through an existing StosFile. Raises ValueError for other types."""
     if isinstance(input, str):
         return StosFile.Load(input)
     elif isinstance(input, StosFile):
@@ -60,12 +90,13 @@ class StosState(StateEventsImpl):
     AlignmentTileSize: tuple[int, int] = (192, 192)
     AngleSearchStepSize: float = 3
     AngleSearchMax: float = 15
-    AnglesToSearch: NDArray[np.floating] = numpy.arange(start=-AngleSearchMax,
+    AnglesToSearch: NDArray[np.floating] = numpy.arange(-AngleSearchMax,
                                                         stop=AngleSearchMax + AngleSearchStepSize,
-                                                        step=AngleSearchStepSize)  # numpy.linspace(-7.5, 7.5, 11)
+                                                        step=AngleSearchStepSize,
+                                                        dtype=np.float64)  # numpy.linspace(-7.5, 7.5, 11)
 
-    _fixed_image_permutations: nornir_imageregistration.ImagePermutationHelper
-    _warped_image_permutations: nornir_imageregistration.ImagePermutationHelper
+    _fixed_image_permutations: nornir_imageregistration.ImagePermutationHelper | None
+    _warped_image_permutations: nornir_imageregistration.ImagePermutationHelper | None
     _TransformViewModel = None
     _WarpedImageViewModel = None
     _FixedImageViewModel = None
@@ -78,19 +109,25 @@ class StosState(StateEventsImpl):
 
     _transform_controller: TransformController  # The transform controller for the stos transform displayed
     _transform_gl_viewmodel: pyre.viewmodels.TransformGLViewModel | None = None
-    _imageviewmodel_manager: IImageViewModelManager
+    _image_viewmodel_manager: IImageViewModelManager
     _image_manager: IImageManager
+    _image_loader: IImageLoader
+    _window_manager: IWindowManager | None
 
     _OnTransformControllerChangeEventListeners: list[TransformControllerChangedCallback] = list()
     _OnImageChangeEventListeners: list[ImageChangedCallback] = list()
 
     def __init__(self, transform_controller: TransformController,
                  image_manager: IImageManager,
-                 imageviewmodel_manager: IImageViewModelManager):
+                 image_viewmodel_manager: IImageViewModelManager,
+                 image_loader: IImageLoader,
+                 window_manager: IWindowManager | None = None):
         super(StosState, self).__init__()
         self._transform_controller = transform_controller
-        self._imageviewmodel_manager = imageviewmodel_manager
+        self._image_viewmodel_manager = image_viewmodel_manager
         self._image_manager = image_manager
+        self._image_loader = image_loader
+        self._window_manager = window_manager
 
         self._fixed_image_permutations = None  # Type : nornir_imageregistration.ImagePermutationHelper
         self._warped_image_permutations = None  # Type : nornir_imageregistration.ImagePermutationHelper
@@ -102,20 +139,30 @@ class StosState(StateEventsImpl):
         self._CompositeImageViewModel = None
 
     @property
-    def FixedWindow(self) -> wx.Frame:
-        return pyre.Windows["Fixed"]
+    def window_manager(self) -> IWindowManager | None:
+        """Application window manager (ViewType-keyed). None in tests or before DI wiring."""
+        return self._window_manager
+
+    def _require_window_manager(self) -> IWindowManager:
+        if self._window_manager is None:
+            raise RuntimeError("StosState.window_manager is not set; cannot resolve STOS windows")
+        return self._window_manager
 
     @property
-    def WarpedWindow(self) -> wx.Frame:
-        return pyre.Windows["Warped"]
+    def FixedWindow(self) -> QMainWindow:
+        return self._require_window_manager()[ViewType.Source]
 
     @property
-    def CompositeWindow(self) -> wx.Frame:
-        return pyre.Windows["Composite"]
+    def WarpedWindow(self) -> QMainWindow:
+        return self._require_window_manager()[ViewType.Target]
+
+    @property
+    def CompositeWindow(self) -> QMainWindow:
+        return self._require_window_manager()[ViewType.Composite]
 
     @property
     def TransformController(self) -> TransformController:
-        """The stos transform we are editting."""
+        """The stos transform we are editing."""
         return self._transform_controller
 
     @property
@@ -195,11 +242,11 @@ class StosState(StateEventsImpl):
         self.FireOnImageChanged(pyre.Space.Source | pyre.Space.Target)
 
     @property
-    def FixedImages(self) -> nornir_imageregistration.ImagePermutationHelper:
+    def FixedImages(self) -> nornir_imageregistration.ImagePermutationHelper | None:
         return self._fixed_image_permutations
 
     @property
-    def WarpedImages(self) -> nornir_imageregistration.ImagePermutationHelper:
+    def WarpedImages(self) -> nornir_imageregistration.ImagePermutationHelper | None:
         return self._warped_image_permutations
 
     @property
@@ -208,6 +255,8 @@ class StosState(StateEventsImpl):
 
     @property
     def TransformType(self) -> nornir_imageregistration.transforms.TransformType | None:
+        if self.Transform is None:
+            return None
         return self.GetTransformType(self.Transform)
 
     @staticmethod
@@ -249,30 +298,80 @@ class StosState(StateEventsImpl):
 
     #            self._transform_controller.TransformModel = stostransform
 
-    #
-    # def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:
-    #     self.FixedImageViewModel = LoadImage(ImageFileFullPath)
-    #     self._fixed_image_permutations = self._update_image_permutations(self.FixedImageViewModel,
-    #                                                                      self.FixedImageMaskViewModel)
-    #
-    # def LoadWarpedImage(self, ImageFileFullPath: str) -> ImageViewModel:
-    #     self.WarpedImageViewModel = LoadImage(ImageFileFullPath)
-    #     self._warped_image_permutations = self._update_image_permutations(self.WarpedImageViewModel,
-    #                                                                       self.WarpedImageMaskViewModel)
-    #
-    # def LoadFixedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel:
-    #     self.FixedImageMaskViewModel = LoadImage(ImageFileFullPath)
-    #     self._fixed_image_permutations = self._update_image_permutations(self.FixedImageViewModel,
-    #                                                                      self.FixedImageMaskViewModel)
-    #
-    # def LoadWarpedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel:
-    #     self.WarpedImageMaskViewModel = LoadImage(ImageFileFullPath)
-    #     self._warped_image_permutations = self._update_image_permutations(self.WarpedImageViewModel,
-    #                                                                       self.WarpedImageMaskViewModel)
+    def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Load the fixed (source) image into the image/viewmodel managers and update STOS permutation state."""
+        search_dirs = [os.path.dirname(ImageFileFullPath) or "."]
+        result = self._image_loader.load_image_into_manager(
+            ViewType.Source,
+            ImageFileFullPath,
+            None,
+            search_dirs,
+        )
+        _warn_rgb_like_paths_converted(
+            ImageFileFullPath,
+            main_color=result.image_converted_from_color,
+            mask_color=result.mask_converted_from_color,
+        )
+        vm = self._image_loader.create_image_viewmodel(ViewType.Source, result.permutations)
+        self.FixedImageViewModel = vm
+        self._fixed_image_permutations = self._update_image_permutations(
+            self.FixedImageViewModel,
+            self.FixedImageMaskViewModel,
+        )
+        self.FireOnImageChanged(pyre.Space.Source)
+        return vm
+
+    def LoadWarpedImage(self, ImageFileFullPath: str) -> ImageViewModel:
+        """Load the warped (target) image into the image/viewmodel managers and update STOS permutation state."""
+        search_dirs = [os.path.dirname(ImageFileFullPath) or "."]
+        result = self._image_loader.load_image_into_manager(
+            ViewType.Target,
+            ImageFileFullPath,
+            None,
+            search_dirs,
+        )
+        _warn_rgb_like_paths_converted(
+            ImageFileFullPath,
+            main_color=result.image_converted_from_color,
+            mask_color=result.mask_converted_from_color,
+        )
+        vm = self._image_loader.create_image_viewmodel(ViewType.Target, result.permutations)
+        self.WarpedImageViewModel = vm
+        self._warped_image_permutations = self._update_image_permutations(
+            self.WarpedImageViewModel,
+            self.WarpedImageMaskViewModel,
+        )
+        return vm
+
+    def LoadFixedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel | None:
+        self.FixedImageMaskViewModel = LoadImage(ImageFileFullPath)
+        if (
+            self.FixedImageMaskViewModel is not None
+            and self.FixedImageMaskViewModel.rgb_like_converted_to_grayscale
+        ):
+            _warn_single_file_rgb_like_converted(ImageFileFullPath)
+        self._fixed_image_permutations = self._update_image_permutations(
+            self.FixedImageViewModel,
+            self.FixedImageMaskViewModel,
+        )
+        return self.FixedImageMaskViewModel
+
+    def LoadWarpedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel | None:
+        self.WarpedImageMaskViewModel = LoadImage(ImageFileFullPath)
+        if (
+            self.WarpedImageMaskViewModel is not None
+            and self.WarpedImageMaskViewModel.rgb_like_converted_to_grayscale
+        ):
+            _warn_single_file_rgb_like_converted(ImageFileFullPath)
+        self._warped_image_permutations = self._update_image_permutations(
+            self.WarpedImageViewModel,
+            self.WarpedImageMaskViewModel,
+        )
+        return self.WarpedImageMaskViewModel
 
     @staticmethod
     def _update_image_permutations(img: ImageViewModel | None, mask: ImageViewModel | None) \
-            -> nornir_imageregistration.ImagePermutationHelper:
+            -> nornir_imageregistration.ImagePermutationHelper | None:
         if img is None:
             return None
         elif mask is None:
@@ -382,6 +481,6 @@ class StosState(StateEventsImpl):
     def WindowsLookAtFixedPoint(self, fixed_point, scale):
         """Force all open windows to look at this point"""
 
-        self.FixedWindow.lookatfixedpoint(fixed_point, scale)
-        self.WarpedWindow.lookatfixedpoint(fixed_point, scale)
-        self.CompositeWindow.lookatfixedpoint(fixed_point, scale)
+        self.FixedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.WarpedWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]
+        self.CompositeWindow.lookatfixedpoint(fixed_point, scale)  # type: ignore[attr-defined]

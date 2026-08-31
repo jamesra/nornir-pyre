@@ -1,11 +1,13 @@
 import concurrent.futures
 from enum import Enum
+import logging
 import os
 
 from dependency_injector.wiring import inject, Provide
 from pyre.settings import AppSettings
 
 from nornir_imageregistration import StosFile
+from nornir_imageregistration.core._core import RgbLikeToGrayscaleLuminance
 import nornir_imageregistration.transforms
 from pyre.interfaces.managers import IImageManager, IImageViewModelManager, IImageLoader
 from pyre.interfaces.named_tuples import ImageLoadResult, LoadStosResult
@@ -15,6 +17,8 @@ from pyre.viewmodels import ImageViewModel
 from pyre.controllers.transformcontroller import TransformController
 from pyre.container import IContainer
 
+logger = logging.getLogger(__name__)
+
 
 class ImageLoader(IImageLoader):
     """Loads images and creates viewmodels for them."""
@@ -23,16 +27,18 @@ class ImageLoader(IImageLoader):
     _image_viewmodel_manager: IImageViewModelManager
     _search_dirs: list[str] | None
     _replacement_paths: dict[str, str] | None
+    _filepath_cache: dict[tuple[str, str | None], nornir_imageregistration.ImagePermutationHelper]
 
     @inject
     def __init__(self,
                  image_manager: IImageManager = Provide[IContainer.image_manager],
-                 imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager],
+                 imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager],
                  settings: AppSettings = Provide[IContainer.settings]):
         self._image_manager = image_manager
         self._image_viewmodel_manager = imageviewmodel_manager
         self._search_dirs = settings.ui.image_search_paths
         self._replacement_paths = settings.ui.replacement_paths
+        self._filepath_cache = {}
 
     def load_stos(self,
                   stos_path: str) -> LoadStosResult | None:
@@ -92,34 +98,62 @@ class ImageLoader(IImageLoader):
         :param key: The key to store the image under in the image manager. If None the key will be the base name of the image file.
         :return: A tuple with the key and the permutations object."""
         key = key if key is not None else os.path.basename(image_fullpath)
-        found_image_fullpath = try_locate_file(image_fullpath, search_dirs, replacement_paths)
+        found_image_fullpath = try_locate_file(image_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
         if found_image_fullpath is None:
             raise ValueError("Image file not found: " + image_fullpath + "\n\tin" + str(search_dirs))
 
-        image = nornir_imageregistration.LoadImage(found_image_fullpath)
-        image_mask = None
-        found_mask_fullpath = None
+        # Resolve mask path up front so we can compute the cache key before any disk I/O.
+        found_mask_fullpath: str | None = None
         if mask_fullpath is not None:
-            found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs, replacement_paths)
+            found_mask_fullpath = try_locate_file(mask_fullpath, search_dirs or [], replacement_paths)  # type: ignore[arg-type]
+
+        cache_key = (
+            os.path.normcase(found_image_fullpath),
+            os.path.normcase(found_mask_fullpath) if found_mask_fullpath is not None else None,
+        )
+
+        img_color = False
+        msk_color = False
+
+        if cache_key not in self._filepath_cache:
+            image = nornir_imageregistration.LoadImage(found_image_fullpath)
+            image, img_color = RgbLikeToGrayscaleLuminance(image)
+            if img_color:
+                logger.warning(
+                    "Image had color channels; converted to grayscale (luminance): %s",
+                    found_image_fullpath,
+                )
+
+            image_mask = None
             if found_mask_fullpath is not None:
                 image_mask = nornir_imageregistration.LoadImage(found_mask_fullpath)
+                image_mask, msk_color = RgbLikeToGrayscaleLuminance(image_mask)
+                if msk_color:
+                    logger.warning(
+                        "Mask had color channels; converted to grayscale (luminance): %s",
+                        found_mask_fullpath,
+                    )
 
-        if key in self._image_manager:
-            del self._image_manager[key]
+            self._filepath_cache[cache_key] = nornir_imageregistration.ImagePermutationHelper(image, image_mask)
 
-        permutations = self._image_manager.add(key=key,
-                                               image=image,
-                                               mask=image_mask)
-        return ImageLoadResult(key=key,
+        permutations = self._filepath_cache[cache_key]
+
+        if key in self._image_manager:  # type: ignore[operator]
+            del self._image_manager[key]  # type: ignore[arg-type]
+
+        self._image_manager.add(key=key, image=permutations)  # type: ignore[arg-type]
+        return ImageLoadResult(key=str(key),
                                permutations=permutations,
                                image_fullpath=found_image_fullpath,
                                mask_fullpath=found_mask_fullpath,
                                image_original_fullpath=image_fullpath,
-                               mask_original_fullpath=mask_fullpath)
+                               mask_original_fullpath=mask_fullpath,
+                               image_converted_from_color=img_color,
+                               mask_converted_from_color=msk_color)
 
     def create_image_viewmodel(self,
                                name: str | Enum,
                                permutations: nornir_imageregistration.ImagePermutationHelper) -> ImageViewModel:
-        if name in self._image_viewmodel_manager:
-            del self._image_viewmodel_manager[name]
-        return self._image_viewmodel_manager.add(name, permutations.Image)
+        if name in self._image_viewmodel_manager:  # type: ignore[operator]
+            del self._image_viewmodel_manager[name]  # type: ignore[index]
+        return self._image_viewmodel_manager.add(str(name), permutations.Image)

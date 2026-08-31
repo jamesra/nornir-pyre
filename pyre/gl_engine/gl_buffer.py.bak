@@ -1,0 +1,236 @@
+import ctypes
+
+from OpenGL import GL as gl
+import numpy as np
+from numpy._typing import NDArray
+
+from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
+from PyQt6.QtGui import QOpenGLContext
+
+from pyre.gl_engine.helpers import raise_on_error, check_for_error
+from pyre.gl_engine.interfaces import IBuffer, IIndexBuffer
+from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
+
+
+class GLBuffer(IBuffer):
+    """Contains a buffer object for use in OpenGL"""
+    _buffer: ctypes.c_uint | None = None
+    _layout: VertexArrayLayout
+    _data: NDArray[np.floating]
+    _usage: int  # How the buffer will be used
+
+    _capacity: int | None  # The number of elements the buffer can hold.  This is different than the number of elements in the data array if the buffer is oversized for dynamic use
+    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """The OpenGL functions used to create the buffer"""
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
+
+    @property
+    def data(self) -> NDArray[np.floating]:
+        """The data in the buffer"""
+        return self._data
+
+    @data.setter
+    def data(self, value: NDArray[np.floating]):
+        self._data = value
+        self._update_buffer_data(value)
+
+    @property
+    def buffer(self) -> ctypes.c_uint:
+        """The OpenGL buffer object"""
+        return self._buffer
+
+    @property
+    def usage(self) -> int:
+        """
+        How the buffer will be used:
+        GL_STREAM_DRAW, GL_STREAM_READ, GL_STREAM_COPY, GL_STATIC_DRAW, GL_STATIC_READ, GL_STATIC_COPY,
+        GL_DYNAMIC_DRAW, GL_DYNAMIC_READ, or GL_DYNAMIC_COPY.
+        """
+        return self._usage
+
+    @property
+    def capacity(self) -> int:
+        """The number of elements the buffer can hold"""
+        return self._capacity
+
+    @property
+    def layout(self) -> VertexArrayLayout | None:
+        """Layout of the buffer, an index buffer does not have an array layout"""
+        return self._layout
+
+    def __init__(self,
+                 layout: VertexArrayLayout | None,
+                 data: NDArray[np.floating] | None = None,
+                 usage: int = gl.GL_STATIC_DRAW,
+                 capacity: int | None = None,
+                 gl_funcs: QOpenGLFunctions = None):
+        self._gl_funcs = gl_funcs
+        self._layout = layout
+        self._data = data
+        self._usage = usage
+        self._capacity = capacity if capacity is not None else \
+            data.nbytes if data is not None else 64  # 64 bytes is the minimum buffer size
+        self._create_open_gl_objects(data)
+
+    def _create_open_gl_objects(self, data: NDArray[np.floating] | None):
+        """Create the buffer object.  This will break any VAO's that use this buffer."""
+        # Check for errors from previous operations - this will raise if there's an error
+        # This helps us find what's causing GL_INVALID_OPERATION before glGenBuffers
+        raise_on_error("before glGenBuffers in GLBuffer._create_open_gl_objects - checking for prior errors")
+        
+        # Verify we have a current OpenGL context
+        current_context = QOpenGLContext.currentContext()
+        if current_context is None or not current_context.isValid():
+            raise RuntimeError(
+                "Cannot create OpenGL buffer: No valid OpenGL context is current. "
+                "Buffers must be created when an OpenGL context is active."
+            )
+        
+        self._buffer = self.gl_funcs.glGenBuffers(1)
+        raise_on_error("after glGenBuffers in _create_open_gl_objects")
+
+        if data is not None:
+            self._update_buffer_data(data)
+
+    def _update_buffer_data(self, data: NDArray[np.floating]):
+        """Update the buffer data, should allow existing VAO's to continue to work."""
+        data = data.flatten()
+        data = np.ascontiguousarray(data)
+        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, self.buffer)
+        raise_on_error("after glBindBuffer in _update_buffer_data")
+
+        # buffer data will be zero if the buffer is not initialized
+        buffer_size = self.gl_funcs.glGetBufferParameteriv(gl.GL_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
+
+        # Expand capacity if needed
+        if buffer_size == 0 or self._capacity < data.nbytes:
+            self._capacity = data.nbytes
+            self.gl_funcs.glBufferData(gl.GL_ARRAY_BUFFER, self.capacity, data, self._usage)
+            raise_on_error("after glBufferData in _update_buffer_data")
+        else:  # Expansion not needed, replace the existing data
+            assert (buffer_size >= self._capacity)
+            self.gl_funcs.glBufferSubData(gl.GL_ARRAY_BUFFER, 0, data.nbytes, data)
+            raise_on_error("after glBufferSubData in _update_buffer_data")
+
+        self.gl_funcs.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+        check_for_error()
+
+    def __del__(self):
+        if self._buffer is not None:
+            self.gl_funcs.glDeleteBuffers(1, [self._buffer])
+            self._buffer = None
+
+
+class GLIndexBuffer(IIndexBuffer):
+    """Contains a buffer object for use in OpenGL"""
+
+    _buffer: ctypes.c_uint | None = None
+    _data: NDArray[np.integer]
+    _usage: int  # How the buffer will be used
+
+    _capacity: int | None  # The number of elements the buffer can hold.  This is different than the number of elements in the data array if the buffer is oversized for dynamic use
+
+    _gl_funcs: QOpenGLFunctions | None = None  # OpenGL functions
+
+    @property
+    def gl_funcs(self) -> QOpenGLFunctions:
+        """The OpenGL functions used to create the buffer"""
+        if self._gl_funcs is None:
+            self._gl_funcs = QOpenGLFunctions()
+            self._gl_funcs.initializeOpenGLFunctions()
+        return self._gl_funcs
+
+    @property
+    def data(self) -> NDArray[np.integer]:
+        """The data in the buffer"""
+        return self._data
+
+    @data.setter
+    def data(self, value: NDArray[np.integer]):
+        self._data = value
+        self._update_buffer_data(value)
+
+    @property
+    def buffer(self) -> ctypes.c_uint:
+        """The OpenGL buffer object"""
+        return self._buffer
+
+    @property
+    def usage(self) -> int:
+        """
+        How the buffer will be used:
+        GL_STREAM_DRAW, GL_STREAM_READ, GL_STREAM_COPY, GL_STATIC_DRAW, GL_STATIC_READ, GL_STATIC_COPY,
+        GL_DYNAMIC_DRAW, GL_DYNAMIC_READ, or GL_DYNAMIC_COPY.
+        """
+        return self._usage
+
+    @property
+    def capacity(self) -> int:
+        """The number of elements the buffer can hold"""
+        return self._capacity
+
+    def __init__(self,
+                 data: NDArray[np.integer] | None = None,
+                 usage: int = gl.GL_STATIC_DRAW,
+                 capacity: int | None = None,
+                 gl_funcs: QOpenGLFunctions = None):
+        self._gl_funcs = gl_funcs
+        self._data = data if data is not None else np.array([], dtype=np.uint16)
+        self._usage = usage
+        self._capacity = capacity if capacity is not None else \
+            data.nbytes if data is not None else 64  # 64 bytes is the minimum buffer size
+        self._create_open_gl_objects(data)
+
+    def _create_open_gl_objects(self, data: NDArray[np.integer] | None):
+        """Create the buffer object.  This will break any VAO's that use this buffer."""
+        # Check for errors from previous operations - this will raise if there's an error
+        # This helps us find what's causing GL_INVALID_OPERATION before glGenBuffers
+        raise_on_error("before glGenBuffers in GLIndexBuffer._create_open_gl_objects - checking for prior errors")
+        
+        # Verify we have a current OpenGL context
+        current_context = QOpenGLContext.currentContext()
+        if current_context is None or not current_context.isValid():
+            raise RuntimeError(
+                "Cannot create OpenGL index buffer: No valid OpenGL context is current. "
+                "Buffers must be created when an OpenGL context is active."
+            )
+        
+        self._buffer = self.gl_funcs.glGenBuffers(1)
+        raise_on_error("after glGenBuffers in _create_open_gl_objects (GLIndexBuffer)")
+
+        if data is not None:
+            self._update_buffer_data(data)
+
+    def _update_buffer_data(self, data: NDArray[np.integer]):
+        """Update the buffer data, should allow existing VAO's to continue to work."""
+        data = data.flatten()
+        data = np.ascontiguousarray(data)
+        self.gl_funcs.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, self.buffer)
+        raise_on_error("after glBindBuffer in _update_buffer_data (GLIndexBuffer)")
+
+        # buffer data will be zero if the buffer is not initialized
+        buffer_size = self.gl_funcs.glGetBufferParameteriv(gl.GL_ELEMENT_ARRAY_BUFFER, gl.GL_BUFFER_SIZE)
+
+        # Expand capacity if needed
+        if buffer_size == 0 or self._capacity < data.nbytes:
+            self._capacity = data.nbytes
+            self.gl_funcs.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, self.capacity, data, self._usage)
+            raise_on_error("after glBufferData in _update_buffer_data (GLIndexBuffer)")
+        else:  # Expansion not needed, replace the existing data
+            assert (buffer_size >= self._capacity)
+            self.gl_funcs.glBufferSubData(gl.GL_ELEMENT_ARRAY_BUFFER, 0, data.nbytes, data)
+            raise_on_error("after glBufferSubData in _update_buffer_data (GLIndexBuffer)")
+
+        gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
+        check_for_error()
+
+    def __del__(self):
+        if self._buffer is not None:
+            self.gl_funcs.glDeleteBuffers(1, [self._buffer])
+            self._buffer = None

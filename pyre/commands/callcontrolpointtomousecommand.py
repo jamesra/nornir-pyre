@@ -3,13 +3,12 @@ from __future__ import annotations
 from dependency_injector.wiring import inject, Provide
 import numpy as np
 from numpy._typing import NDArray
-import wx
 
 import nornir_imageregistration
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
@@ -21,15 +20,14 @@ class CallControlPointToMouseCommand(InstantCommandBase):
     """This command deletes a selection of control points"""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
-    _original_points: NDArray[[2, ], np.floating]
+    _original_points: NDArray[np.floating]
     _transform_controller: TransformController
 
     _space: Space
-    _translate_origin: NDArray[float]
-    _original_points: NDArray[[2, ], np.floating]
+    _translate_origin: NDArray[np.floating] 
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
-    _mouse_position: NDArray[float] = None
+    _mouse_position: NDArray[np.floating] | None = None
     _selected_point: int
 
     @inject
@@ -37,11 +35,10 @@ class CallControlPointToMouseCommand(InstantCommandBase):
                  space: Space,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: TransformController = Provide[IContainer.transform_controller],
                  **kwargs):
-        """
-
+        """ 
         :param parent:
         :param transform_controller:
         :param camera:
@@ -77,6 +74,7 @@ class CallControlPointToMouseCommand(InstantCommandBase):
 
     def execute(self):
         indicies_to_delete = list(self._selected_points)
+        assert self._mouse_position is not None
         self._transform_controller.SetPoint(self._selected_point,
                                             self._mouse_position[1],
                                             self._mouse_position[0],
@@ -86,3 +84,5 @@ class CallControlPointToMouseCommand(InstantCommandBase):
     def activate(self):
         super().activate()
         self.execute()
+
+

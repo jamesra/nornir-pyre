@@ -11,10 +11,16 @@ class ViewType(enum.StrEnum):
 
 
 def convert_to_key(key: str | enum.Enum) -> str:
-    """Converts a key to a string"""
+    """Converts a key to a stable string key.
+
+    For Enum values we prefer the underlying string value (e.g. ViewType.Source -> "Source")
+    instead of enum member name (which can be an alias like "Fixed").
+    """
+    if isinstance(key, enum.Enum):
+        value = key.value
+        if isinstance(value, str):
+            return value
+        return key.name
     if isinstance(key, str):
         return key
-    elif isinstance(key, enum.Enum):
-        return key.name
-    else:
-        raise TypeError(f"key must be a string or ViewType, not {type(key)}")
+    raise TypeError(f"key must be a string or ViewType, not {type(key)}")

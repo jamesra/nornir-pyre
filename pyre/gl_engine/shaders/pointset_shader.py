@@ -62,12 +62,12 @@ class PointSetShader(BaseShader):
     _pointset_layout: VertexArrayLayout | None = None
 
     @property
-    def vertex_layout(self) -> VertexArrayLayout:
+    def vertex_layout(self) -> VertexArrayLayout | None:
         """The layout of the vertex buffer"""
         return self._vertex_layout
 
     @property
-    def pointset_layout(self) -> VertexArrayLayout:
+    def pointset_layout(self) -> VertexArrayLayout | None:
         """
         The layout for the pointset buffer.
         SourceX, SourceY, TargetX, TargetY for each point
@@ -101,6 +101,7 @@ class PointSetShader(BaseShader):
             self._vertex_location = gl.glGetAttribLocation(self.program, "vertex_position")
             if self._vertex_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._vertex_location is not None
         return self._vertex_location
 
     @property
@@ -109,6 +110,7 @@ class PointSetShader(BaseShader):
             self._vertex_texture_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
             if self._vertex_texture_location == -1:
                 raise ValueError("Could not find texture coordinate attribute")
+        assert self._vertex_texture_location is not None
         return self._vertex_texture_location
 
     @property
@@ -117,6 +119,7 @@ class PointSetShader(BaseShader):
             self._point_source_offset_location = gl.glGetAttribLocation(self.program, "point_source_offset")
             if self._point_source_offset_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._point_source_offset_location is not None
         return self._point_source_offset_location
 
     @property
@@ -125,6 +128,7 @@ class PointSetShader(BaseShader):
             self._point_target_offset_location = gl.glGetAttribLocation(self.program, "point_target_offset")
             if self._point_target_offset_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._point_target_offset_location is not None
         return self._point_target_offset_location
 
     @property
@@ -141,6 +145,7 @@ class PointSetShader(BaseShader):
             self._tween_location = gl.glGetUniformLocation(self.program, "tween")
             if self._tween_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._tween_location is not None
         return self._tween_location
 
     @property
@@ -150,6 +155,7 @@ class PointSetShader(BaseShader):
                                                                             "view_projection_matrix")
             if self._view_projection_matrix_location == -1:
                 raise ValueError("Could not find attribute")
+        assert self._view_projection_matrix_location is not None
         return self._view_projection_matrix_location
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating],

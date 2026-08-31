@@ -1,17 +1,18 @@
-import wx.glcanvas
-
-wx_GL_CONTEXT_CREATED_EventType = wx.NewEventType()
-wx_EVT_GL_CONTEXT_CREATED = wx.PyEventBinder(wx_GL_CONTEXT_CREATED_EventType, 1)
+from PyQt6.QtCore import QEvent
+from PyQt6.QtGui import QOpenGLContext
 
 
-class wxGLContextCreatedEvent(wx.PyEvent):
-    """A wx window event that is sent when a new GL context is created so GL objects can be created in that context"""
-    _context: wx.glcanvas.GLContext
+class QtGLContextCreatedEvent(QEvent):
+    """A Qt event that is sent when a new GL context is created so GL objects can be created in that context"""
+    # Create a custom event type
+    EVENT_TYPE = QEvent.Type(QEvent.Type.User + 2)
+
+    _context: QOpenGLContext
 
     @property
-    def context(self) -> wx.glcanvas.GLContext:
+    def context(self) -> QOpenGLContext:
         return self._context
 
-    def __init__(self, context: wx.glcanvas.GLContext, id: int = wx.ID_ANY):
-        super().__init__(eventType=wx_GL_CONTEXT_CREATED_EventType, id=id)
+    def __init__(self, context: QOpenGLContext):
+        super().__init__(QtGLContextCreatedEvent.EVENT_TYPE)
         self._context = context

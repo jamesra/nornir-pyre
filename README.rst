@@ -1,85 +1,129 @@
 Pyre
 ====
 
-A Python-based image registration and visualization tool written by James Anderson and Drew Ferrel
+A Python-based image registration and visualization tool for scientific image processing, developed as part of the Nornir project.
+
+Documentation
+~~~~~~~~~~~~~
+
+* **Full manual (umbrella):** https://nornir.github.io/
+* **Windows install (end users):** https://nornir.github.io/packages/pyre_install.html
+* **Development and packaging:** https://nornir.github.io/development/pyre_development.html
+* **Related overview:** https://nornir.github.io/packages/other_packages.html
+
+Overview
+~~~~~~~~
+
+Pyre (Python Registration Environment) is a powerful tool for visualizing, aligning, and registering large scientific image datasets. It provides an interactive interface for:
+
+* Manual and automatic image alignment
+* Visualization of image transformations
+* Creation and editing of spatial transformations between images
+* Management of image mosaics and volumes
+* Integration with the broader Nornir image processing ecosystem
+
+Pyre is particularly useful for neuroscience applications, including the alignment of serial section microscopy images, but can be applied to any domain requiring precise image registration.
+
+Project Structure
+~~~~~~~~~~~~~~~~
+
+The nornir-pyre package is organized into several key modules:
+
+* **pyre.gl_engine**: OpenGL rendering engine for high-performance image visualization
+* **pyre.ui**: User interface components built with PyQt6
+* **pyre.views**: View implementations for different visualization modes
+* **pyre.state**: State management and manager implementations
+* **pyre.controllers**: Active transform (and similar) state/behavior used by the UI and commands (e.g. TransformController)
+* **pyre.commands**: Command pattern implementations for operations
+* **pyre.interfaces**: Interface definitions for dependency injection
 
 Installation
 ~~~~~~~~~~~~
 
-Pre-Install
------------
-    **Install git:** `http://git-scm.com/ <https://git-scm.com>`_
+Windows (recommended for lab users)
+-----------------------------------
 
-    **Open command Prompt or Terminal Window**
+Download and run ``Pyre-<version>-Setup.exe`` from GitHub Releases. No Python, Git,
+or virtual environment is required. See the install guide:
 
-    1. Check active Python (version needs to be >= 3.13.2)::
+https://nornir.github.io/packages/pyre_install.html
 
-        python --version
+Development install (monorepo)
+------------------------------
 
-    2. If Python is not >= 13.3.2, install latest python: https://www.python.org/downloads/
-        a. Be sure to check the option to add python to the environment variables.
-    3. Close and reopen the prompt/terminal.
-    4. Ensure new python is returned when executing --version command above.
+Requires Python **3.13+** and an umbrella Nornir checkout with sibling packages.
+Full setup, editable installs, and debugging are documented at:
 
+https://nornir.github.io/development/pyre_development.html
 
-Installing Pyre and its dependencies
-------------------------------------
-1. Create a new Python environment (recommended)::
+Quick start after editable installs::
 
-    **Open a Command Prompt or Terminal Window**
-
-    # Using venv
-    python -m venv pyre-env
-
-    # Activate the environment
-    # On Windows:
-    pyre-env\Scripts\activate
-    # On Linux/Mac:
-    source pyre-env/bin/activate
-
-2. Install dependencies using the requirements file
-    Download the requirements file directly from GitHub
-    `requirements-v1.5.2.txt <https://raw.githubusercontent.com/jamesra/nornir-pyre/dev/requirements-v1.5.2.txt>`_
-
-    Run the install command below from the same folder you downloaded the requirements into::
-
-        pip install -r requirements-v1.5.2.txt
-
+    pyre
+    python -m pyre
 
 Running Pyre
 ------------
-    Ensure python environment is active::
 
-        pyre-env\Scripts\activate
+With the environment active::
 
-    Start Pyre::
+    pyre
+    python -m pyre
+    python -m pyre -stos path\to\section.stos
 
-        python -m pyre
+Software OpenGL fallback (development troubleshooting)::
+
+    set PYOPENGL_PLATFORM=software
+    pyre
 
 
+Common Workflows
+~~~~~~~~~~~~~~~
 
-Checking the `repository <https://github.com/jamesra/nornir-pyre/blob/OpenGL>`_ for a later version of the requirements file is also advisable. (Docs updated May 13th 2025)
+Image Registration
+-----------------
 
+1. Load a pair of images for registration:
 
-Alternative Installation Methods
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   * Use File > Open STOS to load an existing transformation
+   * Or use File > New STOS to create a new transformation between two images
 
-**Using pip directly with git repositories**:
+2. Add control points (triangulation / standard STOS transforms with movable control points):
 
-If you prefer to install the latest development versions directly, you can use::
+   * Use Shift+Click to add corresponding points in both images
+   * Use Alt+Shift+Click to add a point and auto-align it
 
-    pip install git+https://github.com/jamesra/nornir-shared.git@dev-v1.5.2
-    pip install git+https://github.com/jamesra/nornir-pools.git@dev-v1.5.2
-    pip install git+https://github.com/jamesra/nornir-imageregistration.git@cupy-v1.6.5
-    pip install git+https://github.com/jamesra/nornir-buildmanager.git@dev-v1.6.5
-    pip install git+https://github.com/jamesra/nornir-pyre.git@dev-v1.5.2
+   Refined grid transforms do not support adding or removing control points via the UI (use triangulation or convert workflow if you need to edit the mesh).
 
+3. Align the images:
+
+   * Rigid transforms: Space runs a local BruteForce refine (±5° at 1° steps) keeping scale; Shift+Space also refines scale
+   * Mesh / grid / RBF: Space auto-aligns the selected control point; Shift+Space auto-aligns all points
+   * Manually adjust points by dragging them
+
+4. Save the transformation:
+
+   * Use File > Save STOS to save the transformation
+
+Mosaic Viewing
+-------------
+
+1. Load a mosaic:
+
+   * Use File > Open Mosaic to load an existing mosaic file
+
+2. Navigate the mosaic:
+
+   * Use WASD keys or right-click drag to pan
+   * Use mouse wheel to zoom; Shift+scroll scales the transform about the cursor when supported; Ctrl+scroll (and Ctrl+Shift+scroll for finer steps) rotates the transform when supported
+   * Use Page Up / Page Down to change magnification
 
 Usage
 ~~~~~
 
 Mouse Controls
 --------------
+
+The bindings below apply to STOS registration views. Triangulation transforms support adding points; refined grid transforms do not (see workflows above).
 
 Left Button:
     * Click to select an existing point
@@ -90,11 +134,12 @@ Left Button:
     * Alt+Click to move currently selected point to mouse position
 
 Right Button:
-    * Shift+Click to delete a point
+    * Shift+Click to delete a point (triangulation transforms; not available on refined grid transforms)
     * Click+drag to move the view
 
 Scroll wheel:
     * Zoom
+    * Shift+scroll to scale warped image about the cursor (rigid / similarity transforms)
     * Ctrl+scroll to rotate warped image
     * Ctrl+Shift+scroll to slowly rotate warped image
 
@@ -109,17 +154,49 @@ View Controls:
     * M: Match the view on all windows to look at the same point as the current window (Not Functional for Warped Image)
     * L: Show transform mesh lines
     * F: Flip the warped image
-    * Tab: Change properties of the view. A warped image may be displayed as it appears registered. The composite view will switch to a different view.
+    * Tab: Toggle how the warped image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
 
 Alignment:
-    * Space: Auto-align the selected point
-    * Shift+Space: Auto-align all points
+    * Rigid: Space refines angle (±5° at 1° steps); Shift+Space also refines scale
+    * Mesh / grid / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
 
 Undo/Redo:
     * Ctrl+Z: Undo a step
     * Ctrl+X: Redo a step
 
+Troubleshooting
+~~~~~~~~~~~~~~
+
+OpenGL Issues
+------------
+If you encounter OpenGL-related errors:
+
+1. Ensure your graphics drivers are up to date
+2. Try running with software rendering::
+
+    set PYOPENGL_PLATFORM=software
+    pyre
+3. Check the console output for specific OpenGL context errors
+
+Image Loading Issues
+------------------
+If images fail to load:
+
+1. Verify the file paths are correct and accessible
+2. Check that the image format is supported (TIFF, PNG, JPEG, etc.)
+3. For large images, ensure you have sufficient RAM available
+
+Performance Issues
+----------------
+If the application is running slowly:
+
+1. Close other memory-intensive applications
+2. For large images, consider using lower-resolution versions for alignment
+3. Disable mesh line display (L key) when not needed
+
 About
 ~~~~~
 
-Pyre was written by James Anderson and Drew Ferrell
+Pyre was developed by James Anderson and Drew Ferrell as part of the Nornir project, a suite of tools for scientific image processing and analysis. The project is particularly focused on neuroscience applications but is applicable to any domain requiring precise image registration and analysis.
+
+For more information about the QT migration, see the QT_MIGRATION_README.md file.

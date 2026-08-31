@@ -10,10 +10,10 @@ from pyre.container import IContainer
 
 @dataclass
 class PointRegistrationSettings:
-    alignment_area: NDArray[int]
-    angles_to_search: NDArray[float]
+    alignment_area: NDArray[np.integer]
+    angles_to_search: NDArray[np.floating]
     #
-    # def __init__(self, alignment_area: NDArray[int], angles_to_search: NDArray[float]):
+    # def __init__(self, alignment_area: NDArray[np.integer], angles_to_search: NDArray[np.floating]):
     #     self.alignment_area = alignment_area
     #     self.angles_to_search = angles_to_search
     #
@@ -28,3 +28,4 @@ class PointRegistrationSettings:
     #                                  step=_alignment_angle_step)
     #
     #     return PointRegistrationSettings(alignment_area=alignment_area, angles_to_search=angles_to_search)
+

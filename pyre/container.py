@@ -1,8 +1,10 @@
 from __future__ import annotations
 import abc
+import logging
 import os
 import sys
-import pydantic
+
+logger = logging.getLogger(__name__)
 from typing import Generator
 from importlib import resources
 
@@ -17,13 +19,13 @@ from pyre.interfaces.managers import (ICommandHistory, IControlPointActionMap, I
                                       IWindowManager, IControlPointMapManager, ControlPointManagerKey, IActionMap)
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.action import ControlPointAction
-from pyre.command_interfaces import ICommand, IInstantCommand
+from pyre.interfaces import ICommand, IInstantCommand
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
 from pyre.settings import AppSettings
 from pyre.space import Space
 from nornir_imageregistration.transforms.transform_type import TransformType
 
-ControlPointActionCommandMapType = Dict[ControlPointAction, AbstractFactory[ICommand]]
+ControlPointActionCommandMapType = Dict[ControlPointAction, AbstractFactory[ICommand]]  # type: ignore[type-arg]
 
 
 def find_file_in_syspath(filename) -> Generator[str, None, None]:
@@ -34,49 +36,44 @@ def find_file_in_syspath(filename) -> Generator[str, None, None]:
     return None
 
 
-def load_yaml_settings() -> object:
-    try:
-        current_directory = os.path.dirname(__file__)
-        cwd_config = resources.files('pyre').joinpath('config.yaml')
-        with open(cwd_config, 'r') as file:
-            return yaml.load(file, Loader=yaml.FullLoader)
-    except:
-        print("Failed to load configuration file: " + cwd_config)
-
-    for configuration in find_file_in_syspath('config.yaml'):
-        try:
-            with open(configuration, 'r') as file:
-                return yaml.load(file, Loader=yaml.FullLoader)
-        except:
-            print("Failed to load configuration file: " + configuration)
-
-    print(f"Failed to find config.yaml configuration file in {sys.path}")
-    return AppSettings()
-
-
 def load_json_settings() -> AppSettings:
-    try:
-        current_directory = os.path.dirname(__file__)
-        cwd_config = resources.files('pyre').joinpath('settings.json')
-        return AppSettings.model_validate_json(cwd_config)
+    from pyre.frozen_paths import is_frozen, user_settings_path
 
+    if is_frozen():
+        frozen_settings = user_settings_path()
+        if os.path.isfile(frozen_settings):
+            try:
+                with open(frozen_settings, encoding='utf-8') as frozen_file:
+                    return AppSettings.model_validate_json(frozen_file.read())
+            except Exception:
+                logger.warning("Failed to load frozen settings file: %s", frozen_settings)
+
+    try:
+        cwd_config = resources.files('pyre').joinpath('settings.json')
+        json_str = cwd_config.read_text(encoding='utf-8')
+        return AppSettings.model_validate_json(json_str)
     except Exception as e:
-        print(f"Failed to load configuration file: {cwd_config}\n{e}")
+        logger.exception("Failed to load configuration file: %s", cwd_config)
 
     for configuration in find_file_in_syspath('settings.json'):
         try:
-            return AppSettings.parse_file(cwd_config)
-        except:
-            print("Failed to load configuration file: " + configuration)
+            with open(configuration, encoding='utf-8') as f:
+                return AppSettings.model_validate_json(f.read())
+        except Exception:
+            logger.warning("Failed to load configuration file: %s", configuration)
 
-    print(f"Failed to find settings.json configuration file in {sys.path}")
+    logger.error("Failed to find settings.json configuration file in %s", sys.path)
     return AppSettings()
 
 
 class IContainer(containers.DeclarativeContainer):
-    """Interface to the dependency injection container for the application components."""
+    """Interface to the dependency injection container for the application components.
+
+    config: dependency_injector Configuration (container-level configuration).
+    settings: Application settings loaded from settings.json (AppSettings, canonical format).
+    """
     config: providers.Configuration = providers.Configuration()
-    logger: providers.Resource = None
+    logger: providers.Resource | None = None
 
     history_manager: providers.AbstractSingleton[ICommandHistory] = providers.AbstractSingleton(ICommandHistory)
     region_map: providers.Factory[IRegionMap] = providers.AbstractFactory(IRegionMap)
@@ -84,9 +81,9 @@ class IContainer(containers.DeclarativeContainer):
         IMousePositionHistoryManager)
     command_history: providers.AbstractSingleton[ICommandHistory] = providers.AbstractSingleton(ICommandHistory)
     image_manager: providers.AbstractSingleton[IImageManager] = providers.AbstractSingleton(IImageManager)
-    transform_glbuffermanager: providers.AbstractSingleton[
+    transform_gl_buffer_manager: providers.AbstractSingleton[
         ITransformControllerGLBufferManager] = providers.AbstractSingleton(ITransformControllerGLBufferManager)
-    imageviewmodel_manager: providers.AbstractSingleton[IImageViewModelManager] = providers.AbstractSingleton(
+    image_viewmodel_manager: providers.AbstractSingleton[IImageViewModelManager] = providers.AbstractSingleton(
         IImageViewModelManager)
     glcontext_manager: providers.AbstractSingleton[IGLContextManager] = providers.AbstractSingleton(IGLContextManager)
     window_manager: providers.AbstractSingleton[IWindowManager] = providers.AbstractSingleton(IWindowManager)
@@ -96,26 +93,21 @@ class IContainer(containers.DeclarativeContainer):
 
     control_point_manager_key = providers.AbstractFactory(
         ControlPointManagerKey)  # Returns the key for the configured transform controller and space
-    controlpointmap_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
+    control_point_map_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()
 
-    transform_control_point_action_maps: providers.Dict[
-        TransformType, providers.AbstractFactory[IControlPointActionMap]] = providers.Dict()
+    transform_control_point_action_maps: providers.Dict = providers.Dict()  # type: ignore[type-arg]
 
-    action_command_map: providers.Dict[TransformType, providers.Dict[ControlPointAction, AbstractFactory[ICommand]]] = \
-        providers.Dict({t: \
-                            {action: providers.AbstractFactory(ICommand) for action in iter(ControlPointAction)} \
-                        for t in iter(TransformType)}
-                       )
+    # Application containers are expected to override this with concrete providers.
+    action_command_map: providers.Dict = providers.Dict({})  # type: ignore[type-arg]
 
     # We want a different set of transform commands for each type of transform
     # action_command_map: providers.Dict[TransformType, ControlPointActionCommandMapType] = providers.Dict({})
 
-    transform_action_map: providers.Dict[TransformType, IControlPointActionMap] = \
-        providers.Dict({
-            TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
-            TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
-            TransformType.RIGID: providers.AbstractFactory(IActionMap),
-            TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
-        })
+    transform_action_map: providers.Dict = providers.Dict({  # type: ignore[type-arg]
+        TransformType.GRID: providers.AbstractFactory(IControlPointActionMap),
+        TransformType.MESH: providers.AbstractFactory(IControlPointActionMap),
+        TransformType.RIGID: providers.AbstractFactory(IActionMap),
+        TransformType.RBF: providers.AbstractFactory(IControlPointActionMap)
+    })
 
     settings = providers.Resource(load_json_settings)

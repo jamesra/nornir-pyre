@@ -46,7 +46,7 @@ _transform_fragment_shader_program = """
 
 class TransformShader(BaseShader):
     """
-    This is a shader that has a pair of verticies and textures for source/target space and can tween between them
+    This is a shader that has a pair of vertices and textures for source/target space and can tween between them
     """
 
     _source_texture_location: int | None = None
@@ -148,8 +148,8 @@ class TransformShader(BaseShader):
         :param model_view_proj_matrix: The model view projection matrix
         :param source_texture: The source texture
         :param target_texture: The target texture
-        :param vertex_array_object: The vertex array object with verticies defined for source and target space verticies and texture coordinates
-        :param vertex_tween: The fractional amount of the tween between source and target space for verticies
+        :param vertex_array_object: The vertex array object with vertices defined for source and target space vertices and texture coordinates
+        :param vertex_tween: The fractional amount of the tween between source and target space for vertices
         :param texture_tween: The fractional amount of the tween between source and target textures
         """
         try:
@@ -157,8 +157,8 @@ class TransformShader(BaseShader):
             check_for_error()
             vertex_array_object.bind()
 
-            bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
-            bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
+            bind_texture(source_texture, self.source_texture_location or 0, gl.GL_TEXTURE0)
+            bind_texture(target_texture, self.target_texture_location or 0, gl.GL_TEXTURE1)
 
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0

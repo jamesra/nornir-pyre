@@ -3,17 +3,17 @@ from __future__ import annotations
 import enum
 
 from dependency_injector.providers import Provider, Configuration
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
 import numpy as np
-from numpy._typing import NDArray
-import wx
+from numpy.typing import NDArray
+from PyQt6.QtWidgets import QWidget
 from pyre.observable import ObservableSet, ObservedAction
 from pyre.observable import SetOperation
 
 import nornir_imageregistration
 import pyre
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, UICommandBase, NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ControlPointManagerKey, \
     IControlPointMapManager
@@ -28,20 +28,19 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
     """
     _selection_set: ObservableSet[int]  # The indices of the selected points
 
-    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.control_point_map_manager]
     # _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     # _config: Configuration = Provide[IContainer.config]
     _command_action_points: set[int]
     _set_operation: SetOperation
 
-    @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
                  space: Space,  # Space we are moving the points in, source or target side
                  set_operation: SetOperation,
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,
 
                  **kwargs):
         """

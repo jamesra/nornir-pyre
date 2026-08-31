@@ -1,24 +1,22 @@
 from __future__ import annotations
 
 from dependency_injector.wiring import Provide, inject
+from PyQt6.QtWidgets import QStatusBar, QWidget, QLabel
+from PyQt6.QtCore import QSize, Qt
 
 import nornir_imageregistration
 from pyre.space import Space
 from pyre.interfaces.readonlycamera import IReadOnlyCamera
 import pyre.controllers.transformcontroller
-from pyre.interfaces.managers.mousepositionhistorymanager import IMousePositionHistoryManager
+from pyre.interfaces.managers.mouse_position_history_manager import IMousePositionHistoryManager
 from pyre.container import IContainer
 
-try:
-    import wx
-except:
-    print("Ignoring wx import failure, assumed documentation use, otherwise please install wxPython")
 
-
-class CameraStatusBar(wx.StatusBar):
-    _camera_window: wx.Window  # Window that the camera is rendering to and we track mouse events on
+class CameraStatusBar(QStatusBar):
+    _camera_window: QWidget  # Window that the camera is rendering to and we track mouse events on
     _window_height: int
     _window_width: int
+    _labels: list[QLabel]  # Labels for each field in the status bar
 
     _mouse_position_history_manager: IMousePositionHistoryManager
 
@@ -40,51 +38,71 @@ class CameraStatusBar(wx.StatusBar):
 
     @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  camera: IReadOnlyCamera,
-                 camera_window: wx.Window,
+                 camera_window: QWidget,
                  mouse_position_history_manager: IMousePositionHistoryManager = Provide[
                      IContainer.mouse_position_history],
                  **kwargs):
         self._camera = camera
         self._camera_window = camera_window
-        # self._space = space
         super(CameraStatusBar, self).__init__(parent, **kwargs)
-        self.SetFieldsCount(3)
-        # self._camera_window.Bind(wx.EVT_MOTION, self.OnMouseMotion)
-        parent.Bind(wx.EVT_SIZE, self.OnSize)
-        parent.Bind(wx.EVT_SIZING, self.OnSize)
-        self._camera.AddOnChangeEventListener(self.OnCameraChanged)
+        
+        # Create labels for each field
+        self._labels = []
+        for i in range(3):
+            label = QLabel("")
+            self._labels.append(label)
+            self.addPermanentWidget(label, 1)  # Equal stretch for all labels
+        
+        # Connect to parent's resize event
+        parent.resizeEvent = self._wrap_resize_event(parent.resizeEvent)  # type: ignore[assignment]
+        
+        # Connect to camera change events
+        self._camera.AddOnChangeEventListener(self.onCameraChanged)
 
-        self._window_width, self._window_height = self._camera_window.GetSize()
-        wx.CallAfter(self.OnSize, None)
+        self._window_width, self._window_height = camera_window.size().width(), camera_window.size().height()
+        
+        # Connect to mouse position history manager
+        mouse_position_history_manager.add_mouse_position_update_event_listener(self.on_position_update)  # type: ignore[arg-type]
 
-        mouse_position_history_manager.add_mouse_position_update_event_listener(self.on_position_update)
+    def _wrap_resize_event(self, original_handler):
+        """Wrap the parent's resize event to also handle our size updates"""
+        def wrapped_handler(event):
+            # Call the original handler if it exists
+            if original_handler:
+                original_handler(event)
+            # Then handle our size update
+            self.onSize(event)
+        return wrapped_handler
 
-    def OnCameraChanged(self):
+    def onCameraChanged(self):
         if self._window_height != 0:
             zoom_percentage = self.camera.scale * 100.0
-            self.SetStatusText('Zoom: %4.2f%%' % zoom_percentage, 2)
+            self.setStatusText(f'Zoom: {zoom_percentage:4.2f}%', 2)
         else:
-            self.SetStatusText('Zoom: 100%', 2)
+            self.setStatusText('Zoom: 100%', 2)
 
     def on_position_update(self, space: Space, position: tuple[float, float]):
         self.update_status_bar(space, position)
 
-    def OnSize(self, event):
-        self._window_width, self._window_height = self._camera_window.GetSize()
+    def onSize(self, event):
+        self._window_width = self._camera_window.size().width()
+        self._window_height = self._camera_window.size().height()
 
-        if event is not None:
-            event.Skip()
+    def setStatusText(self, text: str, field: int):
+        """Set the text for a specific field in the status bar"""
+        if 0 <= field < len(self._labels):
+            self._labels[field].setText(text)
 
     def update_status_bar(self, space: Space, point: tuple[float, float]):
         if space == Space.Source:
             src_txt = f'Source/Warped: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
-            self.SetStatusText(src_txt, 0)
+            self.setStatusText(src_txt, 0)
         elif space == Space.Target:
             tgt_txt = f'Target/Fixed: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
-            self.SetStatusText(tgt_txt, 1)
+            self.setStatusText(tgt_txt, 1)
         else:
             raise ValueError("Invalid space")
 
-        self.Refresh()
+        self.update()

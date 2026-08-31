@@ -8,7 +8,7 @@ include = ["pyre", "pyre.*"]
 
 [project]
 name = "pyre"
-version = "1.5.2"
+version = "1.7.4"
 authors = [
     { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
 ]
@@ -26,7 +26,8 @@ dependencies = [
     "pillow>=2.3",
     "pydantic >= 2.9.2",
     "PyYAML>=6.0.2",
-    "wxPython>=4.0",
+    "PyQt6>=6.6.0",
+    "PyQt6-sip>=13.6.0",
     "nornir_shared @ git+https://github.com/jamesra/nornir-shared.git@dev-v1.5.2",
     "nornir_pools @ git+https://github.com/jamesra/nornir-pools.git@dev-v1.5.2",
     "nornir_imageregistration @ git+https://github.com/jamesra/nornir-imageregistration.git@cupy-v1.6.5",
@@ -40,7 +41,7 @@ classifiers = [
 
 
 [tool.setuptools.package-data]
-"pyre" = ["pyre/resources/*.png"]
+"pyre" = ["resources/*.png"]
 
 
 [project.optional-dependencies]

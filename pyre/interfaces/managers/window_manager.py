@@ -2,23 +2,24 @@ import abc
 from enum import Enum
 from typing import Callable
 
-import wx
+from PyQt6.QtWidgets import QMainWindow
 
 from pyre.interfaces.action import Action
 
-WindowManagerChangeCallback = Callable[[Action, str, wx.Frame], None]
+WindowManagerChangeCallback = Callable[[Action, str, QMainWindow], None]
 
 
 class IWindowManager(abc.ABC):
     """Tracks various windows and their associated frames"""
 
     @abc.abstractmethod
-    def add(self, key: str | Enum, frame: wx.Frame):
-        """Add an image to the manager"""
+    def add(self, key: str | Enum, frame: QMainWindow):
+        """Add a window to the manager"""
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def __getitem__(self, key: str | Enum) -> wx.Frame:
+    def __getitem__(self, key: str | Enum) -> QMainWindow:
+        """Get a window by key"""
         raise NotImplementedError()
 
     @abc.abstractmethod

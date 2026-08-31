@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 import dataclasses
 import enum
 from pyre.space import Space
+
+if TYPE_CHECKING:
+    import pyre.ui
 
 import numpy as np
 from numpy._typing import NDArray
@@ -15,10 +18,10 @@ from pyre.observable import ObservableSet
 
 
 class PointPair(NamedTuple):
-    target: NDArray[[2, ], np.floating]
-    source: NDArray[[2, ], np.floating]
+    target: NDArray[np.floating]
+    source: NDArray[np.floating]
 
-    def __getitem__(self, key: Space) -> NDArray[[2, ], np.floating]:
+    def __getitem__(self, key: Space) -> NDArray[np.floating]:
         if key == Space.Source:
             return self.source
         elif key == Space.Target:
@@ -44,7 +47,7 @@ class SelectionEventData:
     position: NDArray[np.floating]  # The position of the event
     keycode: int | None = None  # The key code for keyboard events
     existing_selections: ObservableSet[
-        int] = None  # The indices of currently selected points.  Some commands need a single selection and this is used to determine if those commands can be activated
+        int] | None = None  # The indices of currently selected points.  Some commands need a single selection and this is used to determine if those commands can be activated
 
     @property
     def eventkey(self) -> SelectionEventKey:
@@ -66,52 +69,52 @@ class SelectionEventData:
     @property
     def IsLeftMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            self.modifiers & InputModifiers.LeftMouseButton
+            bool(self.modifiers & InputModifiers.LeftMouseButton)
 
     @property
     def IsMiddleMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.MiddleMouseButton & self.modifiers
+            bool(InputModifiers.MiddleMouseButton & self.modifiers)
 
     @property
     def IsRightMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.RightMouseButton & self.modifiers
+            bool(InputModifiers.RightMouseButton & self.modifiers)
 
     @property
     def IsBackMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.BackMouseButton & self.modifiers
+            bool(InputModifiers.BackMouseButton & self.modifiers)
 
     @property
     def IsForwardMousePressed(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.ForwardMouseButton & self.modifiers
+            bool(InputModifiers.ForwardMouseButton & self.modifiers)
 
     @property
     def IsLeftMouseChanged(self) -> bool:
         return self.source == InputSource.Mouse and \
-            self.modifiers & InputModifiers.LeftMouseButtonChanged
+            bool(self.modifiers & InputModifiers.LeftMouseButtonChanged)
 
     @property
     def IsMiddleMouseChanged(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.MiddleMouseButtonChanged & self.modifiers
+            bool(InputModifiers.MiddleMouseButtonChanged & self.modifiers)
 
     @property
     def IsRightMouseChanged(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.RightMouseButtonChanged & self.modifiers
+            bool(InputModifiers.RightMouseButtonChanged & self.modifiers)
 
     @property
     def IsBackMouseChanged(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.BackMouseButtonChanged & self.modifiers
+            bool(InputModifiers.BackMouseButtonChanged & self.modifiers)
 
     @property
     def IsForwardMouseChanged(self) -> bool:
         return self.source == InputSource.Mouse and \
-            InputModifiers.ForwardMouseButtonChanged & self.modifiers
+            bool(InputModifiers.ForwardMouseButtonChanged & self.modifiers)
 
     @property
     def IsShiftPressed(self) -> bool:
@@ -220,3 +223,4 @@ class InputSource(enum.Enum):
     Touch = 2
     Pen = 3
     Keyboard = 4
+

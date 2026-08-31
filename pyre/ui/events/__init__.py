@@ -1,2 +1,2 @@
-from .gl_context_created_event import wxGLContextCreatedEvent
-from .invoke_on_main_thread_event import wxInvokeOnMainThreadEvent
+from .gl_context_created_event import QtGLContextCreatedEvent
+from .invoke_on_main_thread_event import QtInvokeOnMainThreadEvent

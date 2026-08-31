@@ -1,11 +1,12 @@
-'''
+"""
 Created on Feb 10, 2015
 
 @author: u0490822
-'''
+"""
 
 import numpy
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QMouseEvent
 
 import nornir_imageregistration.spatial
 from pyre.commands.uicommandbase import UICommandBase
@@ -15,6 +16,9 @@ import pyre.views
 class RectangleCommand(UICommandBase):
     '''
     The user interface to draw and size a rectangle
+
+    Legacy wx-era command kept for compatibility with old mosaic panel code.
+    New command routing uses UICommandBase mouse/key dispatch methods.
     '''
 
     @property
@@ -61,7 +65,8 @@ class RectangleCommand(UICommandBase):
         :param tuple origin: Origin of rectangle
         '''
 
-        super(RectangleCommand, self).__init__(parent, completed_func, camera)
+        super(RectangleCommand, self).__init__(parent, completed_func)
+        self.camera = camera  # type: ignore[attr-defined]
 
         self.Origin = origin
         self.LastMousePosition = origin
@@ -73,48 +78,58 @@ class RectangleCommand(UICommandBase):
             self.Origin[nornir_imageregistration.spatial.iPoint.Y]))
 
     def _bind_mouse_events(self):
-        self.parent.Bind(wx.EVT_MOTION, self.on_mouse_drag)
-        self.parent.Bind(wx.EVT_LEFT_UP, self.on_mouse_release)
+        # In Qt, we'll override the parent's event handlers
+        # The parent will call our methods directly
+        pass
 
     def _unbind_mouse_events(self):
-        self.parent.Unbind(wx.EVT_MOTION, handler=self.on_mouse_drag)
-        self.parent.Unbind(wx.EVT_LEFT_UP, handler=self.on_mouse_release)
+        # In Qt, we don't need to unbind events
         return
 
-    def _update_last_mouse_position(self, e):
+    def _update_last_mouse_position(self, e: QMouseEvent):
         '''Update the last mouse position using volume coordinates.
+        :param QMouseEvent e: Qt mouse event
         :return: Volume coordinates in numpy array (Y,X)
         '''
-        (y, x) = self.GetCorrectedMousePosition(e)
-        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
+        # Get the mouse position from the Qt event
+        pos = e.pos()
+        # Convert to GL coordinates (y is inverted in GL)
+        y = self.parent.height() - pos.y()
+        x = pos.x()
+
+        ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)  # type: ignore[union-attr]
         self.LastMousePosition = numpy.array((ImageY, ImageX))
 
         return numpy.array((ImageY, ImageX))
 
-    def on_mouse_drag(self, e):
+    def on_mouse_motion(self, e):
         '''
         :param obj e: wx mouse move object
-        :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL        
+        :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL
         '''
         try:
             self._update_last_mouse_position(e)
             print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
                                      self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
-            self.parent.Refresh()
+            self.parent.update()  # type: ignore[union-attr]
         finally:
             e.Skip()
         pass
 
+    # Legacy alias retained for old manual call sites.
+    def on_mouse_drag(self, e):
+        self.on_mouse_motion(e)
+
     def on_mouse_release(self, e):
         '''
         :param obj e: wx mouse move object
-        :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL        
+        :param tuple mouse_position: Position of the mouse on the screen, corrected for inverted Y coordinates in GL
         '''
         self._update_last_mouse_position(e)
         print("X: %g x Y: %g" % (self.LastMousePosition[nornir_imageregistration.spatial.iPoint.X],
                                  self.LastMousePosition[nornir_imageregistration.spatial.iPoint.Y]))
-        self.parent.Refresh()
-        self.end_command()
+        self.parent.update()  # type: ignore[union-attr]
+        self.end_command()  # type: ignore[attr-defined]
         return
 
     def draw(self):

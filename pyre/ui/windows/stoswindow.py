@@ -1,28 +1,49 @@
 import os
+import logging
+from concurrent.futures import Future, ThreadPoolExecutor
+
+import numpy as np
 
 from dependency_injector.wiring import Provide, inject
-import wx
+from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
+from PyQt6.QtGui import QAction
+from PyQt6.QtCore import Qt
 
 from nornir_shared import prettyoutput
 import nornir_imageregistration
-from nornir_imageregistration import StosFile
-from nornir_imageregistration.settings import GridRefinement
+from nornir_imageregistration.settings import GridRefinement, SliceToSliceMethod
 import nornir_imageregistration.transforms
 import nornir_pools as pools
 import pyre
+from pyre.common import (
+    SaveRegisteredWarpedImage,
+    build_stos_object_for_save,
+    save_stos_object,
+    stos_image_dims_from_stos_config,
+)
+from pyre.qt_eventmanager import qt_post_to_main
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
 from pyre.space import Space
 from pyre.container import IContainer
 from pyre.interfaces.managers import ICommandHistory, IImageManager, IImageViewModelManager, IImageLoader
+from pyre.interfaces.managers.window_manager import IWindowManager
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
 from pyre.interfaces.named_tuples import LoadStosResult
 import pyre.ui
 from pyre.ui.widgets import ImageTransformViewPanel
 from pyre.ui.windows.filedrop import FileDrop
+from pyre.ui.windows.help_dialog import ControlsHelpDialog
+from pyre.ui.window_geometry import apply_frame_geometry_to_widget, apply_saved_browser_geometry
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
 from pyre.observable import ObservableSet
+
+logger = logging.getLogger(__name__)
+
+_stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-stos-save")
+_warped_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-warped-save")
+_DEFAULT_BROWSER_LAYOUT_WIDTH = 350
 
 
 class StosWindow(PyreWindowBase):
@@ -33,13 +54,27 @@ class StosWindow(PyreWindowBase):
     _space: Space
     dirname: str = ''
     _view_type: ViewType
+    _folder_browser: 'StosFileBrowserWindow | None' = None  # shared across all StosWindow instances
+    _stos_save_in_progress: bool = False
+    _stos_save_initiator: 'StosWindow | None' = None
+    _save_stos_menu_actions: list[QAction] = []
+    _warped_save_in_progress: bool = False
+    _warped_save_initiator: 'StosWindow | None' = None
+    _save_warped_menu_actions: list[QAction] = []
     _selected_points: ObservableSet[int] = Provide[StosContainer.selected_points]
     _transform_controller: pyre.state.TransformController
-    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
+    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
     _history_manager: ICommandHistory = Provide[IContainer.history_manager]
     _config = Provide[IContainer.config]
     _settings: AppSettings = Provide[IContainer.settings]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
+    _menu_workarounds: QMenu
+    _action_reverse_angle: QAction
+    _menu_refinement: QMenu
+    _action_refine_rigid_angle: QAction
+    _action_refine_rigid_angle_scale: QAction
+    _action_refine_rigid_separator: QAction
+    _action_refine_grid: QAction
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -71,31 +106,23 @@ class StosWindow(PyreWindowBase):
         super(StosWindow, self).__init__(parent=parent, windowID=window_id, title=title)
 
         self._transform_controller = transform_controller
-        # self.imagepanel = wx.Panel(self, -1)
-        self._space = Space.Source if view_type == ViewType.Source else Space.Target
+        self._space = Space.Source if view_type in (ViewType.Source, ViewType.Composite) else Space.Target
         self._view_type = view_type
 
         self.FixedImageFullPath = None
         self.WarpedImageFullPath = None
-
-        ###FOR DEBUGGING####
-        # DataFullPath = os.path.join(os.getcwd(), "..", "Test","Data","Images")
-        # FixedImageFullPath = os.path.join(DataFullPath, "0225_mosaic_64.png")
-        # WarpedImageFullPath = os.path.join(DataFullPath, "0226_mosaic_64.png")
-        # pyre.IrTweakInit(FixedImageFullPath, WarpedImageFullPath)
-        ####################
 
         display_image_names = set([ViewType.Source.value, ViewType.Target.value]) if view_type == ViewType.Composite \
             else set([view_type.value])
 
         imagename_space_mapping = {}
         if view_type == ViewType.Composite:
-            imagename_space_mapping[ViewType.Source] = Space.Source
-            imagename_space_mapping[ViewType.Target] = Space.Target
+            imagename_space_mapping[ViewType.Source.value] = Space.Source
+            imagename_space_mapping[ViewType.Target.value] = Space.Target
         elif view_type == ViewType.Source:
-            imagename_space_mapping[ViewType.Source] = Space.Source
+            imagename_space_mapping[ViewType.Source.value] = Space.Source
         elif view_type == ViewType.Target:
-            imagename_space_mapping[ViewType.Target] = Space.Target
+            imagename_space_mapping[ViewType.Target.value] = Space.Target
         else:
             raise NotImplementedError("Unknown ViewType")
 
@@ -106,414 +133,587 @@ class StosWindow(PyreWindowBase):
                                                   imagename_space_mapping=imagename_space_mapping,
                                                   selected_points=self._selected_points)
 
-        # self.control = wx.StaticText(panel, -1, README_Import(self), size=(800,-1))
+        # Set the image panel as the central widget
+        self.setCentralWidget(self.imagepanel)
 
-        # Populate menu options into a File Dropdown menu.
+        # Create menu
+        self.createMenu()
+        self._transform_controller.AddOnModelReplacedEventListener(self._update_workarounds_menu_state)
+        self._transform_controller.AddOnModelReplacedEventListener(self._update_refinement_menu_state)
+        self._update_workarounds_menu_state()
+        self._update_refinement_menu_state()
 
-        self.CreateMenu()
+        # Add drag and drop support
+        self.file_drop = FileDrop(self)
 
-        # Allows Drag and Drop
-        dt = FileDrop(self)
-        self.SetDropTarget(dt)
+        # Show the window
+        self.show()
 
-        wx.CallAfter(self.setPosition)
+    @classmethod
+    def sync_window_visibility_menus(cls, window_manager: IWindowManager) -> None:
+        """Update Windows menu checkmarks to match each view's visibility."""
+        try:
+            source_visible = window_manager[ViewType.Source].isVisible()
+            target_visible = window_manager[ViewType.Target].isVisible()
+            composite_visible = window_manager[ViewType.Composite].isVisible()
+        except KeyError:
+            return
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            win = window_manager[view_type]
+            if not isinstance(win, StosWindow):
+                continue
+            win.menuShowFixedImage.setChecked(target_visible)  # type: ignore[union-attr]
+            win.menuShowWarpedImage.setChecked(source_visible)  # type: ignore[union-attr]
+            win.menuShowCompositeImage.setChecked(composite_visible)  # type: ignore[union-attr]
 
-        wx.CallAfter(self.Show, True)
+    def createMenu(self):
+        """Create the menu bar and menus"""
+        menuBar = QMenuBar(self)
+        self.setMenuBar(menuBar)
 
-        # Make sure we have a GL context before initializing view window
-        # wx.CallAfter(self.UpdateRawImageWindow)
+        # Create File menu
+        filemenu = self.__createFileMenu()
+        menuBar.addMenu(filemenu)
 
-    def CreateMenu(self):
-        menuBar = wx.MenuBar()
+        # Create Operations menu
+        opsmenu = self.__createOpsMenu()
+        menuBar.addMenu(opsmenu)
 
-        filemenu = self.__CreateFileMenu()
-        menuBar.Append(filemenu, "&File")
+        # Create Settings menu
+        settingsmenu = self.__createSettingsMenu()
+        menuBar.addMenu(settingsmenu)
 
-        opsmenu = self.__CreateOpsMenu()
-        menuBar.Append(opsmenu, "&Operations")
+        # Create Windows menu
+        self.windmenu = self.__createWindowsMenu()
+        menuBar.addMenu(self.windmenu)
 
-        self.windmenu = self.__CreateWindowsMenu()
-        menuBar.Append(self.windmenu, "&Windows")
+    def __createSettingsMenu(self) -> QMenu:
+        """Create the top-level Settings menu."""
+        menu = QMenu("&Settings", self)
+        menuTransforms = menu.addAction("&Transforms\u2026")
+        menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
+        return menu
 
-        self.Bind(wx.EVT_CLOSE, self.OnClose)
+    def __createWindowsMenu(self):
+        """Create the Windows menu"""
+        menu = QMenu("&Windows", self)
 
-        # self.imagepanel.SetDropTarget(FileDrop(self.imagepanel))
-
-        # self.SetDropTarget(TextDrop(self))
-        # self.DragAcceptFiles(True)
-
-        # print "Drop target set"
-
-        # print str(self.GetDropTarget())
-
-        self.SetMenuBar(menuBar)
-
-    def __CreateWindowsMenu(self):
-        menu = wx.Menu()
-        windowSubMenu = wx.Menu()
-
-        displayCount = wx.Display.GetCount()
+        from PyQt6.QtGui import QGuiApplication
+        displayCount = len(QGuiApplication.screens())
 
         if displayCount == 1:
             pass
         elif displayCount == 2:
-            submenuWindow1 = windowSubMenu.Append(wx.ID_ANY, "Left 1 Window View")
-            submenuWindow2 = windowSubMenu.Append(wx.ID_ANY, "Right 1 Window View")
-            windowSubMenu.AppendSeparator()
-            submenuWindow3 = windowSubMenu.Append(wx.ID_ANY, "2 Window View")
+            submenuWindow1 = menu.addAction("Left 1 Window View")
+            submenuWindow2 = menu.addAction("Right 1 Window View")
+            menu.addSeparator()
+            submenuWindow3 = menu.addAction("2 Window View")
 
-            self.Bind(wx.EVT_MENU, self.OnLeft1WindowView, submenuWindow1)
-            self.Bind(wx.EVT_MENU, self.OnRight1WindowView, submenuWindow2)
-            self.Bind(wx.EVT_MENU, self.On2WindowView, submenuWindow3)
-
-            menu.Append(wx.ID_ANY, "&Window Options", windowSubMenu)
+            submenuWindow1.triggered.connect(self.onLeft1WindowView)  # type: ignore[union-attr]
+            submenuWindow2.triggered.connect(self.onRight1WindowView)  # type: ignore[union-attr]
+            submenuWindow3.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
 
         elif displayCount >= 3:
-            submenuWindow1 = windowSubMenu.Append(wx.ID_ANY, "Left 1 Window View")
-            submenuWindow2 = windowSubMenu.Append(wx.ID_ANY, "Center 1 Window View")
-            submenuWindow3 = windowSubMenu.Append(wx.ID_ANY, "Right 1 Window View")
-            windowSubMenu.AppendSeparator()
-            submenuWindow4 = windowSubMenu.Append(wx.ID_ANY, "Left 2 Window View")
-            submenuWindow5 = windowSubMenu.Append(wx.ID_ANY, "Right 2 Window View")
-            windowSubMenu.AppendSeparator()
-            submenuWindow6 = windowSubMenu.Append(wx.ID_ANY, "3 Window View")
+            submenuWindow1 = menu.addAction("Left 1 Window View")
+            submenuWindow2 = menu.addAction("Center 1 Window View")
+            submenuWindow3 = menu.addAction("Right 1 Window View")
+            menu.addSeparator()
+            submenuWindow4 = menu.addAction("Left 2 Window View")
+            submenuWindow5 = menu.addAction("Right 2 Window View")
+            menu.addSeparator()
+            submenuWindow6 = menu.addAction("3 Window View")
 
-            self.Bind(wx.EVT_MENU, self.OnLeft1WindowView, submenuWindow1)
-            self.Bind(wx.EVT_MENU, self.OnCenter1WindowView, submenuWindow2)
-            self.Bind(wx.EVT_MENU, self.OnRight1WindowView, submenuWindow3)
-            self.Bind(wx.EVT_MENU, self.On2WindowView, submenuWindow4)
-            self.Bind(wx.EVT_MENU, self.OnRight2WindowView, submenuWindow5)
-            self.Bind(wx.EVT_MENU, self.On3WindowView, submenuWindow6)
+            submenuWindow1.triggered.connect(self.onLeft1WindowView)  # type: ignore[union-attr]
+            submenuWindow2.triggered.connect(self.onCenter1WindowView)  # type: ignore[union-attr]
+            submenuWindow3.triggered.connect(self.onRight1WindowView)  # type: ignore[union-attr]
+            submenuWindow4.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
+            submenuWindow5.triggered.connect(self.onRight2WindowView)  # type: ignore[union-attr]
+            submenuWindow6.triggered.connect(self.on3WindowView)  # type: ignore[union-attr]
 
-            menu.AppendMenu(wx.ID_ANY, "&Multiple display options", windowSubMenu)
+        # Add checkable menu items for showing different windows
+        self.menuShowFixedImage = menu.addAction("&Target Image")
+        self.menuShowFixedImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.triggered.connect(self.onShowTargetWindow)  # type: ignore[union-attr]
 
-        self.menuShowFixedImage = menu.Append(wx.ID_ANY, "&Target Image", kind=wx.ITEM_CHECK)
-        menu.Check(self.menuShowFixedImage.GetId(), True)
-        self.Bind(wx.EVT_MENU, self.OnShowTargetWindow, self.menuShowFixedImage)
+        self.menuShowWarpedImage = menu.addAction("&Source Image")
+        self.menuShowWarpedImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowWarpedImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowWarpedImage.triggered.connect(self.onShowSourceWindow)  # type: ignore[union-attr]
 
-        self.menuShowWarpedImage = menu.Append(wx.ID_ANY, "&Source Image", kind=wx.ITEM_CHECK)
-        menu.Check(self.menuShowWarpedImage.GetId(), True)
-        self.Bind(wx.EVT_MENU, self.OnShowSourceWindow, self.menuShowWarpedImage)
+        self.menuShowCompositeImage = menu.addAction("&Composite Image")
+        self.menuShowCompositeImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowCompositeImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowCompositeImage.triggered.connect(self.onShowCompositeWindow)  # type: ignore[union-attr]
 
-        self.menuShowCompositeImage = menu.Append(wx.ID_ANY, "&Composite Image", kind=wx.ITEM_CHECK)
-        menu.Check(self.menuShowCompositeImage.GetId(), True)
-        self.Bind(wx.EVT_MENU, self.OnShowCompositeWindow, self.menuShowCompositeImage)
+        menu.addSeparator()
 
-        menu.AppendSeparator()
-
-        menuRestoreOrientation = menu.Append(wx.ID_ANY, "&Restore Orientation")
-        self.Bind(wx.EVT_MENU, self.OnRestoreOrientation, menuRestoreOrientation)
-
-        return menu
-
-    @staticmethod
-    def __get_transform_type_from_menuitem(menu_item: wx.Menu) -> nornir_imageregistration.transforms.TransformType:
-        if menu_item is None:
-            raise ValueError('menu_item')
-
-        return nornir_imageregistration.transforms.TransformType[menu_item.ItemLabelText]
-
-    @staticmethod
-    def __get_cell_size_from_menuitem(menu_item: wx.Menu) -> tuple[int, int]:
-        if menu_item is None:
-            raise ValueError('menu_item')
-
-        option_parts = menu_item.ItemLabelText.split('x')
-        option = tuple(int(d) for d in option_parts)
-        return option
-
-    def OnSetCellSize(self, e):
-        from pyre.state import currentStosConfig
-
-        menu_id = e.Id
-        menu = e.EventObject
-        # Find the selected child_menu since Wx passes the parent for some insane reason
-        selected_item = list(filter(lambda m: m.Id == menu_id, menu.MenuItems))[0]
-
-        cell_size = self.__get_cell_size_from_menuitem(selected_item)
-        currentStosConfig.AlignmentTileSize = cell_size
-
-        self.UpdateCellSizeChecks(menu)
-
-    def OnSetTransformType(self, e):
-        menu_id = e.Id
-        menu = e.EventObject
-
-        # Find the selected child_menu since Wx passes the parent for some insane reason
-        selected_item = list(filter(lambda m: m.Id == menu_id, menu.MenuItems))[0]
-
-        transform_type = self.__get_transform_type_from_menuitem(selected_item)
-
-        if pyre.state.currentStosConfig.TransformType == transform_type:
-            print(f"transform is already {transform_type}, no change")
-            return
-
-        converter_kwargs = self.GetTransformConfig(transform_type)
-        if converter_kwargs is None:
-            print("User cancelled settings, transform conversion aborted")
-            return
-
-        # pyre.history.SaveState(setattr, pyre.state.currentStosConfig.TransformController, 'TransformModel',
-        #                               pyre.state.currentStosConfig.TransformController.TransformModel)
-        source_imageviewmodel = self._imageviewmodel_manager[ViewType.Source]
-        self.transform_controller.TransformModel = \
-            nornir_imageregistration.transforms.ConvertTransform(
-                self.transform_controller.TransformModel, transform_type,
-                source_image_shape=source_imageviewmodel.Image.shape,
-                **converter_kwargs)
-
-        print(f"Changed transform type to {transform_type}")
-        self.UpdateTransformTypeChecks(menu)
-        return
-
-    def OnLinearBlend(self, e):
-
-        blend_factor_percentage = wx.GetNumberFromUser("Select a linear blend factor from 0 to 100%",
-                                                       "Blend %",
-                                                       "Linear Blend",
-                                                       10, 0, 100,
-                                                       parent=self)
-        blend_factor = blend_factor_percentage / 100.0
-
-        pyre.common.LinearBlendTransform(blend_factor=blend_factor)
-
-    def GetTransformConfig(self, transform_type) -> dict[str, any]:
-        """Returns a dictionary containing arguments to ConvertTransform
-        :returns: A dictionary of parameters or None if user cancelled the dialog"""
-        if transform_type == nornir_imageregistration.transforms.TransformType.GRID:
-            return self.GetGridTransformConfig()
-
-        return {}
-
-    def GetGridTransformConfig(self) -> dict[str, any] | None:
-        """Show a UI to get the transform configuration"""
-        with pyre.ui.windows.GridTransformSettingsDialog(self) as dlg:
-            if dlg.ShowModal() == wx.ID_OK:
-                return {'grid_dims': dlg.grid_dims}
-            else:
-                return
-
-    def UpdateCellSizeChecks(self, menu: wx.Menu):
-        from pyre.state import currentStosConfig
-
-        for m in menu.MenuItems:
-            option_cell_size = self.__get_cell_size_from_menuitem(m)
-            m.Check(option_cell_size == currentStosConfig.AlignmentTileSize)
-            # print(m.IsChecked())
-
-        # menu.UpdateUI()
-
-    def UpdateTransformTypeChecks(self, menu: wx.Menu):
-
-        current_type = self.transform_controller.TransformModel.type
-
-        for m in menu.MenuItems:
-            menu_item_transform_type = self.__get_transform_type_from_menuitem(m)
-            m.Check(menu_item_transform_type == current_type)
-            # print(f'Checked: Evaluated: {menu_item_transform_type == current_type} Control State: {m.IsChecked()}')
-
-        # menu.UpdateUI()
-
-    def __CreateCellSizeMenu(self):
-        menu = wx.Menu()
-
-        cell_size_options = [(128, 128),
-                             (192, 192),
-                             (256, 256),
-                             (512, 512)]
-
-        for option in cell_size_options:
-            menu_option = menu.AppendCheckItem(wx.NewId(), f'{option[0]}x{option[1]}')
-            menu_option.cell_size_option = option
-            self.Bind(wx.EVT_MENU, self.OnSetCellSize, menu_option, menu_option.Id)
+        restoreSubmenu = menu.addMenu("&Restore Orientation")
+        assert restoreSubmenu is not None
+        menuRestoreCompositeOnly = restoreSubmenu.addAction("&Composite Only")
+        menuRestoreCompositeOnly.triggered.connect(  # type: ignore[union-attr]
+            self.onRestoreOrientationCompositeOnly)
+        menuRestoreAllWindows = restoreSubmenu.addAction("&All Windows")
+        menuRestoreAllWindows.triggered.connect(  # type: ignore[union-attr]
+            self.onRestoreOrientationAllWindows)
 
         return menu
 
-    def __CreateTransformMenu(self):
-        menu = wx.Menu()
+    def __createOpsMenu(self):
+        """Create the Operations menu"""
+        menu = QMenu("&Operations", self)
 
-        for key in nornir_imageregistration.transforms.TransformType.__members__.keys():
-            menu_option = menu.AppendCheckItem(wx.NewId(), key)
-            menu_option.transform_type = key
-            self.Bind(wx.EVT_MENU, self.OnSetTransformType, menu_option, menu_option.Id)
+        menuFlip = menu.addAction("&Flip Image")
+        menuFlip.triggered.connect(self.onFlipImage)  # type: ignore[union-attr]
+
+        convertSubmenu = menu.addMenu("Convert Transform &Type")
+        assert convertSubmenu is not None
+        convertToRigid = convertSubmenu.addAction("&Rigid")
+        convertToRigid.triggered.connect(self.onConvertToRigid)  # type: ignore[union-attr]
+        convertToGrid = convertSubmenu.addAction("&Grid")
+        convertToGrid.triggered.connect(self.onConvertToGrid)  # type: ignore[union-attr]
+        convertToMesh = convertSubmenu.addAction("&Mesh")
+        convertToMesh.triggered.connect(self.onConvertToMesh)  # type: ignore[union-attr]
+        convertToRbf = convertSubmenu.addAction("&RBF")
+        convertToRbf.triggered.connect(self.onConvertToRbf)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
+        rotateTranslateSubmenu = menu.addMenu("&Rotate translate estimate")
+        assert rotateTranslateSubmenu is not None
+        menuLogPolar = rotateTranslateSubmenu.addAction("Log Polar (Fast)")
+        menuLogPolar.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.LogPolar))
+        menuBruteForce = rotateTranslateSubmenu.addAction("Brute Force (Slow)")
+        menuBruteForce.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.BruteForce))
+
+        self._menu_refinement = menu.addMenu("&Refinement")
+        assert self._menu_refinement is not None
+        self._action_refine_rigid_angle = self._menu_refinement.addAction("Refine &angle (±5°)")
+        assert self._action_refine_rigid_angle is not None
+        self._action_refine_rigid_angle.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigidAngle)
+        self._action_refine_rigid_angle_scale = self._menu_refinement.addAction(
+            "Refine angle &and scale")
+        assert self._action_refine_rigid_angle_scale is not None
+        self._action_refine_rigid_angle_scale.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigidAngleScale)
+        self._action_refine_rigid_separator = self._menu_refinement.addSeparator()
+        assert self._action_refine_rigid_separator is not None
+        self._action_refine_grid = self._menu_refinement.addAction("Refine w/ &Grid")
+        assert self._action_refine_grid is not None
+        self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
+        menuInstructions = menu.addAction("&Mouse and Keyboard Help")
+        menuInstructions.triggered.connect(self.onInstructions)  # type: ignore[union-attr]
+
+        menuClearMasked = menu.addAction("&Clear All Masked points")
+        menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
+
+        menuClear = menu.addAction("&Reset Transform")
+        menuClear.triggered.connect(self.onResetTransform)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
+        # Obscure migration aids; keep at the bottom of Operations.
+        self._menu_workarounds = menu.addMenu("&Workarounds")
+        assert self._menu_workarounds is not None
+        self._action_reverse_angle = self._menu_workarounds.addAction("&Reverse Angle")
+        self._action_reverse_angle.triggered.connect(self.onReverseAngle)  # type: ignore[union-attr]
 
         return menu
 
-    def __CreateOpsMenu(self):
-        menu = wx.Menu()
+    def __createFileMenu(self):
+        """Create the File menu"""
+        filemenu = QMenu("&File", self)
 
-        menuFlip = menu.Append(wx.ID_ANY, "&Flip Image")
-        self.Bind(wx.EVT_MENU, self.OnFlipImage, menuFlip)
+        # Open stos action
+        menuOpenStos = filemenu.addAction("&Open stos file")
+        menuOpenStos.triggered.connect(self.onOpenStos)  # type: ignore[union-attr]
 
-        menuRotationTranslation = menu.Append(wx.ID_ANY, "&Rotate translate estimate")
-        self.Bind(wx.EVT_MENU, self.OnRotateTranslate, menuRotationTranslation)
+        # Open stos folder browser
+        menuOpenStosBrowser = filemenu.addAction("Open Stos &Folder Browser\u2026")
+        menuOpenStosBrowser.triggered.connect(self.onOpenStosFolderBrowser)  # type: ignore[union-attr]
 
-        menuGridRefine = menu.Append(wx.ID_ANY, "&Convert to refined grid")
-        self.Bind(wx.EVT_MENU, self.OnRefineGrid, menuGridRefine)
+        # Open fixed image action
+        menuOpenFixedImage = filemenu.addAction("&Open Fixed Image")
+        menuOpenFixedImage.triggered.connect(self.onOpenFixedImage)  # type: ignore[union-attr]
 
-        menu.AppendSeparator()
+        # Open warped image action
+        menuOpenWarpedImage = filemenu.addAction("&Open Warped Image")
+        menuOpenWarpedImage.triggered.connect(self.onOpenWarpedImage)  # type: ignore[union-attr]
 
-        menuInstructions = menu.Append(wx.ID_ABOUT, "&Keyboard Instructions")
-        self.Bind(wx.EVT_MENU, self.OnInstructions, menuInstructions)
+        # Open fixed image mask action
+        menuOpenFixedImageMask = filemenu.addAction("&Open Fixed Image Mask")
+        menuOpenFixedImageMask.triggered.connect(self.onOpenFixedImageMask)  # type: ignore[union-attr]
 
-        menuClearMasked = menu.Append(wx.ID_ANY, "&Clear All Masked points")
-        self.Bind(wx.EVT_MENU, self.OnClearMaskedPoints, menuClearMasked)
+        # Open warped image mask action
+        menuOpenWarpedImageMask = filemenu.addAction("&Open Warped Image Mask")
+        menuOpenWarpedImageMask.triggered.connect(self.onOpenWarpedImageMask)  # type: ignore[union-attr]
 
-        menuClear = menu.Append(wx.ID_ANY, "&Clear All points")
-        self.Bind(wx.EVT_MENU, self.OnClearAllPoints, menuClear)
+        filemenu.addSeparator()
 
-        menu.AppendSeparator()
+        # Save stos action
+        menuSaveStos = filemenu.addAction("&Save Stos File")
+        menuSaveStos.triggered.connect(self.onSaveStos)  # type: ignore[union-attr]
+        if menuSaveStos not in StosWindow._save_stos_menu_actions:
+            StosWindow._save_stos_menu_actions.append(menuSaveStos)
 
-        menu_linear_blend = menu.Append(wx.ID_ANY, "Linear Blend")
-        self.Bind(wx.EVT_MENU, self.OnLinearBlend, menu_linear_blend)
+        # Save warped image action
+        menuSaveWarpedImage = filemenu.addAction("&Save Warped Image")
+        menuSaveWarpedImage.triggered.connect(self.onSaveWarpedImage)  # type: ignore[union-attr]
+        if menuSaveWarpedImage not in StosWindow._save_warped_menu_actions:
+            StosWindow._save_warped_menu_actions.append(menuSaveWarpedImage)
 
-        _cell_size_menu = self.__CreateCellSizeMenu()
-        menu.AppendSubMenu(_cell_size_menu, "Align ROI Size", "How large of a region is used to auto-align points")
-        self.UpdateCellSizeChecks(_cell_size_menu)
+        filemenu.addSeparator()
 
-        menu.AppendSeparator()
-
-        transform_menu = self.__CreateTransformMenu()
-        menu.AppendSubMenu(transform_menu, "transform type", "Select the type of transform to use")
-        self.UpdateTransformTypeChecks(transform_menu)
-
-        menu.AppendSeparator()
-
-        self.Bind(wx.EVT_MENU, self.OnClearAllPoints, menuClear)
-
-        return menu
-
-    def __CreateFileMenu(self):
-
-        filemenu = wx.Menu()
-
-        # Menu options
-        menuOpenStos = filemenu.Append(wx.ID_ANY, "&Open stos file")
-        self.Bind(wx.EVT_MENU, self.OnOpenStos, menuOpenStos)
-
-        menuOpenFixedImage = filemenu.Append(wx.ID_ANY, "&Open Fixed Image")
-        self.Bind(wx.EVT_MENU, self.OnOpenFixedImage, menuOpenFixedImage)
-
-        menuOpenWarpedImage = filemenu.Append(wx.ID_ANY, "&Open Warped Image")
-        self.Bind(wx.EVT_MENU, self.OnOpenWarpedImage, menuOpenWarpedImage)
-
-        menuOpenFixedImageMask = filemenu.Append(wx.ID_ANY, "&Open Fixed Image Mask")
-        self.Bind(wx.EVT_MENU, self.OnOpenFixedImageMask, menuOpenFixedImageMask)
-
-        menuOpenWarpedImageMask = filemenu.Append(wx.ID_ANY, "&Open Warped Image Mask")
-        self.Bind(wx.EVT_MENU, self.OnOpenWarpedImageMask, menuOpenWarpedImageMask)
-
-        filemenu.AppendSeparator()
-
-        menuSaveStos = filemenu.Append(wx.ID_ANY, "&Save Stos File")
-        self.Bind(wx.EVT_MENU, self.OnSaveStos, menuSaveStos)
-
-        menuSaveWarpedImage = filemenu.Append(wx.ID_ANY, "&Save Warped Image")
-        self.Bind(wx.EVT_MENU, self.OnSaveWarpedImage, menuSaveWarpedImage)
-
-        filemenu.AppendSeparator()
-
-        menuExit = filemenu.Append(wx.ID_EXIT, "&Exit")
-        self.Bind(wx.EVT_MENU, self.OnExit, menuExit)
+        # Exit action
+        menuExit = filemenu.addAction("&Exit")
+        menuExit.triggered.connect(self.onExit)  # type: ignore[union-attr]
 
         return filemenu
 
-    #
-    # def OnImageViewModelManagerChange(self, manager: pyre.state.IImageViewModelManager,
-    #                                   key: str, action: pyre.state.Action, image_name: str):
-    #
-    #
-
-    # def UpdateRawImageWindow(self):
-    #
-    #     # if hasattr(self, 'imagepanel'):
-    #     #    del self.imagepanel
-    #
-    #     imageTransformView = None
-    #     if self.Composite:
-    #         imageTransformView = pyre.views.CompositeTransformView(glcontexmanager=self.config.glcontext_manager,
-    #                                                                FixedImageArray=state.currentStosConfig.FixedImageViewModel,
-    #                                                                WarpedImageArray=state.currentStosConfig.WarpedImageViewModel,
-    #                                                                transform_controller=state.currentStosConfig.transform_controller)
-    #     else:
-    #         imageViewModel = state.currentStosConfig.FixedImageViewModel
-    #         if not self.showFixed:
-    #             imageViewModel = state.currentStosConfig.WarpedImageViewModel
-    #
-    #         imageTransformView = pyre.views.ImageTransformView(space=self.space,
-    #                                                            glcontexmanager=self.config.glcontext_manager,
-    #                                                            ImageViewModel=imageViewModel,
-    #                                                            transform_controller=state.currentStosConfig.transform_controller)
-    #
-    #     self.imagepanel.image_transform_view = imageTransformView
-
-    def OnShowTargetWindow(self, e):
+    def onShowTargetWindow(self):
+        """Handle Show Target Window action"""
         window = self._window_manager[ViewType.Target.value]
-        window.Shown = not window.Shown
+        window.setVisible(not window.isVisible())
 
-    def OnShowSourceWindow(self, e):
+    def onShowSourceWindow(self):
+        """Handle Show Source Window action"""
         window = self._window_manager[ViewType.Source.value]
-        window.Shown = not window.Shown
+        window.setVisible(not window.isVisible())
 
-    def OnShowCompositeWindow(self, e):
+    def onShowCompositeWindow(self):
+        """Handle Show Composite Window action"""
         window = self._window_manager[ViewType.Composite.value]
-        window.Shown = not window.Shown
+        window.setVisible(not window.isVisible())
 
-    def OnRestoreOrientation(self, e):
-        pyre.Windows[ViewType.Composite].setPosition()
-        pyre.Windows[ViewType.Target].setPosition()
-        pyre.Windows[ViewType.Source].setPosition()
+    def _set_layout_position(self, position, desired_displays: int = 1):
+        """Position all rendering windows then, if the folder browser is visible,
+        tuck it to the left of the composite window at its current width."""
+        super()._set_layout_position(position, desired_displays)
+        if StosWindow._folder_browser is not None and StosWindow._folder_browser.isVisible():
+            self._layout_browser_left_of_composite()
 
-    def OnInstructions(self, e):
+    def _position_folder_browser_beside_composite(self) -> None:
+        """Compatibility alias for docking the browser beside the composite window."""
+        self._layout_browser_left_of_composite()
 
-        dlg = wx.MessageDialog(self, self._config["readme"], "Keyboard Instructions", wx.OK)
-        dlg.ShowModal()
-        dlg.Destroy()
+    @classmethod
+    def _primary_work_area(cls):
+        """Return the leftmost screen work area (x, y, width, height)."""
+        from PyQt6.QtGui import QGuiApplication
 
-    def OnClearAllPoints(self, e):
-        sourceImageView = self._imageviewmodel_manager[ViewType.Source]
-        targetImageView = self._imageviewmodel_manager[ViewType.Target]
-        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(
-            pyre.state.currentStosConfig.TransformType,
-            sourceImageView.Image.shape,
-            targetImageView.Image.shape)
+        screens = QGuiApplication.screens()
+        if not screens:
+            return 0, 0, 1920, 1080
+        ordered = sorted(screens, key=lambda s: s.availableGeometry().x())
+        geom = ordered[0].availableGeometry()
+        return geom.x(), geom.y(), geom.width(), geom.height()
 
-    def OnClearMaskedPoints(self, e):
+    @classmethod
+    def _browser_layout_width(cls) -> int:
+        """Width reserved for the STOS file browser in automatic layouts."""
+        browser = cls._folder_browser
+        if browser is None:
+            return _DEFAULT_BROWSER_LAYOUT_WIDTH
+        min_width = browser.minimum_layout_width()
+        return max(int(browser.width()), int(min_width))
+
+    def _layout_browser_left_of_composite(self) -> None:
+        """Dock the shared folder browser in the left strip of the primary work area."""
+        StosWindow._layout_browser_in_work_area(self._window_manager)
+
+    @classmethod
+    def _layout_browser_in_work_area(
+            cls,
+            window_manager: IWindowManager | None = None) -> int:
+        """Place the visible folder browser in the left strip; return reserved width (0 if none)."""
+        browser = cls._folder_browser
+        if browser is None or not browser.isVisible():
+            return 0
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = min(cls._browser_layout_width(), max(work_w // 2, 1))
+        apply_frame_geometry_to_widget(browser, work_x, work_y, browser_w, work_h)
+        return browser_w
+
+    @classmethod
+    def apply_single_monitor_composite_layout(cls, window_manager: IWindowManager) -> None:
+        """Hide Source/Target; fill remaining work area with Composite (browser strip if open)."""
+        if ViewType.Composite not in window_manager:
+            return
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = 0
+        if cls._folder_browser is not None and cls._folder_browser.isVisible():
+            browser_w = cls._layout_browser_in_work_area(window_manager)
+
+        if ViewType.Source in window_manager:
+            window_manager[ViewType.Source].hide()
+        if ViewType.Target in window_manager:
+            window_manager[ViewType.Target].hide()
+        composite = window_manager[ViewType.Composite]
+        composite.show()
+        apply_frame_geometry_to_widget(
+            composite,
+            work_x + browser_w,
+            work_y,
+            max(work_w - browser_w, 1),
+            work_h,
+        )
+        cls.sync_window_visibility_menus(window_manager)
+
+    @classmethod
+    def apply_single_monitor_all_windows_layout(cls, window_manager: IWindowManager) -> None:
+        """Tile Source/Target on top and Composite below, leaving a left browser strip when open."""
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type not in window_manager:
+                return
+        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        browser_w = 0
+        if cls._folder_browser is not None and cls._folder_browser.isVisible():
+            browser_w = cls._layout_browser_in_work_area(window_manager)
+
+        rest_x = work_x + browser_w
+        rest_w = max(work_w - browser_w, 1)
+        half_x = rest_w // 2
+        half_y = work_h // 2
+
+        source = window_manager[ViewType.Source]
+        target = window_manager[ViewType.Target]
+        composite = window_manager[ViewType.Composite]
+        source.show()
+        target.show()
+        composite.show()
+
+        apply_frame_geometry_to_widget(source, rest_x, work_y, half_x, half_y)
+        apply_frame_geometry_to_widget(target, rest_x + half_x, work_y, rest_w - half_x, half_y)
+        apply_frame_geometry_to_widget(composite, rest_x, work_y + half_y, rest_w, work_h - half_y)
+        cls.sync_window_visibility_menus(window_manager)
+
+    def onRestoreOrientationCompositeOnly(self) -> None:
+        """Restore a composite-only layout with room for the STOS file browser."""
+        browser = StosWindow._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        StosWindow.apply_single_monitor_composite_layout(self._window_manager)
+
+    def onRestoreOrientationAllWindows(self) -> None:
+        """Restore Source/Target/Composite tiling with room for the STOS file browser."""
+        browser = StosWindow._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        StosWindow.apply_single_monitor_all_windows_layout(self._window_manager)
+
+    def onRestoreOrientation(self) -> None:
+        """Legacy entry point; defaults to All Windows restore."""
+        self.onRestoreOrientationAllWindows()
+
+    def onInstructions(self):
+        """Open scrollable help scrolled to mouse and keyboard controls."""
+        ControlsHelpDialog(self, self._config["readme"]).exec()
+
+    def onTransformsSettings(self) -> None:
+        """Open Settings → Transforms dialog for registration defaults."""
+        from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
+        TransformsSettingsDialog.edit_settings(self._settings, parent=self)
+
+    def onResetTransform(self):
+        """Reset the transform. Rigid transforms return to zero offset and angle."""
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
+        transform_type = config.TransformType or nornir_imageregistration.transforms.TransformType.RIGID
+        if transform_type == nornir_imageregistration.transforms.TransformType.RIGID:
+            self.transform_controller.reset_rigid_transform()
+            self.imagepanel._glpanel.update()
+            return
+
+        source_key = ViewType.Source.value
+        target_key = ViewType.Target.value
+        manager = self._imageviewmodel_manager
+        if source_key not in manager or target_key not in manager:
+            QMessageBox.warning(
+                self,
+                "Reset Transform",
+                "Load fixed and warped images before resetting a mesh transform.",
+            )
+            return
+        source_image_view = manager[source_key]
+        target_image_view = manager[target_key]
+        self.transform_controller.TransformModel = pyre.controllers.transformcontroller.CreateDefaultTransform(  # type: ignore[attr-defined]
+            transform_type,
+            source_image_view.Image.shape,
+            target_image_view.Image.shape)
+        self.imagepanel._glpanel.update()
+
+    def onClearAllPoints(self):
+        """Deprecated alias for onResetTransform."""
+        self.onResetTransform()
+
+    def onClearMaskedPoints(self):
+        """Handle Clear Masked Points action"""
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
         if not (
-                pyre.state.currentStosConfig.FixedImageMaskViewModel is None or pyre.state.currentStosConfig.WarpedImageMaskViewModel is None):
+                config.FixedImageMaskViewModel is None or config.WarpedImageMaskViewModel is None):
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image,
-                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
+                                          config.FixedImageMaskViewModel.Image,
+                                          config.WarpedImageMaskViewModel.Image)
 
-        elif not pyre.state.currentStosConfig.FixedImageMaskViewModel is None:
+        elif config.FixedImageMaskViewModel is not None:
             pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          pyre.state.currentStosConfig.FixedImageMaskViewModel.Image, None)
+                                          config.FixedImageMaskViewModel.Image, None)  # type: ignore[arg-type]
 
-        elif not pyre.state.currentStosConfig.WarpedImageMaskViewModel is None:
-            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,
-                                          pyre.state.currentStosConfig.WarpedImageMaskViewModel.Image)
+        elif config.WarpedImageMaskViewModel is not None:
+            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,  # type: ignore[arg-type]
+                                          config.WarpedImageMaskViewModel.Image)
 
-    def OnFlipImage(self, e):
+    def onFlipImage(self):
+        """Handle Flip Image action"""
         self.transform_controller.FlipWarped()
 
-    def OnRotateTranslate(self, e):
+    def onReverseAngle(self) -> None:
+        """Negate rigid angle (workaround for flipped CS2D ITK angle on reload)."""
+        self.transform_controller.negate_rigid_angle()
+        self.imagepanel._glpanel.update()
+
+    def _update_workarounds_menu_state(self, *args: object) -> None:
+        """Enable Workarounds items only when applicable; disable the submenu if empty."""
+        is_rigid = isinstance(
+            self._transform_controller.TransformModel,
+            nornir_imageregistration.IRigidTransform)
+        self._action_reverse_angle.setEnabled(is_rigid)
+        any_enabled = any(action.isEnabled() for action in self._menu_workarounds.actions())
+        menu_action = self._menu_workarounds.menuAction()
+        if menu_action is not None:
+            menu_action.setEnabled(any_enabled)
+
+    def _update_refinement_menu_state(self, *args: object) -> None:
+        """Show rigid-only Refinement items only when the current transform is rigid."""
+        is_rigid = isinstance(
+            self._transform_controller.TransformModel,
+            nornir_imageregistration.IRigidTransform)
+        self._action_refine_rigid_angle.setVisible(is_rigid)
+        self._action_refine_rigid_angle_scale.setVisible(is_rigid)
+        self._action_refine_rigid_separator.setVisible(is_rigid)
+
+    def onRefineRigidAngle(self) -> None:
+        """Local BruteForce refine of angle (±5°) keeping current scale."""
+        self._run_local_rigid_refine(refine_scale=False)
+
+    def onRefineRigidAngleScale(self) -> None:
+        """Local BruteForce refine of angle (±5°) and scale."""
+        self._run_local_rigid_refine(refine_scale=True)
+
+    def _run_local_rigid_refine(self, refine_scale: bool) -> None:
+        """Run local rigid refine and replace the transform model on success."""
+        current_transform = self._transform_controller.TransformModel
+        if not isinstance(current_transform, nornir_imageregistration.IRigidTransform):
+            QMessageBox.warning(
+                self,
+                "Refine rigid transform",
+                "Local angle/scale refinement requires a rigid transform.",
+            )
+            return
+        try:
+            resulting_transform = pyre.common.RefineRigidTransformLocal(
+                current_transform=current_transform,
+                refine_scale=refine_scale,
+                source_image_key=Space.Source,  # type: ignore[arg-type]
+                target_image_key=Space.Target,  # type: ignore[arg-type]
+            )
+        except Exception as e:
+            logger.exception("Local rigid refine failed refine_scale=%s", refine_scale)
+            QMessageBox.warning(self, "Refine rigid transform", str(e))
+            return
+        if resulting_transform is not None:
+            self._transform_controller.TransformModel = resulting_transform
+
+    def _convertTransformTo(self, transform_type: nornir_imageregistration.transforms.TransformType):
+        """Convert the current transform model to the requested transform type."""
+        current_transform = self._transform_controller.TransformModel
+        if current_transform.type == transform_type:
+            return
+
+        kwargs = {}
+        try:
+            source_image = self._image_manager[ViewType.Source]
+            kwargs["source_image_shape"] = source_image.shape
+        except Exception:
+            # Some conversion paths do not require an image shape.
+            pass
+
+        try:
+            converted_transform = nornir_imageregistration.transforms.ConvertTransform(
+                current_transform,
+                transform_type,
+                **kwargs
+            )
+            self._transform_controller.TransformModel = converted_transform
+        except Exception as e:
+            logger.exception("Failed converting transform to %s", transform_type.value)
+            QMessageBox.warning(
+                self,
+                "Convert Transform Type",
+                f"Unable to convert transform to {transform_type.value}: {e}"
+            )
+
+    def onConvertToRigid(self):
+        """Convert the current transform to a rigid transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RIGID)
+
+    def onConvertToGrid(self):
+        """Convert the current transform to a grid transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.GRID)
+
+    def onConvertToMesh(self):
+        """Convert the current transform to a mesh transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.MESH)
+
+    def onConvertToRbf(self):
+        """Convert the current transform to an RBF transform."""
+        self._convertTransformTo(nornir_imageregistration.transforms.TransformType.RBF)
+
+    def onRotateTranslate(self, method: SliceToSliceMethod = SliceToSliceMethod.LogPolar):
+        """Run rotate-translate estimate using the selected registration method."""
+        logger.debug("Rotate translate estimate triggered method=%s", method.name)
         settings = self._settings.stos.brute_registration
-        resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,
-                                                                     target_image_key=Space.Target,
-                                                                     settings=settings,
-                                                                     LimitImageSize=True
-                                                                     )
+        current_transform = self._transform_controller.TransformModel
+        try:
+            resulting_transform = pyre.common.RotateTranslateWarpedImage(source_image_key=Space.Source,  # type: ignore[arg-type]
+                                                                         target_image_key=Space.Target,  # type: ignore[arg-type]
+                                                                         settings=settings,
+                                                                         LimitImageSize=True,
+                                                                         method=method,
+                                                                         )
+        except Exception as e:
+            logger.exception("Rotate translate estimate failed method=%s", method.name)
+            QMessageBox.warning(self, "Rotate translate estimate", str(e))
+            return
+
+        logger.debug(
+            "Rotate translate estimate result_is_none=%s equals_current=%s method=%s",
+            resulting_transform is None,
+            resulting_transform == current_transform if resulting_transform is not None else None,
+            method.name,
+        )
 
         if resulting_transform is not None:
             self._transform_controller.TransformModel = resulting_transform
 
-    def OnRefineGrid(self, e):
+    def onRefineGrid(self):
+        """Handle Refine Grid action"""
         if self._settings.stos.source_image is None or \
                 self._settings.stos.target_image is None:
             print("Need both images loaded with a transform to run refine grid")
             return None
 
-        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(self)
+        user_settings = pyre.ui.windows.RefineGridSettingsDialog.GetGridRefineSettings(
+            self, app_settings=self._settings)
         if user_settings is not None:
             with nornir_imageregistration.settings.GridRefinement.CreateWithPreprocessedImages(
                     source_img_data=self._image_manager[ViewType.Source],
@@ -524,137 +724,437 @@ class StosWindow(PyreWindowBase):
                     angles_to_search=user_settings.angle_range) as grid_refinement_settings:
                 pyre.common.GridRefineTransform(grid_refinement_settings)
 
-    def OnOpenFixedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose a fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            StosWindow.imagedirname = str(dlg.GetDirectory())
+    def onOpenFixedImage(self):
+        """Handle Open Fixed Image action"""
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose a fixed image")
+        dialog.setDirectory(StosWindow.imagedirname)
+        dialog.setNameFilter("All files (*.*)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-            pyre.state.currentStosConfig.LoadFixedImage(os.path.join(StosWindow.imagedirname, filename))
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.LoadFixedImage(filename)
 
-        dlg.Destroy()
-        # if Config.FixedImageFullPath is not None and Config.WarpedImageFullPath is not None:
-        #    pyre.IrTweakInit(Config.FixedImageFullPath, Config.WarpedImageFullPath)
+    def onOpenWarpedImage(self):
+        """Handle Open Warped Image action"""
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose an image to warp")
+        dialog.setDirectory(StosWindow.imagedirname)
+        dialog.setNameFilter("All files (*.*)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-    def OnOpenWarpedImage(self, e):
-        dlg = wx.FileDialog(self, "Choose an image to warp", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            StosWindow.imagedirname = str(dlg.GetDirectory())
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.LoadWarpedImage(filename)
 
-            pyre.state.currentStosConfig.LoadWarpedImage(os.path.join(StosWindow.imagedirname, filename))
+    def onOpenFixedImageMask(self):
+        """Handle Open Fixed Image Mask action"""
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose a mask for the fixed image")
+        dialog.setDirectory(StosWindow.imagedirname)
+        dialog.setNameFilter("All files (*.*)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-        dlg.Destroy()
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.FixedImageMaskViewModel = config.LoadFixedMaskImage(filename)
 
-    def OnOpenFixedImageMask(self, e):
-        dlg = wx.FileDialog(self, "Choose a mask for the fixed image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            StosWindow.imagedirname = str(dlg.GetDirectory())
+    def onOpenWarpedImageMask(self):
+        """Handle Open Warped Image Mask action"""
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose a mask for the warped image")
+        dialog.setDirectory(StosWindow.imagedirname)
+        dialog.setNameFilter("All files (*.*)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-            pyre.state.currentStosConfig.FixedImageMaskViewModel = state.currentStosConfig.LoadFixedMaskImage(
-                os.path.join(StosWindow.imagedirname, filename))
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                config = pyre.state.get_current_stos_config()
+                if config is not None:
+                    filename = selected_files[0]
+                    StosWindow.imagedirname = os.path.dirname(filename)
+                    config.WarpedImageMaskViewModel = config.LoadWarpedMaskImage(filename)
 
-        dlg.Destroy()
-        # if Config.FixedImageFullPath is not None and Config.WarpedImageFullPath is not None:
-        #    pyre.IrTweakInit(Config.FixedImageFullPath, Config.WarpedImageFullPath)
+    def onOpenStos(self):
+        """Handle Open Stos File action"""
+        config = pyre.state.get_current_stos_config()
+        dirname = config.stosdirname if config is not None else ''
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Choose a file")
+        dialog.setDirectory(dirname)
+        dialog.setNameFilter("Stos files (*.stos)")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
 
-    def OnOpenWarpedImageMask(self, e):
-        dlg = wx.FileDialog(self, "Choose a mask for the warped image", StosWindow.imagedirname, "", "*.*", wx.FD_OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            StosWindow.imagedirname = str(dlg.GetDirectory())
+        if dialog.exec() == QFileDialog.DialogCode.Accepted:
+            selected_files = dialog.selectedFiles()
+            if selected_files:
+                filename = selected_files[0]
+                self.dirname = os.path.dirname(filename)
+                StosWindow.stosfilename = os.path.basename(filename)
+                self.loadStos(filename, browser_folder=None, browser_flat_manual=False)
+                if StosWindow._folder_browser is not None:
+                    StosWindow._folder_browser.set_current_file(filename)
 
-            pyre.state.currentStosConfig.WarpedImageMaskViewModel = state.currentStosConfig.LoadWarpedMaskImage(
-                os.path.join(StosWindow.imagedirname, filename))
+    @classmethod
+    def _ensure_folder_browser(cls) -> 'StosFileBrowserWindow':
+        """Create the shared folder browser window if needed."""
+        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+        if cls._folder_browser is None:
+            cls._folder_browser = StosFileBrowserWindow(parent=None)
+        return cls._folder_browser
 
-        dlg.Destroy()
+    @classmethod
+    def show_folder_browser(cls, anchor_window: 'StosWindow | None' = None,
+                            settings: AppSettings | None = None) -> None:
+        """Show the shared folder browser and optionally dock it beside the composite view."""
+        browser = cls._ensure_folder_browser()
+        browser.show()
+        browser.raise_()
+        browser.activateWindow()
+        if settings is None and anchor_window is not None:
+            settings = anchor_window._settings
+        if settings is not None and apply_saved_browser_geometry(settings, browser, force_visible=True):
+            return
+        if anchor_window is not None:
+            anchor_window._layout_browser_left_of_composite()
 
-        # if Config.FixedImageFullPath is not None and Config.WarpedImageFullPath is not None:
-        #    pyre.IrTweakInit(Config.FixedImageFullPath, Config.WarpedImageFullPath)
+    @classmethod
+    def open_folder_browser_if_cached_folder_exists(
+            cls,
+            settings: AppSettings,
+            anchor_window: 'StosWindow',
+            *,
+            geometry_restored: bool = False,
+    ) -> None:
+        """Show the browser at startup when a saved folder path still exists."""
+        from PyQt6.QtGui import QGuiApplication
+        from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
+        if not StosFileBrowserWindow.has_cached_folder(settings):
+            return
+        browser = cls._ensure_folder_browser()
+        last_loaded = settings.stos.stos_fullpath
+        if last_loaded:
+            browser.set_current_file(last_loaded)
+        browser.show()
+        browser.raise_()
+        restored_saved = apply_saved_browser_geometry(settings, browser, force_visible=True)
+        if restored_saved:
+            return
+        display_count = len(QGuiApplication.screens())
+        if not geometry_restored and display_count == 1:
+            cls.apply_single_monitor_composite_layout(anchor_window._window_manager)
+            return
+        anchor_window._layout_browser_left_of_composite()
 
-    def OnOpenStos(self, e):
-        dirname = pyre.state.currentStosConfig.stosdirname
-        dlg = wx.FileDialog(self, "Choose a file", dirname, "", "*.stos", wx.FD_OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            filename = str(dlg.GetFilename())
-            self.dirname = str(dlg.GetDirectory())
-            StosWindow.stosfilename = filename
+    def onOpenStosFolderBrowser(self):
+        """Show (or create) the Stos Folder Browser window."""
+        StosWindow.show_folder_browser(anchor_window=self)
 
-            self.LoadStos(os.path.join(self.dirname, filename))
-            # pyre.state.currentStosConfig.LoadStos(os.path.join(self.dirname,
-            #                                                   filename))
+    @classmethod
+    def close_folder_browser(cls) -> None:
+        """Close the shared Stos file browser window, if it is open."""
+        browser = cls._folder_browser
+        if browser is None:
+            return
+        browser.close()
+        cls._folder_browser = None
 
-        dlg.Destroy()
+    def onExit(self):
+        """Exit the application; folder-browser geometry is captured on aboutToQuit."""
+        super().onExit()
 
     @staticmethod
-    def LoadStos(filename: str,
+    def loadStos(filename: str,
                  image_loader: IImageLoader = Provide[IContainer.image_loader],
                  stos_transform_controller: pyre.state.TransformController = Provide[
                      StosContainer.transform_controller],
-                 settings: pyre.settings.AppSettings = Provide[IContainer.settings]) -> LoadStosResult | None:
+                 settings: AppSettings = Provide[IContainer.settings],
+                 browser_folder: str | None = None,
+                 browser_flat_manual: bool = False,
+                 browser_basename: str | None = None) -> LoadStosResult | None:
         try:
             load_result = image_loader.load_stos(filename)
             settings.stos.stos_filename = filename
-            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
+            settings.stos.stos_opened_from_browser_folder = browser_folder
+            settings.stos.stos_browser_flat_manual = browser_flat_manual
+            settings.stos.stos_browser_basename = browser_basename
+            transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
             stos_transform_controller.TransformModel = transform
 
             settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
                                                           mask_fullpath=load_result.source.mask_fullpath)
             settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                           mask_fullpath=load_result.target.mask_fullpath)
+            stos_config = pyre.state.get_current_stos_config()
+            if stos_config is not None:
+                from pyre.stos_registration import resolve_warped_and_fixed_image_data, sync_stos_registration_roles
+                warped, fixed = resolve_warped_and_fixed_image_data(
+                    image_loader._image_manager,  # type: ignore[attr-defined]
+                    ViewType.Source.value,
+                    ViewType.Target.value,
+                    stos_filename=filename,
+                    settings_source_image_path=load_result.source.image_fullpath,
+                    settings_target_image_path=load_result.target.image_fullpath,
+                )
+                sync_stos_registration_roles(stos_config, warped, fixed)
 
             return load_result
 
         except Exception as e:
-            print("Error loading stos file: {e}")
+            print(f"Error loading stos file: {e}")
             pass
 
-    def OnSaveWarpedImage(self, e):
-        # Set the path for the output directory.
-        if not (
-                pyre.state.currentStosConfig.FixedImageViewModel is None or pyre.state.currentStosConfig.WarpedImageViewModel is None):
-            dlg = wx.FileDialog(self, "Choose a Directory", StosWindow.imagedirname, "", "*.png", wx.FD_SAVE)
-            if dlg.ShowModal() == wx.ID_OK:
-                StosWindow.imagedirname = dlg.GetDirectory()
-                self.filename = dlg.GetFilename()
-                pyre.state.currentStosConfig.OutputImageFullPath = os.path.join(StosWindow.imagedirname, self.filename)
+    def onSaveWarpedImage(self):
+        """Handle Save Warped Image action."""
+        if StosWindow._warped_save_in_progress:
+            return
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            QMessageBox.warning(self, "Save warped image", "No STOS session is open.")
+            return
+        if config.FixedImageViewModel is None or config.WarpedImageViewModel is None:
+            QMessageBox.warning(
+                self,
+                "Save warped image",
+                "Load both the fixed and warped images before saving the registered image.",
+            )
+            return
+        if config.Transform is None:
+            QMessageBox.warning(self, "Save warped image", "No transform is loaded.")
+            return
 
-                #                 common.SaveRegisteredWarpedImage(pyre.state.currentStosConfig.OutputImageFullPath,
-                #                                                  pyre.state.currentStosConfig.transform,
-                #                                                  pyre.state.currentStosConfig.WarpedImageViewModel.Image)
-                pool = pools.GetGlobalThreadPool()
-                pool.add_task("Save " + pyre.state.currentStosConfig.OutputImageFullPath,
-                              pyre.common.SaveRegisteredWarpedImage,
-                              pyre.state.currentStosConfig.OutputImageFullPath,
-                              pyre.state.currentStosConfig.Transform,
-                              pyre.state.currentStosConfig.WarpedImageViewModel.Image)
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Save registered warped image")
+        if StosWindow.imagedirname:
+            dialog.setDirectory(StosWindow.imagedirname)
+        dialog.setNameFilter("PNG files (*.png)")
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
 
-    def OnSaveStos(self, e):
-        if not (self._transform_controller is None):
-            if self._settings.stos.stos_filename is not None:
-                dirname = os.path.dirname(self._settings.stos.stos_filename)
-                filename = os.path.basename(self._settings.stos.stos_filename)
+        if dialog.exec() != QFileDialog.DialogCode.Accepted:
+            return
+
+        selected_files = dialog.selectedFiles()
+        if not selected_files:
+            return
+
+        fullpath = selected_files[0]
+        StosWindow.imagedirname = os.path.dirname(fullpath)
+        self.filename = os.path.basename(fullpath)
+        config.OutputImageFullPath = fullpath  # type: ignore[attr-defined]
+
+        fixed_shape = tuple(int(v) for v in config.FixedImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
+        warped_image = config.WarpedImageViewModel.Image  # type: ignore[attr-defined]
+        transform = config.Transform
+        self._submit_async_warped_save(fullpath, transform, fixed_shape, warped_image)
+
+    def _submit_async_warped_save(
+            self,
+            fullpath: str,
+            transform: nornir_imageregistration.ITransform,
+            fixed_shape: tuple[int, ...],
+            warped_image: np.ndarray) -> None:
+        """Queue a background registered-image write and update UI while in flight."""
+        StosWindow._warped_save_in_progress = True
+        StosWindow._warped_save_initiator = self
+        basename = os.path.basename(fullpath)
+        for action in StosWindow._save_warped_menu_actions:
+            action.setEnabled(False)
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type in self._window_manager:
+                self._window_manager[view_type].statusBar().showMessage(f"Saving {basename}…")
+
+        future = _warped_save_executor.submit(
+            SaveRegisteredWarpedImage,
+            fullpath,
+            transform,
+            fixed_shape,
+            warped_image,
+        )
+        future.add_done_callback(
+            lambda completed: qt_post_to_main(StosWindow._on_warped_save_finished, completed, fullpath),
+        )
+
+    @classmethod
+    def _clear_warped_save_status(cls) -> None:
+        """Re-enable Save Warped actions and clear in-flight state."""
+        cls._warped_save_in_progress = False
+        cls._warped_save_initiator = None
+        for action in cls._save_warped_menu_actions:
+            action.setEnabled(True)
+
+    @classmethod
+    def _on_warped_save_finished(cls, future: Future[None], fullpath: str) -> None:
+        """Handle background warped-image save completion on the Qt main thread."""
+        initiator = cls._warped_save_initiator
+        saved_ok = False
+        try:
+            try:
+                future.result()
+                saved_ok = True
+            except Exception as exc:
+                if initiator is not None:
+                    QMessageBox.warning(
+                        initiator,
+                        "Save warped image failed",
+                        f"The image was not saved:\n{exc}",
+                    )
+                return
+        finally:
+            if initiator is not None:
+                basename = os.path.basename(fullpath)
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                    if view_type in initiator._window_manager:
+                        status_bar = initiator._window_manager[view_type].statusBar()
+                        if saved_ok:
+                            status_bar.showMessage(f"Saved {basename}", 5000)
+                        else:
+                            status_bar.clearMessage()
+            cls._clear_warped_save_status()
+
+    def onSaveStos(self):
+        """Handle Save Stos File action."""
+        if self._transform_controller is None or StosWindow._stos_save_in_progress:
+            return
+        fullpath = self._prompt_save_stos_path()
+        if fullpath is None:
+            return
+        self._submit_async_stos_save(fullpath)
+
+    def _prompt_save_stos_path(
+            self,
+            *,
+            dialog_title: str = "Choose a Directory",
+            initial_path: str | None = None,
+    ) -> str | None:
+        """Show the save dialog and return the chosen path, or None if cancelled."""
+        if self._settings.stos.stos_filename is not None:
+            dirname = os.path.dirname(self._settings.stos.stos_filename)
+            filename = os.path.basename(self._settings.stos.stos_filename)
+        else:
+            dirname = os.getcwd()
+            filename = None
+
+        browser_folder = self._settings.stos.stos_opened_from_browser_folder
+        if browser_folder:
+            from pyre.stos_manual_paths import ensure_manual_directory
+            if self._settings.stos.stos_browser_flat_manual:
+                dirname = browser_folder
             else:
-                dirname = os.getcwd()
-                filename = None
+                dirname = ensure_manual_directory(browser_folder)
 
-            dlg = wx.FileDialog(self, "Choose a Directory",
-                                dirname,
-                                filename, "*.stos",
-                                wx.FD_SAVE)
-            if dlg.ShowModal() == wx.ID_OK:
-                try:
-                    fullpath = os.path.join(dlg.GetDirectory(), dlg.GetFilename())
-                    self._settings.stos.stos_filename = fullpath
+        if initial_path is not None:
+            dirname = os.path.dirname(initial_path) or dirname
+            filename = os.path.basename(initial_path)
 
-                    stosObj = StosFile.Create(
-                        self._settings.stos.target_image.image_fullpath,
-                        self._settings.stos.source_image.image_fullpath,
-                        self._transform_controller.TransformModel,
-                        self._settings.stos.target_image.mask_fullpath,
-                        self._settings.stos.source_image.mask_fullpath, )
-                    stosObj.Save(fullpath)
-                except ValueError:
-                    prettyoutput.LogErr(f"Error saving stos file {fullpath}")
-            dlg.Destroy()
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle(dialog_title)
+        dialog.setDirectory(dirname)
+        dialog.setNameFilter("Stos files (*.stos)")
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        if filename:
+            dialog.selectFile(filename)
+
+        if dialog.exec() != QFileDialog.DialogCode.Accepted:
+            return None
+        selected_files = dialog.selectedFiles()
+        if not selected_files:
+            return None
+        return selected_files[0]
+
+    def _build_stos_object_for_current_transform(self):
+        """Build a StosFile snapshot from the current transform and settings."""
+        stos_config = pyre.state.get_current_stos_config()
+        control_dim, mapped_dim = stos_image_dims_from_stos_config(stos_config)
+        return build_stos_object_for_save(
+            self._settings.stos.target_image.image_fullpath,  # type: ignore[union-attr]
+            self._settings.stos.source_image.image_fullpath,  # type: ignore[union-attr]
+            self._transform_controller.TransformModel,
+            self._settings.stos.target_image.mask_fullpath,  # type: ignore[union-attr]
+            self._settings.stos.source_image.mask_fullpath,  # type: ignore[union-attr]
+            control_image_dim=control_dim,
+            mapped_image_dim=mapped_dim,
+        )
+
+    def _submit_async_stos_save(self, fullpath: str) -> None:
+        """Queue a background STOS write and update UI while in flight."""
+        try:
+            stos_obj = self._build_stos_object_for_current_transform()
+        except ValueError as exc:
+            prettyoutput.LogErr(f"Error preparing stos file: {exc}")
+            return
+
+        StosWindow._stos_save_in_progress = True
+        StosWindow._stos_save_initiator = self
+        basename = os.path.basename(fullpath)
+        for action in StosWindow._save_stos_menu_actions:
+            action.setEnabled(False)
+        for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            if view_type in self._window_manager:
+                self._window_manager[view_type].statusBar().showMessage(f"Saving {basename}…")
+
+        future = _stos_save_executor.submit(save_stos_object, stos_obj, fullpath)
+        future.add_done_callback(
+            lambda completed: qt_post_to_main(StosWindow._on_stos_save_finished, completed, fullpath),
+        )
+
+    @classmethod
+    def _clear_stos_save_status(cls) -> None:
+        """Re-enable Save actions and clear status text on all STOS windows."""
+        cls._stos_save_in_progress = False
+        cls._stos_save_initiator = None
+        for action in cls._save_stos_menu_actions:
+            action.setEnabled(True)
+
+    @classmethod
+    def _on_stos_save_finished(cls, future: Future[str], fullpath: str) -> None:
+        """Handle background STOS save completion on the Qt main thread."""
+        initiator = cls._stos_save_initiator
+        retrying = False
+        try:
+            try:
+                saved_path = future.result()
+            except Exception as exc:
+                if initiator is not None:
+                    QMessageBox.warning(
+                        initiator,
+                        "STOS save failed",
+                        f"The file was not saved:\n{exc}",
+                    )
+                    retry_path = initiator._prompt_save_stos_path(
+                        dialog_title="STOS save failed — choose where to retry",
+                        initial_path=fullpath,
+                    )
+                    if retry_path is not None:
+                        retrying = True
+                        initiator._submit_async_stos_save(retry_path)
+                return
+
+            if initiator is not None:
+                initiator._settings.stos.stos_filename = saved_path
+            if cls._folder_browser is not None:
+                cls._folder_browser.rescan()
+                cls._folder_browser.set_current_file(saved_path)
+        finally:
+            if initiator is not None:
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
+                    if view_type in initiator._window_manager:
+                        initiator._window_manager[view_type].statusBar().clearMessage()
+            if not retrying:
+                cls._clear_stos_save_status()
