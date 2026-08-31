@@ -2,6 +2,7 @@ from OpenGL import GL as gl
 from typing import Callable, cast
 import numpy as np
 from numpy.typing import NDArray
+from PyQt6.QtCore import QCoreApplication, Qt
 from PyQt6.QtGui import QOpenGLContext
 from nornir_imageregistration import in_debug_mode
 
@@ -9,6 +10,23 @@ from nornir_imageregistration import in_debug_mode
 def gl_context_is_current() -> bool:
     """True when some OpenGL context is current on this thread."""
     return QOpenGLContext.currentContext() is not None
+
+
+def context_sharing_enabled() -> bool:
+    """True when ``AA_ShareOpenGLContexts`` is active for this application.
+
+    Pyre compiles each shader program once at module level and caches its attrib and
+    uniform locations, then uses them from every STOS panel. That is only valid because
+    programs, shaders, buffers and textures are *shared* objects: with context sharing on,
+    a name from one context is the same object in another. VAOs and framebuffers are
+    container objects, which the OpenGL specification excludes from sharing, which is why
+    those alone are tracked per context (see ContextAwareVAOHelper).
+
+    Qt ignores the attribute if it is set after the QApplication exists, so this reports
+    the effective state rather than what was requested.
+    """
+    return QCoreApplication.testAttribute(
+        Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 
 def delete_gl_object_on_teardown(delete: Callable[[], None], description: str) -> bool:

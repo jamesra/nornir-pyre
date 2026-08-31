@@ -415,6 +415,17 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     else:
         print("Warning: QApplication instance already exists, reusing it")
 
+    # Qt silently ignores AA_ShareOpenGLContexts once a QApplication exists, so reusing one
+    # created elsewhere can leave sharing off. Every shader program is compiled once at
+    # module level and used from all STOS panels, which is only valid while contexts share,
+    # so report it here rather than letting panels render with names from another context.
+    from pyre.gl_engine.helpers import context_sharing_enabled
+    if not context_sharing_enabled():
+        print("ERROR: OpenGL context sharing is not enabled (AA_ShareOpenGLContexts). "
+              "Shader programs are compiled once and shared across STOS panels, so "
+              "rendering in secondary windows will be incorrect. This happens when a "
+              "QApplication was created before Pyre could set the attribute.")
+
     from pyre.qt_eventmanager import init_main_thread_dispatcher
     init_main_thread_dispatcher()
 

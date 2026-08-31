@@ -80,7 +80,18 @@ class FragmentShader:
 
 
 class BaseShader(ABC):
-    """Shared code for shaders."""
+    """Shared code for shaders.
+
+    A program is compiled once and reused from every STOS panel, with its attrib and
+    uniform locations cached alongside it. That is valid because shaders, programs, buffers
+    and textures are *shared* objects: while ``AA_ShareOpenGLContexts`` is enabled (set in
+    launcher.main_qt before the QApplication is built) a name from one context refers to the
+    same object in every other, and locations are properties of the shared program.
+
+    VAOs and framebuffers are container objects, which the OpenGL specification excludes
+    from sharing, so those are tracked per context instead -- see ContextAwareVAOHelper.
+    The difference between the two is that distinction, not an inconsistency.
+    """
     _vertex_shader: VertexShader
     _fragment_shader: FragmentShader
     _program: int | None = None
