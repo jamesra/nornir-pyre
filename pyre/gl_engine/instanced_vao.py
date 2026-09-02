@@ -15,6 +15,7 @@ Classes:
 """
 
 import ctypes
+import logging
 
 from OpenGL import GL as gl
 from PyQt6.QtGui import QOpenGLContext
@@ -25,6 +26,8 @@ import pyre.gl_engine
 from pyre.gl_engine import raise_on_error, check_for_error
 from pyre.gl_engine.interfaces import IBuffer
 from pyre.gl_engine.context_aware_vao import ContextAwareVAOHelper
+
+logger = logging.getLogger(__name__)
 
 
 class InstancedVAO(ContextAwareVAOHelper):
@@ -122,7 +125,7 @@ class InstancedVAO(ContextAwareVAOHelper):
             gl.glBindVertexArray(0)
             check_for_error("after glBindVertexArray(0) in end_init")
         except Exception as e:
-            print(f"Warning: Error unbinding VAO: {e}")
+            logger.warning("Error unbinding VAO: %s", e)
             check_for_error("during VAO unbind exception handling in end_init")
 
     def add_index_buffer(self, indicies: NDArray[np.uint16]):

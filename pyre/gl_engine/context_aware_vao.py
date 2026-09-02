@@ -12,6 +12,7 @@ Classes:
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
 import ctypes
+import logging
 
 from OpenGL import GL as gl
 from PyQt6.QtGui import QOpenGLContext
@@ -20,6 +21,8 @@ from numpy.typing import NDArray
 
 from pyre.gl_engine.helpers import raise_on_error, check_for_error
 from pyre.gl_engine.interfaces import IBuffer
+
+logger = logging.getLogger(__name__)
 
 
 class ContextAwareVAOHelper(ABC):
@@ -171,7 +174,7 @@ class ContextAwareVAOHelper(ABC):
 
         context = QOpenGLContext.currentContext()
         if not context or not context.isValid():
-            print("Warning: No valid OpenGL context for VAO bind")
+            logger.warning("No valid OpenGL context for VAO bind")
             return False
 
         # Check if we already have a VAO for this context
@@ -181,7 +184,7 @@ class ContextAwareVAOHelper(ABC):
                 vao_id = self._create_vao_for_context(context)
                 self._context_vaos[context] = vao_id
             except Exception as e:
-                print(f"Error creating VAO for context: {e}")
+                logger.error("Error creating VAO for context: %s", e)
                 return False
 
         # Bind the VAO for this context
@@ -191,7 +194,7 @@ class ContextAwareVAOHelper(ABC):
             raise_on_error("after glBindVertexArray in bind")
             return True
         except Exception as e:
-            print(f"Error binding VAO: {e}")
+            logger.error("Error binding VAO: %s", e)
             return False
 
     def unbind(self):
@@ -205,7 +208,7 @@ class ContextAwareVAOHelper(ABC):
             gl.glBindVertexArray(0)
             check_for_error("after glBindVertexArray(0) in unbind")
         except Exception as e:
-            print(f"Warning: Error unbinding VAO: {e}")
+            logger.warning("Error unbinding VAO: %s", e)
 
     def __enter__(self):
         """
@@ -309,7 +312,7 @@ class ContextAwareVAOHelper(ABC):
                 gl.glDeleteVertexArrays(1, [vao_id])
                 check_for_error(f"after glDeleteVertexArrays for context {context}")
             except Exception as e:
-                print(f"Warning: Error deleting VAO for context {context}: {e}")
+                logger.warning("Error deleting VAO for context %s: %s", context, e)
                 retained[context] = vao_id
 
         self._context_vaos = retained
@@ -321,7 +324,7 @@ class ContextAwareVAOHelper(ABC):
                 check_for_error("after glDeleteBuffers for index buffer")
                 self._index_buffer_id = None
             except Exception as e:
-                print(f"Warning: Error deleting index buffer: {e}")
+                logger.warning("Error deleting index buffer: %s", e)
 
     def __del__(self):
         """
@@ -336,4 +339,4 @@ class ContextAwareVAOHelper(ABC):
         try:
             self.cleanup()
         except Exception as e:
-            print(f"Warning: Error during VAO cleanup in __del__: {e}")
+            logger.warning("Error during VAO cleanup in __del__: %s", e)

@@ -1,10 +1,13 @@
 from OpenGL import GL as gl
 from typing import Callable, cast
+import logging
 import numpy as np
 from numpy.typing import NDArray
 from PyQt6.QtCore import QCoreApplication, Qt
 from PyQt6.QtGui import QOpenGLContext
 from nornir_imageregistration import in_debug_mode
+
+logger = logging.getLogger(__name__)
 
 
 def gl_context_is_current() -> bool:
@@ -41,14 +44,14 @@ def delete_gl_object_on_teardown(delete: Callable[[], None], description: str) -
         return means the GL object is leaked until its context is destroyed.
     """
     if not gl_context_is_current():
-        print(f"Warning: no current OpenGL context during teardown; leaked {description}")
+        logger.warning("no current OpenGL context during teardown; leaked %s", description)
         return False
 
     try:
         delete()
         return True
     except Exception as e:
-        print(f"Warning: failed to delete {description} during teardown: {e}")
+        logger.warning("failed to delete %s during teardown: %s", description, e)
         return False
 
 
@@ -97,9 +100,9 @@ def check_for_error(message: str | None = None) -> bool:
         if error != gl.GL_NO_ERROR:
             error_name = get_gl_error_name(error)
             if message:
-                print(f"ERROR: OpenGL error {message}: {error_name} ({error})")
+                logger.error("OpenGL error %s: %s (%s)", message, error_name, error)
             else:
-                print(f"ERROR: OpenGL error: {error_name} ({error})")
+                logger.error("OpenGL error: %s (%s)", error_name, error)
 
     found_error = False
     error = gl.glGetError()

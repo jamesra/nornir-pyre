@@ -1,9 +1,12 @@
 import OpenGL.GL as gl
+import logging
 import numpy as np
 from numpy.typing import NDArray
 from typing import cast
 
 import nornir_imageregistration
+
+logger = logging.getLogger(__name__)
 
 
 #
@@ -54,7 +57,7 @@ def _configure_mipmaps(image_shape: NDArray[np.integer] | tuple[int, int], targe
     gl.glGenerateMipmap(target)
 
     max_level = gl.glGetTexParameteriv(target, gl.GL_TEXTURE_MAX_LEVEL)
-    print(f"Maximum mipmap level: {max_level}")
+    logger.debug("Maximum mipmap level: %s", max_level)
 
 
 def create_grayscale_texture(image: NDArray[np.uint8]) -> int:

@@ -1,4 +1,5 @@
 import ctypes
+import logging
 
 import OpenGL.GL as gl
 import numpy as np
@@ -10,6 +11,8 @@ import pyre.gl_engine.helpers
 from pyre.gl_engine.helpers import check_for_error, raise_on_error
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 from pyre.gl_engine.context_aware_vao import ContextAwareVAOHelper
+
+logger = logging.getLogger(__name__)
 
 
 class ShaderVAO(ContextAwareVAOHelper):
@@ -217,8 +220,7 @@ class ShaderVAO(ContextAwareVAOHelper):
     def unbind(self):
         """Unbind the VAO from the context."""
         if not self._is_bound:
-            # Warn that we are unbinding an unbound VAO
-            print("Warning: unbinding an unbound VAO")
+            logger.warning("unbinding an unbound VAO")
             return
 
         super().unbind()
