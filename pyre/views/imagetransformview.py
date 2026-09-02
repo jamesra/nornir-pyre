@@ -31,6 +31,7 @@ from pyre.controllers.transformcontroller import TransformController
 from pyre.controllers.transform_display import TileRefreshHint
 from pyre.interfaces.viewtype import ViewType
 from pyre.perf_debug import timed
+import pyre.image_contrast as image_contrast
 
 _LAZY_TILE_MESH_BUDGET = 8
 
@@ -710,6 +711,9 @@ class ImageTransformView(IImageTransformView):
                 prefetch_coords = set(image_viewmodel.generate_grid_indicies())
             self._ensure_visible_tile_meshes(prefetch_coords)
 
+        # Contrast is per image space, not per tile — resolve once outside the draw loop.
+        contrast = image_contrast.contrast_for_space(self._image_space)
+
         for ix in range(0, image_viewmodel.NumCols):
             column = image_array[ix]
             for iy in range(0, image_viewmodel.NumRows):
@@ -731,8 +735,6 @@ class ImageTransformView(IImageTransformView):
                     continue
 
                 try:
-                    from pyre.image_contrast import contrast_for_space
-                    contrast = contrast_for_space(self._image_space)
                     shaders.texture_shader.draw(view_proj, texture, render_data.vao, tween=tween,  # type: ignore[union-attr]
                                                 use_rigid_path=use_rigid_path,
                                                 rigid_source_to_target=rigid_forward,

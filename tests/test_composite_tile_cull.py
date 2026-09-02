@@ -95,6 +95,41 @@ class TestCompositeTileCull(unittest.TestCase):
         self.assertEqual(len(coords), 16)  # type: ignore[arg-type]
 
 
+class TestContrastLookupOutsideTileLoop(unittest.TestCase):
+    """#207: contrast_for_space must not run once per tile per frame."""
+
+    def test_contrast_for_space_called_once_per_draw(self) -> None:
+        cull = TestCompositeTileCull()
+        view = cull._make_view()
+        contrast = MagicMock(min=0.0, max=255.0, gamma=1.0)
+        mesh_transform = MagicMock()
+        with patch.object(
+                ImageTransformView, "transform",
+                new_callable=lambda: property(lambda self: mesh_transform)):
+            with patch("pyre.views.gltiles.is_rigid_transform", return_value=False):
+                with patch("pyre.views.imagetransformview.shaders.texture_shader.draw"):
+                    with patch(
+                            "pyre.image_contrast.contrast_for_space",
+                            return_value=contrast) as contrast_lookup:
+                        with patch.object(view, "_ensure_visible_tile_meshes"):
+                            view._draw_imageviewmodel(
+                                view_proj=np.eye(4, dtype=np.float32),
+                                image_viewmodel=view._image_viewmodel,
+                                space=Space.Source,
+                                bounding_box=None,
+                                view_type=ViewType.Source,
+                            )
+        contrast_lookup.assert_called_once_with(Space.Source)
+
+    def test_draw_method_has_no_nested_image_contrast_import(self) -> None:
+        import inspect
+        source = inspect.getsource(ImageTransformView._draw_imageviewmodel)
+        self.assertNotIn(
+            'from pyre.image_contrast import',
+            source,
+            msg='nested import inside the per-tile draw loop (#207)')
+
+
 class TestEagerMeshSkipDuringInteractive(unittest.TestCase):
     """Composite source must not remesh the full tile grid mid-drag."""
 
