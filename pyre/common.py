@@ -492,8 +492,16 @@ def either_roi_is_masked(transform: ITransform,
     """Returns True if either mask is all False"""
 
     if target_mask is not None and source_mask is not None:
+        # Warp the masks through the same local rigid approximation AttemptAlignPoint uses
+        # for the image ROIs. Warping through the full mesh/RBF transform here cost ~18s
+        # per point versus ~2s, and sampled a different mapping than the ROIs being checked.
+        rigid_transform = nornir_imageregistration.local_distortion_correction.ApproximateRigidTransformByTargetPoints(
+            input_transform=transform,
+            target_points=target_controlpoint,  # type: ignore[arg-type]
+            cell_size=alignmentArea)  # type: ignore[arg-type]
+
         target_mask_roi, source_mask_roi = nornir_imageregistration.local_distortion_correction.BuildAlignmentROIs(
-            transform=transform,
+            transform=rigid_transform[0],
             targetImage_param=target_mask,
             sourceImage_param=source_mask,
             target_image_stats=None,
@@ -521,7 +529,8 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,  # type: ignore[type-arg
                            source_image_stats: ImageStats,
                            target_controlpoint,
                            alignmentArea: NDArray | tuple[float, float],
-                           anglesToSearch: Iterable[float]):
+                           anglesToSearch: Iterable[float],
+                           estimate_angle: bool = False):
     """Start an async alignment attempt for one control point. Returns None if ROI is masked; otherwise returns the task."""
     if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
         return None
@@ -541,7 +550,8 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,  # type: ignore[type-arg
                                                                                        source_image_stats=source_image_stats,
                                                                                        target_controlpoint=target_controlpoint,
                                                                                        alignmentArea=alignmentArea,
-                                                                                       anglesToSearch=anglesToSearch)
+                                                                                       anglesToSearch=anglesToSearch,
+                                                                                       estimate_angle=estimate_angle)
 
     return task
 

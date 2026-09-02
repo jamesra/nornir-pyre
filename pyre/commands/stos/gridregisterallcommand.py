@@ -75,34 +75,18 @@ class GridRegisterAllCommand(InstantCommandBase):
 
     def execute(self) -> None:
         """Show the one-pass refine dialog and submit the shared CPU refine job."""
-        # #region agent log
-        from pyre.debug_shift_space_profile import log_event, phase_timer, start_cprofile, stop_cprofile
-        log_event(
-            hypothesis_id="F",
-            location="gridregisterallcommand.py:execute",
-            message="grid shift+space execute start",
-            data={"transform_type": str(self._transform_controller.type)},
-        )
-        start_cprofile("grid_register_all_execute")
-        # #endregion
         if (self._app_settings.stos.source_image is None
                 or self._app_settings.stos.target_image is None):
             print("Need both images loaded with a transform to run refine grid")
             super().execute()
             return
 
-        with phase_timer(
-                "F",
-                "gridregisterallcommand.py:execute",
-                "refine_dialog",
-        ):
-            user_settings = RefineGridSettingsDialog.GetGridRefineSettings(
-                self._parent,
-                app_settings=self._app_settings,
-                fixed_num_iterations=1,
-            )
+        user_settings = RefineGridSettingsDialog.GetGridRefineSettings(
+            self._parent,
+            app_settings=self._app_settings,
+            fixed_num_iterations=1,
+        )
         if user_settings is None:
-            stop_cprofile("grid_register_all_execute")
             super().execute()
             return
 
@@ -113,28 +97,14 @@ class GridRegisterAllCommand(InstantCommandBase):
                 "Grid refine (one pass)",
                 "No STOS window is available to run grid refinement.",
             )
-            stop_cprofile("grid_register_all_execute")
             super().execute()
             return
 
-        with phase_timer(
-                "F",
-                "gridregisterallcommand.py:execute",
-                "start_grid_refine_job",
-        ):
-            window.start_grid_refine_job(
-                user_settings,
-                title="Grid refine (one pass)",
-                save_plots=False,
-            )
-        # #region agent log
-        stop_cprofile("grid_register_all_execute")
-        log_event(
-            hypothesis_id="F",
-            location="gridregisterallcommand.py:execute",
-            message="grid shift+space execute end",
+        window.start_grid_refine_job(
+            user_settings,
+            title="Grid refine (one pass)",
+            save_plots=False,
         )
-        # #endregion
         super().execute()
 
     def activate(self) -> None:

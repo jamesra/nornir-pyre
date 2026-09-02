@@ -58,7 +58,9 @@ _DEFAULT_BROWSER_LAYOUT_WIDTH = 350
 _STOS_WINDOW_BASE_TITLES: dict[ViewType, str] = {
     ViewType.Source: "Source Image",
     ViewType.Target: "Target Image",
-    ViewType.Composite: "Composite Image",
+    # Carries the running build tag so it is obvious whether this window is showing a
+    # freshly restarted Pyre or a stale process from before a source-code edit.
+    ViewType.Composite: f"Composite Image [{pyre.build_tag()}]",
 }
 
 
@@ -352,6 +354,11 @@ class StosWindow(PyreWindowBase):
         menuRestoreAllWindows = restoreSubmenu.addAction("&All Windows")
         menuRestoreAllWindows.triggered.connect(  # type: ignore[union-attr]
             self.onRestoreOrientationAllWindows)
+
+        menu.addSeparator()
+        menuROIInspector = menu.addAction("&Registration ROI Inspector\u2026")
+        menuROIInspector.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onShowROIInspector())
 
         return menu
 
@@ -650,6 +657,27 @@ class StosWindow(PyreWindowBase):
                 space = Space.Source
         ContrastAdjustmentWindow.show_for_space(
             space, parent=None, settings=self._settings)
+
+    def onShowROIInspector(self) -> None:
+        """Open (or raise) the registration ROI inspector tool window."""
+        from pyre.ui.windows.registration_roi_inspector import RegistrationROIInspector
+        inspector = RegistrationROIInspector.show_instance(parent=None)
+        # Register per-TC callbacks the first time; reuse if already connected.
+        tc = self._transform_controller
+        if not hasattr(tc, '_roi_inspector_listener_installed'):
+            def _on_alignment(point_id: int, record: object) -> None:
+                inst = RegistrationROIInspector.instance()
+                if inst is not None:
+                    inst.update_from_record(point_id, record)
+
+            def _on_applied(point_id: int, applied: bool, reason: str) -> None:
+                inst = RegistrationROIInspector.instance()
+                if inst is not None:
+                    inst.update_apply_status(point_id, applied, reason)
+
+            tc.AddAlignmentResultListener(_on_alignment)
+            tc.AddAlignmentAppliedListener(_on_applied)
+            tc._roi_inspector_listener_installed = True  # type: ignore[attr-defined]
 
     def onResetTransform(self):
         """Reset to an identity Rigid transform (zero offset, angle, and scale)."""

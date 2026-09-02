@@ -25,11 +25,32 @@ Project Structure:
 * pyre.space: Space enum (source/target) at package root for historical use; also re-exported via pyre.Space
 """
 
-__all__ = ['ui', 'viewmodels', 'views', 'state', 'resources', 'common', 'Space']
+__all__ = ['ui', 'viewmodels', 'views', 'state', 'resources', 'common', 'Space', 'build_tag']
+
+import os
+import time
 
 import pydantic
 import numpy as np
 from numpy.typing import NDArray
+
+_PROCESS_START_TIME = time.strftime("%H:%M:%S")
+
+
+def build_tag() -> str:
+    """A short tag identifying the running Pyre build, for window titles.
+
+    Includes the package version, process id, and the time this process
+    started so a window title makes it obvious whether Pyre was actually
+    restarted after a source change, rather than still running stale
+    in-memory code from before the edit.
+    """
+    try:
+        from importlib.metadata import version as _pkg_version
+        pkg_version = _pkg_version("pyre")
+    except Exception:
+        pkg_version = "?"
+    return f"v{pkg_version} pid{os.getpid()} @ {_PROCESS_START_TIME}"
 
 
 def _enable_pydantic_v2_basesettings_compat() -> None:

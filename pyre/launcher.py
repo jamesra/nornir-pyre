@@ -68,7 +68,7 @@ from pyre.settings import AppSettings
 from pyre.ui.window_geometry import apply_saved_window_geometry, capture_window_geometry
 
 from pyre.ui.windows.mosaicwindow import MosaicWindow
-from pyre.ui.windows.stoswindow import StosWindow
+from pyre.ui.windows.stoswindow import StosWindow, _STOS_WINDOW_BASE_TITLES
 
 
 class TeeOutput:
@@ -438,7 +438,8 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
     # Create STOS windows for source, target, and composite views
     source_window = StosWindow(None, ViewType.Source, "Source Image", ViewType.Source)
     target_window = StosWindow(None, ViewType.Target, "Target Image", ViewType.Target)
-    composite_window = StosWindow(None, ViewType.Composite, "Composite Image", ViewType.Composite)
+    composite_window = StosWindow(
+        None, ViewType.Composite, _STOS_WINDOW_BASE_TITLES[ViewType.Composite], ViewType.Composite)
 
     window_manager.add(ViewType.Source, source_window)
     window_manager.add(ViewType.Target, target_window)

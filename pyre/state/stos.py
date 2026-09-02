@@ -331,6 +331,7 @@ class StosState(StateEventsImpl):
                 self.SourceImageViewModel,
                 self.FixedImageMaskViewModel,
             )
+        self.publish_alignment_images(pyre.Space.Source)
         self.FireOnImageChanged(pyre.Space.Source)
         return vm
 
@@ -357,6 +358,7 @@ class StosState(StateEventsImpl):
                 self.TargetImageViewModel,
                 self.WarpedImageMaskViewModel,
             )
+        self.publish_alignment_images(pyre.Space.Target)
         return vm
 
     def LoadFixedImage(self, ImageFileFullPath: str) -> ImageViewModel:
@@ -388,6 +390,7 @@ class StosState(StateEventsImpl):
             self.SourceImageViewModel,
             self.FixedImageMaskViewModel,
         )
+        self.publish_alignment_images(pyre.Space.Source)
         return self.FixedImageMaskViewModel
 
     def LoadWarpedMaskImage(self, ImageFileFullPath: str) -> ImageViewModel | None:
@@ -401,7 +404,43 @@ class StosState(StateEventsImpl):
             self.TargetImageViewModel,
             self.WarpedImageMaskViewModel,
         )
+        self.publish_alignment_images(pyre.Space.Target)
         return self.WarpedImageMaskViewModel
+
+    def registration_helper_for_space(
+            self, image_space: pyre.Space) -> nornir_imageregistration.ImagePermutationHelper | None:
+        """Contrast-adjusted alignment helper for one space, or None when unloaded.
+
+        Registration scores contrast-adjusted pixels, so the published arrays must
+        be the same ones Spacebar would have scored in-process.
+        """
+        helper = (self._warped_image_permutations
+                  if image_space == pyre.Space.Target
+                  else self._fixed_image_permutations)
+        if helper is None:
+            return None
+        try:
+            from pyre.image_contrast import contrast_for_space, contrasted_permutation_helper
+
+            return contrasted_permutation_helper(
+                helper, contrast_for_space(image_space))
+        except Exception:
+            # Settings are not wired in headless tests; publish the raw helper.
+            logger.debug("Publishing uncontrasted alignment images for %s", image_space,
+                         exc_info=True)
+            return helper
+
+    def publish_alignment_images(self, image_space: pyre.Space | None = None) -> None:
+        """Copy alignment pixels for one (or both) spaces into read-only shared memory.
+
+        Called after every permutation assignment so the process-pool workers can
+        attach instead of receiving a mosaic per control point. The copy runs off
+        the UI thread; the registration queue gates until it completes.
+        """
+        spaces = (pyre.Space.Source, pyre.Space.Target) if image_space is None else (image_space,)
+        for space in spaces:
+            self._transform_controller.publish_registration_image(
+                space, self.registration_helper_for_space(space))
 
     @staticmethod
     def _update_image_permutations(img: ImageViewModel | None, mask: ImageViewModel | None) \

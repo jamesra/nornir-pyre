@@ -23,6 +23,7 @@ from pyre.settings.app import (
     AppSettings,
     GridRefineDefaults,
     PointRegistrationSettings,
+    UISettings,
 )
 
 
@@ -43,6 +44,7 @@ class TransformsSettingsDialog(QDialog):
         tabs.addTab(self._build_rigid_tab(settings.stos.brute_registration), "Rigid")
         tabs.addTab(self._build_grid_tab(settings.stos.grid_refine), "Grid")
         tabs.addTab(self._build_point_tab(settings.stos.point_registration), "Point / Mesh")
+        tabs.addTab(self._build_debug_tab(settings.ui), "Debug")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -145,9 +147,28 @@ class TransformsSettingsDialog(QDialog):
         self._point_angle_step.setSingleStep(0.5)
         self._point_angle_step.setValue(float(angle.angle_step_size))
 
+        self._point_estimate_angle = QCheckBox(page)
+        self._point_estimate_angle.setChecked(bool(point.estimate_angle))
+        self._point_estimate_angle.setToolTip(
+            "Add a log-polar angle estimate to the angles searched above.")
+
         form.addRow("Alignment area", self._alignment_area)
         form.addRow("Max angle (± degrees)", self._point_max_angle)
         form.addRow("Angle step (degrees)", self._point_angle_step)
+        form.addRow("Estimate angle", self._point_estimate_angle)
+        return page
+
+    def _build_debug_tab(self, ui: UISettings) -> QWidget:
+        """Build controls for ui debug/diagnostic display options."""
+        page = QWidget(self)
+        form = QFormLayout(page)
+
+        self._show_control_point_ids = QCheckBox(page)
+        self._show_control_point_ids.setChecked(bool(ui.show_control_point_ids))
+        self._show_control_point_ids.setToolTip(
+            "Draw each control point's session ID next to its glyph in the Source "
+            "and Target image windows, to confirm which point on screen is which.")
+        form.addRow("Show control point IDs", self._show_control_point_ids)
         return page
 
     @staticmethod
@@ -182,7 +203,10 @@ class TransformsSettingsDialog(QDialog):
                 max_angle=float(self._point_max_angle.value()),
                 angle_step_size=float(self._point_angle_step.value()),
             ),
+            estimate_angle=self._point_estimate_angle.isChecked(),
         )
+
+        self._settings.ui.show_control_point_ids = self._show_control_point_ids.isChecked()
 
     @staticmethod
     def edit_settings(settings: AppSettings, parent: QWidget | None = None) -> bool:

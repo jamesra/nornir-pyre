@@ -38,9 +38,15 @@ class AngleSearchRange(BaseModel):
 class PointRegistrationSettings(BaseModel):
     alignment_area: int = 128
     angle_search_range: AngleSearchRange = AngleSearchRange.zero()  # field(default_factory=AngleSearchRange)
+    # When True a log-polar estimate appends an angle to angle_search_range, so the
+    # search is no longer limited to the angles configured above. Off by default:
+    # single-point registration must search only the angles configured here.
+    estimate_angle: bool = False
 
-    def __init__(self, alignment_area: int = 256, angle_search_range: AngleSearchRange = AngleSearchRange.zero()):
-        super().__init__(alignment_area=alignment_area, angle_search_range=angle_search_range)
+    def __init__(self, alignment_area: int = 256, angle_search_range: AngleSearchRange = AngleSearchRange.zero(),
+                 estimate_angle: bool = False):
+        super().__init__(alignment_area=alignment_area, angle_search_range=angle_search_range,
+                         estimate_angle=estimate_angle)
 
     @property
     def alignment_area_shape(self) -> NDArray[np.integer]:
@@ -120,6 +126,9 @@ class ImageDisplayContrast(BaseModel):
 class UISettings(BaseModel):
     zoom_limits: FloatRange = FloatRange(min=0.00390625, max=16)  # Maximum and minimum zoom levels
     control_point_search_radius: float = 10.0  # Radius in pixels to search for control points
+    # Draws each control point's session ID next to its glyph in the Source/Target image
+    # windows. A debug aid for confirming which point is which without hover-guessing.
+    show_control_point_ids: bool = False
     image_search_paths: list[str] = []  # field(default_factory=list)  # Paths to search for images
     replacement_paths: dict[
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files

@@ -40,6 +40,10 @@ class RegisterControlPointCommand(InstantCommandBase):
     def angles_to_search(self) -> NDArray[np.floating]:
         return self._settings.angles_to_search
 
+    @property
+    def estimate_angle(self) -> bool:
+        return self._settings.estimate_angle
+
     @inject
     def __init__(self,
                  selected_points: ObservableSet[int],  # The indices of the selected points
@@ -74,29 +78,8 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._settings = settings.stos.point_registration
 
         if register_all:
-            # #region agent log
-            from pyre.debug_shift_space_profile import log_event, phase_timer
-            log_event(
-                hypothesis_id="B",
-                location="registercontrolpointcommand.py:__init__",
-                message="register_all init",
-                data={"num_points": transform_controller.NumPoints},
-            )
-            with phase_timer(
-                    "B",
-                    "registercontrolpointcommand.py:__init__",
-                    "selected_points_update",
-                    num_points=transform_controller.NumPoints,
-            ):
-                self._selected_points.update(range(transform_controller.NumPoints))
-            with phase_timer(
-                    "B",
-                    "registercontrolpointcommand.py:__init__",
-                    "snapshot_original_points",
-                    num_points=transform_controller.NumPoints,
-            ):
-                self._original_points = transform_controller.points
-            # #endregion
+            self._selected_points.update(range(transform_controller.NumPoints))
+            self._original_points = transform_controller.points
         else:
             self._selected_points.update(command_points)
             self._original_points = transform_controller.points
@@ -117,72 +100,38 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
-        # #region agent log
-        from pyre.debug_shift_space_profile import (
-            log_event,
-            phase_timer,
-            start_cprofile,
-            stop_cprofile,
-        )
         queued = list(self._selected_points)
-        register_all = len(queued) == self._transform_controller.NumPoints
-        log_event(
-            hypothesis_id="A",
-            location="registercontrolpointcommand.py:execute",
-            message="execute start",
-            data={
-                "queued_count": len(queued),
-                "num_points": self._transform_controller.NumPoints,
-                "register_all": register_all,
-            },
-        )
-        if register_all:
-            start_cprofile("register_all_execute")
-        # #endregion
-        with phase_timer(
-                "A",
-                "registercontrolpointcommand.py:execute",
-                "contrasted_permutation_helper_source",
-                queued_count=len(queued),
-        ):
+        # Images published to shared memory at load (and on contrast settle) are
+        # already the arrays the pool workers attach to; re-wrapping them here
+        # would build a helper the controller cannot match to a publication.
+        published = bool(getattr(
+            self._transform_controller, "registration_images_published", False)
+            or getattr(
+            self._transform_controller, "registration_publish_pending", False))
+        source = None
+        target = None
+        if not published:
             source = contrasted_permutation_helper(
                 self._image_manager[self._source_image],
                 self._app_settings.ui.source_contrast,
             )
-        with phase_timer(
-                "A",
-                "registercontrolpointcommand.py:execute",
-                "contrasted_permutation_helper_target",
-                queued_count=len(queued),
-        ):
             target = contrasted_permutation_helper(
                 self._image_manager[self._target_image],
                 self._app_settings.ui.target_contrast,
             )
-        with phase_timer(
-                "C",
-                "registercontrolpointcommand.py:execute",
-                "enqueue_point_registrations",
-                queued_count=len(queued),
-        ):
-            self._transform_controller.enqueue_point_registrations(
-                queued,
-                source_image=source,
-                target_image=target,
-                alignment_area=self.alignment_area,
-                angles_to_search=self.angles_to_search,
-            )
-        # #region agent log
-        if register_all:
-            stop_cprofile("register_all_execute")
-        log_event(
-            hypothesis_id="A",
-            location="registercontrolpointcommand.py:execute",
-            message="execute end",
-            data={"queued_count": len(queued)},
+        self._transform_controller.enqueue_point_registrations(
+            queued,
+            source_image=source,
+            target_image=target,
+            alignment_area=self.alignment_area,
+            angles_to_search=self.angles_to_search,
+            estimate_angle=self.estimate_angle,
         )
-        # #endregion
-        _logger.info("RegisterControlPointCommand queued %s selected point(s)", len(queued))
+        # Enumerates every index actually queued (not just the count) plus its session ID,
+        # to check whether _selected_points has accumulated stale entries from earlier
+        # selections instead of holding only the point the user just clicked.
+        queued_ids = [(index, self._transform_controller.point_id_for_index(index)) for index in queued]
+        _logger.info("RegisterControlPointCommand queued %s selected point(s): %s", len(queued), queued_ids)
         super().execute()
 
     def activate(self):
@@ -200,4 +149,5 @@ class RegisterControlPointCommand(InstantCommandBase):
             target_image=targetimage,
             alignment_area=self.alignment_area,
             angles_to_search=self.angles_to_search,
+            estimate_angle=self.estimate_angle,
         )

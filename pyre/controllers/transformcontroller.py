@@ -51,10 +51,17 @@ from pyre.selection_event_data import PointPair
 from pyre.qt_eventmanager import qt_post_to_main
 from pyre.array_host import yx_host as _mapped_yx_host
 from pyre.controllers.alignment_payload import (
+    HostImagePayload,
     SharedImagePairRef,
     StagedImagePair,
+    host_image_payload,
     shared_memory_supported,
+    stage_host_image,
     stage_image_pair,
+)
+from pyre.controllers.registration_image_store import (
+    PublishedPairLease,
+    RegistrationImageStore,
 )
 
 _logger = logging.getLogger(__name__)
@@ -104,6 +111,7 @@ def _align_control_point_from_arrays(
         alignment_area: NDArray[np.integer],
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
+        estimate_angle: bool = False,
 ) -> object | None:
     """Align one control point from host arrays. Shared by both pool paths.
 
@@ -130,6 +138,11 @@ def _align_control_point_from_arrays(
         target_controlpoint=target_controlpoint,
         alignmentArea=area,
         anglesToSearch=angles_to_search,
+        estimate_angle=estimate_angle,
+        # The mesh transform already carries the section scale, so the ROI pair is
+        # already at scale 1.0 relative to each other; searching scale here only adds
+        # seconds and lets a mis-scaled match win the translation.
+        search_scale=False,
         use_gpu=False,
     )
 
@@ -141,6 +154,7 @@ def run_control_point_alignment(
         alignment_area: NDArray[np.integer],
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
+        estimate_angle: bool = False,
 ) -> object | None:
     """Align one control point in this process from ``ImagePermutationHelper`` pairs."""
     return _align_control_point_from_arrays(
@@ -154,6 +168,7 @@ def run_control_point_alignment(
         alignment_area,
         angles_to_search,
         target_controlpoint,
+        estimate_angle,
     )
 
 
@@ -163,6 +178,7 @@ def run_shared_control_point_alignment(
         alignment_area: NDArray[np.integer],
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
+        estimate_angle: bool = False,
 ) -> object | None:
     """Align one control point in a pool worker from a staged image pair.
 
@@ -182,6 +198,7 @@ def run_shared_control_point_alignment(
             alignment_area,
             angles_to_search,
             target_controlpoint,
+            estimate_angle,
         )
 
 
@@ -213,6 +230,46 @@ def _to_numpy(arr: NDArray) -> NDArray:
     if hasattr(arr, 'get'):
         return arr.get()  # type: ignore[union-attr]
     return numpy.asarray(arr)
+
+
+def _is_device_array(value: object) -> bool:
+    """True when *value* looks like a CuPy ndarray rather than a host array."""
+    return (not isinstance(value, np.ndarray)
+            and hasattr(value, 'shape')
+            and hasattr(value, 'dtype')
+            and hasattr(value, 'get'))
+
+
+def host_transform_snapshot(
+        transform: nornir_imageregistration.ITransform) -> nornir_imageregistration.ITransform:
+    """Return a host-array clone of *transform* safe to pickle into a worker.
+
+    Rebuilt through the transform's own pickle state so control points and
+    matrices are the same values, with device arrays copied to the host on the
+    calling (CUDA-owning) thread. A worker must never receive a live CuPy mesh:
+    its backend is numpy and mapping points from a device array there is how a
+    ``CUDA_ERROR_ILLEGAL_ADDRESS`` happens. Returns *transform* unchanged when
+    it holds no device arrays or does not implement the state protocol.
+    """
+    get_state = getattr(transform, '__getstate__', None)
+    set_state = getattr(transform, '__setstate__', None)
+    if not callable(get_state) or not callable(set_state):
+        return transform
+    try:
+        state = get_state()
+        if not isinstance(state, dict) or not any(
+                _is_device_array(value) for value in state.values()):
+            return transform
+        host_state = {
+            key: (_to_numpy(value) if _is_device_array(value) else value)
+            for key, value in state.items()
+        }
+        clone = transform.__class__.__new__(transform.__class__)
+        clone.__setstate__(host_state)  # type: ignore[attr-defined]
+    except Exception:
+        _logger.exception("Could not host-snapshot the transform; pickling it as-is")
+        return transform
+    return clone  # type: ignore[return-value]
 
 
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
@@ -268,6 +325,14 @@ TransformModelChangedCallback = Callable[['TransformController',
 
 BusyPointsChangedCallback = Callable[['TransformController', frozenset[int]], None]
 
+# Called on the UI thread when a single-point alignment finishes; second arg is the
+# AlignmentRecord with .TargetROI and .SourceROI attached.
+AlignmentResultCallback = Callable[[int, object], None]
+
+# Called on the UI thread after _apply_registration_record decides; args are
+# (point_id, applied: bool, reason: str).
+AlignmentAppliedCallback = Callable[[int, bool, str], None]
+
 
 class TransformController:
     """
@@ -308,6 +373,8 @@ class TransformController:
     _registration_queue: ControlPointRegistrationQueue
     _busy_points: ControlPointBusySet
     __OnBusyPointsChangedListeners: IEventManager[BusyPointsChangedCallback]
+    __OnAlignmentResultListeners: IEventManager[AlignmentResultCallback]
+    __OnAlignmentAppliedListeners: IEventManager[AlignmentAppliedCallback]
     _ui_selected_points: ObservableSet[int] | None
     _registration_apply_in_progress: bool = False
     _registration_align_fn: Callable[..., object] | None = None
@@ -315,7 +382,12 @@ class TransformController:
     _registration_target_image: ImagePermutationHelper | None = None
     _registration_alignment_area: NDArray[np.integer] | None = None
     _registration_angles: NDArray[np.floating] | None = None
+    _registration_estimate_angle: bool = False
     _registration_staged_pair: StagedImagePair | None = None
+    _registration_image_store: RegistrationImageStore
+    _registration_published_helpers: dict[Space, ImagePermutationHelper]
+    _registration_leases: dict[int, PublishedPairLease]
+    _registration_job_generations: dict[int, tuple[int | None, int | None]]
 
     @property
     def interactive_edit_in_progress(self) -> bool:
@@ -786,6 +858,25 @@ class TransformController:
         """Unsubscribe from busy-set changes."""
         self.__OnBusyPointsChangedListeners.remove(func)
 
+    def AddAlignmentResultListener(self, func: AlignmentResultCallback) -> None:
+        """Subscribe to alignment-result events fired after each single-point registration."""
+        self.__OnAlignmentResultListeners.add(func)
+
+    def RemoveAlignmentResultListener(self, func: AlignmentResultCallback) -> None:
+        """Unsubscribe from alignment-result events."""
+        self.__OnAlignmentResultListeners.remove(func)
+
+    def AddAlignmentAppliedListener(self, func: AlignmentAppliedCallback) -> None:
+        """Register *func* called after :meth:`_apply_registration_record` decides.
+
+        Signature: ``(point_id: int, applied: bool, reason: str) -> None``.
+        """
+        self.__OnAlignmentAppliedListeners.add(func)
+
+    def RemoveAlignmentAppliedListener(self, func: AlignmentAppliedCallback) -> None:
+        """Unsubscribe from alignment-applied events."""
+        self.__OnAlignmentAppliedListeners.remove(func)
+
     def OnTransformChanged(self):
         # If the transform is getting complicated then use
         # InitializeDataStructures to parallelize the
@@ -923,6 +1014,8 @@ class TransformController:
         self.__OnPointMovedEventListeners = pyre.qt_eventmanager.QtEventManager[PointMovedCallback]()
         self.__OnTransformModelReplacedEventListeners = pyre.qt_eventmanager.QtEventManager[TransformModelChangedCallback]()
         self.__OnBusyPointsChangedListeners = pyre.qt_eventmanager.QtEventManager[BusyPointsChangedCallback]()
+        self.__OnAlignmentResultListeners = pyre.qt_eventmanager.QtEventManager[AlignmentResultCallback]()
+        self.__OnAlignmentAppliedListeners = pyre.qt_eventmanager.QtEventManager[AlignmentAppliedCallback]()
 
         self.DefaultToForwardTransform = DefaultToForwardTransform
 
@@ -957,6 +1050,11 @@ class TransformController:
         self._registration_target_image = None
         self._registration_alignment_area = None
         self._registration_angles = None
+        self._registration_estimate_angle = False
+        self._registration_image_store = RegistrationImageStore()
+        self._registration_published_helpers = {}
+        self._registration_leases = {}
+        self._registration_job_generations = {}
 
         self.TransformModel = TransformModel
 
@@ -1111,6 +1209,11 @@ class TransformController:
         count = self.NumPoints
         current = int(self._point_ids.shape[0])
         if count == current:
+            # Detects the case _reconcile_point_ids cannot otherwise see: the row order of
+            # the underlying transform's points changing (e.g. on reload/rebuild) while the
+            # point count stays the same. _point_ids/_id_to_index are never re-minted here,
+            # so if the physical point at a given row silently changes, the session ID that
+            # row reports becomes wrong even though nothing here raised an error.
             return
         if count > current:
             extra = count - current
@@ -1202,25 +1305,15 @@ class TransformController:
             target_image: ImagePermutationHelper | None = None,
             alignment_area: NDArray[np.integer] | None = None,
             angles_to_search: NDArray[np.floating] | None = None,
+            estimate_angle: bool | None = None,
             align_fn: Callable[..., object] | None = None,
     ) -> list[int]:
         """Queue unique control-point alignments by session ID. Returns newly queued IDs."""
-        # #region agent log
-        import time
-        from pyre.debug_shift_space_profile import log_event, phase_timer
-        _enqueue_t0 = time.perf_counter()
-        # #endregion
         point_ids: list[int] = []
-        with phase_timer(
-                "C",
-                "transformcontroller.py:enqueue_point_registrations",
-                "index_to_point_id",
-                index_count=len(indices),
-        ):
-            for index in indices:
-                point_id = self.point_id_for_index(int(index))
-                if point_id is not None:
-                    point_ids.append(point_id)
+        for index in indices:
+            point_id = self.point_id_for_index(int(index))
+            if point_id is not None:
+                point_ids.append(point_id)
         if align_fn is not None:
             self._registration_align_fn = align_fn
         if source_image is not None:
@@ -1231,48 +1324,18 @@ class TransformController:
             self._registration_alignment_area = alignment_area
         if angles_to_search is not None:
             self._registration_angles = angles_to_search
-        with phase_timer(
-                "C",
-                "transformcontroller.py:enqueue_point_registrations",
-                "queue_enqueue",
-                point_id_count=len(point_ids),
-        ):
-            added = self._registration_queue.enqueue(point_ids)
+        if estimate_angle is not None:
+            self._registration_estimate_angle = estimate_angle
+        added = self._registration_queue.enqueue(point_ids)
         if added:
             _logger.info("Queued control-point alignments ids=%s", added)
-            with phase_timer(
-                    "C",
-                    "transformcontroller.py:enqueue_point_registrations",
-                    "sync_register_busy",
-                    added_count=len(added),
-            ):
-                self._sync_register_busy()
-            with phase_timer(
-                    "D",
-                    "transformcontroller.py:enqueue_point_registrations",
-                    "pump_registration_queue",
-                    added_count=len(added),
-            ):
-                self._pump_registration_queue()
+            self._sync_register_busy()
+            self._pump_registration_queue()
         elif point_ids:
             _logger.info(
                 "Control-point alignments already pending or in flight ids=%s",
                 list(point_ids),
             )
-        # #region agent log
-        log_event(
-            hypothesis_id="C",
-            location="transformcontroller.py:enqueue_point_registrations",
-            message="enqueue complete",
-            data={
-                "index_count": len(indices),
-                "point_id_count": len(point_ids),
-                "added_count": len(added),
-                "pending_count": len(self._registration_queue.queued_ids),
-                "elapsed_ms": round((time.perf_counter() - _enqueue_t0) * 1000.0, 3),
-            },
-        )
-        # #endregion
         return added
 
     def _pump_registration_queue(self) -> None:
@@ -1281,6 +1344,11 @@ class TransformController:
         if self._registration_queue.pending_count == 0:
             if self._registration_queue.is_idle:
                 self._on_registration_queue_idle()
+            return
+        if self._registration_align_fn is None and self.registration_publish_pending:
+            # Spacebar may enqueue while a load-time copy is still running; the
+            # publication completing pumps again. IDs stay pending (busy glyphs).
+            _logger.info("Registration queue waiting for shared-memory publication")
             return
         capacity = max_concurrent_point_alignments()
         started_any = False
@@ -1324,21 +1392,133 @@ class TransformController:
         self._registration_staged_pair = None
         staged.close()
 
+    @property
+    def registration_images_published(self) -> bool:
+        """True when both sides have a current shared-memory publication."""
+        store = self._registration_image_store
+        return store.is_ready(Space.Source) and store.is_ready(Space.Target)
+
+    @property
+    def registration_publish_pending(self) -> bool:
+        """True while a published generation is still being copied off the UI thread."""
+        return self._registration_image_store.publish_pending()
+
+    def published_registration_helper(
+            self, space: Space) -> ImagePermutationHelper | None:
+        """Helper whose pixels were published for *space*, if any."""
+        return self._registration_published_helpers.get(space)
+
+    def publish_registration_image(
+            self,
+            space: Space,
+            helper: ImagePermutationHelper | None) -> int | None:
+        """Copy one side's alignment pixels into read-only shared memory.
+
+        Device arrays are host-copied here, on the CUDA-owning caller's thread;
+        everything else (noise-mask fill and the shared-memory copy) runs on the
+        global thread pool so image load does not stall the UI. Returns the
+        generation started, or None when there is nothing to publish. In-flight
+        registrations are cancelled because their peaks would apply to pixels the
+        user has replaced.
+        """
+        if helper is None:
+            self._registration_published_helpers.pop(space, None)
+            self._cancel_all_registrations()
+            self._registration_image_store.retire(space)
+            return None
+        if not shared_memory_supported():
+            return None
+
+        self._registration_published_helpers[space] = helper
+        self._cancel_all_registrations()
+        generation = self._registration_image_store.begin(space, helper)
+        payload: HostImagePayload | None = None
+        if _is_device_array(getattr(helper, 'Image', None)):
+            # Only the owning thread may touch device memory, so pay the host
+            # copy here rather than from a pool thread.
+            try:
+                payload = host_image_payload(helper)
+            except Exception:
+                _logger.exception("Could not host-copy alignment images for %s", space)
+                self._registration_image_store.complete(space, generation, None)
+                return generation
+
+        def _copy_to_shared_memory() -> object | None:
+            try:
+                return stage_host_image(
+                    payload if payload is not None else host_image_payload(helper))
+            except Exception:
+                _logger.exception("Could not publish alignment images for %s", space)
+                return None
+
+        if QApplication.instance() is None:
+            # Headless (tests): publish synchronously so callers need no event loop.
+            self._complete_registration_publish(
+                space, generation, _copy_to_shared_memory())
+            return generation
+
+        def _publish_task() -> None:
+            staged = _copy_to_shared_memory()
+            qt_post_to_main(
+                self._complete_registration_publish, space, generation, staged)
+
+        pools.GetGlobalThreadPool().add_task(
+            f"Publish {space} alignment image gen={generation}",
+            _publish_task,
+        )
+        return generation
+
+    def _complete_registration_publish(
+            self,
+            space: Space,
+            generation: int,
+            staged: object | None) -> None:
+        """Install a finished publication on the UI thread and resume the queue."""
+        installed = self._registration_image_store.complete(
+            space, generation, staged)  # type: ignore[arg-type]
+        if installed:
+            _logger.info("Published %s alignment images gen=%s", space, generation)
+        self._pump_registration_queue()
+
+    def _current_publish_generations(self) -> tuple[int | None, int | None]:
+        """Source and target publication generations at dispatch time."""
+        store = self._registration_image_store
+        return store.generation(Space.Source), store.generation(Space.Target)
+
+    def _release_registration_lease(self, point_id: int) -> None:
+        """Drop a finished job's hold so a retired generation can unlink."""
+        lease = self._registration_leases.pop(point_id, None)
+        if lease is not None:
+            lease.release()
+
+    def _job_images_are_stale(self, point_id: int) -> bool:
+        """True when the images this job scored have since been replaced."""
+        recorded = self._registration_job_generations.pop(point_id, None)
+        if recorded is None:
+            return False
+        return recorded != self._current_publish_generations()
+
+    def invalidate_registration_images(self) -> None:
+        """Retire published generations and drop in-flight registration work.
+
+        Late results are discarded by generation, and retired segments unlink
+        once the jobs holding them finish.
+        """
+        self._cancel_all_registrations()
+        self._registration_image_store.invalidate()
+
     def _dispatch_point_alignment(self, point_id: int, index: int) -> None:
         """Submit one already-in-flight alignment to the process or thread pool."""
-        # #region agent log
-        import time
-        from pyre.debug_shift_space_profile import log_event, next_alignment_seq
-        _pump_t0 = time.perf_counter()
-        # #endregion
         snapshot_target = _mapped_yx_host(self.GetFixedPoint(index)).copy()
-        source_image = self._registration_source_image
-        target_image = self._registration_target_image
+        source_image = (self._registration_source_image
+                        or self.published_registration_helper(Space.Source))
+        target_image = (self._registration_target_image
+                        or self.published_registration_helper(Space.Target))
         alignment_area = self._registration_alignment_area
         angles = self._registration_angles
+        estimate_angle = self._registration_estimate_angle
         align_fn = self._registration_align_fn
         transform = self.TransformModel
-        alignment_seq = next_alignment_seq()
 
         def _finish(record: object | None) -> None:
             if QApplication.instance() is None:
@@ -1349,9 +1529,6 @@ class TransformController:
 
         def _thread_worker() -> None:
             record: object | None = None
-            # #region agent log
-            _align_t0 = time.perf_counter()
-            # #endregion
             try:
                 _logger.info("Aligning control point id=%s", point_id)
                 record = self._run_point_alignment(
@@ -1360,24 +1537,12 @@ class TransformController:
                     target_image=target_image,
                     alignment_area=alignment_area,
                     angles_to_search=angles,
+                    estimate_angle=estimate_angle,
                     target_controlpoint=snapshot_target,
                     align_fn=align_fn,
                 )
             except Exception:
                 _logger.exception("Exception aligning point id %s", point_id)
-            # #region agent log
-            log_event(
-                hypothesis_id="D",
-                location="transformcontroller.py:_thread_worker",
-                message="alignment finished (thread)",
-                data={
-                    "alignment_seq": alignment_seq,
-                    "point_id": point_id,
-                    "index": index,
-                    "elapsed_ms": round((time.perf_counter() - _align_t0) * 1000.0, 3),
-                },
-            )
-            # #endregion
             _finish(record)
 
         if QApplication.instance() is None:
@@ -1385,68 +1550,50 @@ class TransformController:
             return
 
         staged_pair: StagedImagePair | None = None
+        pair_ref: SharedImagePairRef | None = None
+        lease: PublishedPairLease | None = None
         if (align_fn is None
                 and transform is not None
                 and source_image is not None
                 and target_image is not None
                 and alignment_area is not None
                 and uses_process_pool_for_point_alignment()):
-            staged_pair = self._staged_alignment_pair(source_image, target_image)
-        use_process_pool = staged_pair is not None
-        pool_kind = "process" if use_process_pool else "thread"
-        # #region agent log
-        log_event(
-            hypothesis_id="E",
-            location="transformcontroller.py:_pump_registration_queue",
-            message="dispatch alignment",
-            data={
-                "alignment_seq": alignment_seq,
-                "point_id": point_id,
-                "index": index,
-                "pool_kind": pool_kind,
-                "pending_count": self._registration_queue.pending_count,
-                "in_flight_count": self._registration_queue.in_flight_count,
-                "capacity": max_concurrent_point_alignments(),
-                "num_points": self.NumPoints,
-            },
-        )
-        # #endregion
+            lease = self._registration_image_store.lease(source_image, target_image)
+            if lease is not None:
+                pair_ref = lease.ref
+            else:
+                staged_pair = self._staged_alignment_pair(source_image, target_image)
+                pair_ref = None if staged_pair is None else staged_pair.ref
+        use_process_pool = pair_ref is not None
         if not use_process_pool:
             pools.GetGlobalThreadPool().add_task(
                 f"Align Pyre Point id={point_id}",
                 _thread_worker,
             )
-            # #region agent log
-            log_event(
-                hypothesis_id="E",
-                location="transformcontroller.py:_pump_registration_queue",
-                message="thread pool submit complete",
-                data={
-                    "alignment_seq": alignment_seq,
-                    "point_id": point_id,
-                    "elapsed_ms": round((time.perf_counter() - _pump_t0) * 1000.0, 3),
-                },
-            )
-            # #endregion
             return
 
-        assert staged_pair is not None
+        assert pair_ref is not None
         _logger.info("Aligning control point id=%s on process pool", point_id)
+        if lease is not None:
+            self._registration_leases[point_id] = lease
+        self._registration_job_generations[point_id] = self._current_publish_generations()
         try:
             task = pools.GetGlobalLocalMachinePool().add_task(
                 f"Align Pyre Point id={point_id}",
                 run_shared_control_point_alignment,
-                transform,
-                staged_pair.ref,
+                host_transform_snapshot(transform),
+                pair_ref,
                 alignment_area,
                 angles,
                 snapshot_target,
+                estimate_angle,
             )
         except Exception:
             _logger.exception(
                 "Process-pool submit failed for point id %s; using thread pool",
                 point_id,
             )
+            self._release_registration_lease(point_id)
             pools.GetGlobalThreadPool().add_task(
                 f"Align Pyre Point id={point_id}",
                 _thread_worker,
@@ -1455,44 +1602,16 @@ class TransformController:
 
         def _await_process_result() -> None:
             record: object | None = None
-            # #region agent log
-            _wait_t0 = time.perf_counter()
-            # #endregion
             try:
                 record = task.wait_return()
             except Exception:
                 _logger.exception("Exception aligning point id %s", point_id)
-            # #region agent log
-            log_event(
-                hypothesis_id="E",
-                location="transformcontroller.py:_await_process_result",
-                message="process pool wait complete",
-                data={
-                    "alignment_seq": alignment_seq,
-                    "point_id": point_id,
-                    "index": index,
-                    "wait_ms": round((time.perf_counter() - _wait_t0) * 1000.0, 3),
-                },
-            )
-            # #endregion
             _finish(record)
 
         pools.GetGlobalThreadPool().add_task(
             f"Await Pyre Point id={point_id}",
             _await_process_result,
         )
-        # #region agent log
-        log_event(
-            hypothesis_id="E",
-            location="transformcontroller.py:_pump_registration_queue",
-            message="process pool submit complete",
-            data={
-                "alignment_seq": alignment_seq,
-                "point_id": point_id,
-                "elapsed_ms": round((time.perf_counter() - _pump_t0) * 1000.0, 3),
-            },
-        )
-        # #endregion
 
     def _run_point_alignment(
             self,
@@ -1502,6 +1621,7 @@ class TransformController:
             target_image: ImagePermutationHelper | None,
             alignment_area: NDArray[np.integer] | None,
             angles_to_search: NDArray[np.floating] | None,
+            estimate_angle: bool = False,
             target_controlpoint: NDArray[np.floating],
             align_fn: Callable[..., object] | None,
     ) -> object | None:
@@ -1523,6 +1643,7 @@ class TransformController:
             alignment_area,
             angles_to_search,
             target_controlpoint,
+            estimate_angle=estimate_angle,
         )
 
     def _on_registration_finished(
@@ -1532,31 +1653,19 @@ class TransformController:
             record: object | None,
     ) -> None:
         """Apply a finished alignment on the UI thread, then start the next job."""
-        # #region agent log
-        import time
-        from pyre.debug_shift_space_profile import log_event
-        _finish_t0 = time.perf_counter()
-        # #endregion
         cancelled = self._registration_queue.is_cancelled(point_id)
+        stale_images = self._job_images_are_stale(point_id)
+        self._release_registration_lease(point_id)
         self._registration_queue.finish(point_id)
         self._sync_register_busy()
-        if not cancelled:
+        if stale_images:
+            _logger.info(
+                "Alignment for point id %s discarded: images were replaced", point_id)
+        if not cancelled and not stale_images:
+            if record is not None:
+                self.__OnAlignmentResultListeners.invoke(point_id, record)
             self._apply_registration_record(point_id, snapshot_target, record)
         self._pump_registration_queue()
-        # #region agent log
-        log_event(
-            hypothesis_id="D",
-            location="transformcontroller.py:_on_registration_finished",
-            message="registration finished on UI thread",
-            data={
-                "point_id": point_id,
-                "cancelled": cancelled,
-                "pending_count": len(self._registration_queue.queued_ids),
-                "queue_idle": self._registration_queue.is_idle,
-                "elapsed_ms": round((time.perf_counter() - _finish_t0) * 1000.0, 3),
-            },
-        )
-        # #endregion
 
     def _apply_registration_record(
             self,
@@ -1569,21 +1678,28 @@ class TransformController:
         if index is None or record is None:
             if record is None:
                 _logger.info("Alignment for point id %s produced no record", point_id)
+            self.__OnAlignmentAppliedListeners.invoke(
+                point_id, False, "no record" if record is None else "point id unknown")
             return
         weight = getattr(record, "weight", 0)
         peak = getattr(record, "peak", None)
         if weight == 0 or peak is None:
             _logger.info("Alignment for point id %s ignored (weight=%s)", point_id, weight)
+            self.__OnAlignmentAppliedListeners.invoke(point_id, False, f"weight={weight}")
             return
         dy, dx = float(peak[0]), float(peak[1])
         if math.isnan(dx) or math.isnan(dy):
             _logger.info("Alignment for point id %s ignored (NaN peak)", point_id)
+            self.__OnAlignmentAppliedListeners.invoke(point_id, False, "NaN peak")
             return
         current = _mapped_yx_host(self.GetFixedPoint(index))
         if not np.allclose(current, snapshot_target, rtol=1e-5, atol=1e-3):
             _logger.info("Alignment for point id %s discarded because the point moved", point_id)
+            self.__OnAlignmentAppliedListeners.invoke(point_id, False, "point moved since snapshot")
             return
-        _logger.info("Applying alignment for point id %s delta=(%s, %s)", point_id, dy, dx)
+        _logger.info("Applying alignment for point id %s delta=(%.2f, %.2f) weight=%.4f",
+                     point_id, dy, dx, weight)
+
         self._registration_apply_in_progress = True
         try:
             self.MovePoint(index, dx, dy, space=Space.Target)
@@ -1592,6 +1708,8 @@ class TransformController:
                 self._cancel_all_registrations()
         finally:
             self._registration_apply_in_progress = False
+        self.__OnAlignmentAppliedListeners.invoke(
+            point_id, True, f"delta=(dy={dy:+.2f}, dx={dx:+.2f}) w={weight:.4f}")
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""

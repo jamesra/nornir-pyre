@@ -52,6 +52,7 @@ from pyre.views.composite_display import (
     camera_lookat_from_target_space,
     composite_control_point_draw_rows,
     composite_legend_rich_text,
+    display_lookat_for_composite,
     rebase_composite_camera_to_display,
     resolve_composite_display_draw_params,
 )
@@ -228,6 +229,8 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         QTimer.singleShot(GLYPH_TIMER_IDLE_MS, self.on_timer_singleshot)
 
         self.statusbar.space = self.space
+
+        self._glpanel._overlay_paint_method = self._paint_control_point_id_overlay
 
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
@@ -681,6 +684,78 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self.transform_controller, point, self.space)
 
         super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)  # type: ignore[arg-type]
+
+    def _paint_control_point_id_overlay(self, painter: PyQt6.QtGui.QPainter) -> None:
+        """Debug aid: draw each control point's session ID next to its glyph.
+
+        Gated behind settings.ui.show_control_point_ids.
+
+        Points array layout: [[TargetY, TargetX, SourceY, SourceX], ...]
+        GL shader selects: tween=0 → point_source_offset (cols 2,3) for Source panel,
+                           tween=1 → point_target_offset (cols 0,1) for Target panel.
+        Composite panel draws glyphs at Target coords (cols 0,1) via
+        composite_control_point_draw_rows, using a display-space lookat.
+        """
+        if not self._settings.ui.show_control_point_ids:
+            return
+        if self.camera is None or self._transform_controller is None:
+            return
+
+        points = self._transform_controller.points  # Nx4: TargetY, TargetX, SourceY, SourceX
+        if points.shape[0] == 0:
+            return
+
+        # Match the GL shader's tween: Source panel → SourcePoints (cols 2,3),
+        # Target panel → TargetPoints (cols 0,1).
+        # Composite → TargetPoints (cols 0,1), same as composite_control_point_draw_rows.
+        if self._view_type == ViewType.Composite or self.space == Space.Target:
+            column_offset = 0
+        else:
+            column_offset = 2
+
+        window_height = int(self.camera.window_size[0])
+
+        # For the Composite panel the camera lookat is in source space but the glyphs
+        # are placed in target/display space, so we need the composite display lookat
+        # to compute correct screen positions.
+        composite_min_world = None
+        if self._view_type == ViewType.Composite:
+            try:
+                composite_lookat = display_lookat_for_composite(
+                    self.camera, self._transform_controller)
+                composite_min_world = np.asarray(composite_lookat, dtype=np.float64) \
+                    - np.asarray(self.camera.visible_world_size, dtype=np.float64) / 2.0
+            except Exception as _exc:
+                return
+
+        font = PyQt6.QtGui.QFont(painter.font())
+        font.setBold(True)
+        font.setPointSize(max(font.pointSize(), 10))
+        painter.setFont(font)
+
+        LEADER = 4
+        cam_visible = self.camera.visible_world_size
+        cam_window = self.camera.window_size
+        for row_index in range(points.shape[0]):
+            point_id = self._transform_controller.point_id_for_index(row_index)
+            if point_id is None:
+                continue
+            y, x = float(points[row_index, column_offset]), float(points[row_index, column_offset + 1])
+
+            if composite_min_world is not None:
+                offset = np.array((y, x)) - composite_min_world
+                screen_yx = (offset / cam_visible) * cam_window
+                screen_y, screen_x = float(screen_yx[0]), float(screen_yx[1])
+            else:
+                screen_y, screen_x = self.camera.screen_coords_for_world(y, x)
+
+            qt_x, qt_y = int(screen_x) + LEADER, int(window_height - screen_y) - LEADER
+            text = str(point_id)
+            painter.setPen(PyQt6.QtGui.QColor(0, 0, 0))
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                painter.drawText(qt_x + dx, qt_y + dy, text)
+            painter.setPen(PyQt6.QtGui.QColor(255, 255, 0))
+            painter.drawText(qt_x, qt_y, text)
 
     def draw(self):
         """Region is [x,y,TextureWidth,TextureHeight] indicating where the image should be drawn on the window"""

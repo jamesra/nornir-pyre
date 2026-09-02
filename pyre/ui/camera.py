@@ -174,6 +174,16 @@ class Camera(IReadOnlyCamera):
         world_coords = self.min_visible_world_coords() + offset
         return world_coords
 
+    def screen_coords_for_world(self, y: float, x: float) -> NDArray[np.floating]:
+        """Inverse of ImageCoordsForMouse: world (y, x) -> bottom-left-origin screen (y, x).
+
+        Callers that need Qt's top-left-origin widget coordinates must still flip y via
+        ``window_height - y``, matching how ``GetCorrectedMousePosition`` flips the other way.
+        """
+        offset = np.array((y, x), dtype=float) - self.min_visible_world_coords()
+        screen_coords = (offset / self.visible_world_size) * self._window_size
+        return screen_coords
+
         # image_x = ((float(x) / self.WindowWidth) * self.visible_world_width) + (
         #         self.x - (self.visible_world_width / 2.0))
         # image_y = ((float(y) / self.WindowHeight) * self.visible_world_height) + (

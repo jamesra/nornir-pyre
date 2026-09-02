@@ -16,6 +16,10 @@ from PyQt6.QtWidgets import (
 )
 
 from pyre.container import IContainer
+from pyre.contrast_settle import (
+    ContrastSettleNotifier,
+    republish_alignment_images_for_space,
+)
 from pyre.image_contrast import (
     GAMMA_MAX,
     GAMMA_MIN,
@@ -57,6 +61,7 @@ class ContrastAdjustmentWindow(QWidget):
     _max_control: LinkedSliderSpin
     _gamma_control: LinkedSliderSpin
     _view_refresh_timer: QTimer
+    _settle_notifier: ContrastSettleNotifier
 
     def __init__(
             self,
@@ -124,6 +129,7 @@ class ContrastAdjustmentWindow(QWidget):
         self._view_refresh_timer = QTimer(self)
         self._view_refresh_timer.setSingleShot(True)
         self._view_refresh_timer.timeout.connect(self._refresh_stos_views)
+        self._settle_notifier = ContrastSettleNotifier(republish_alignment_images_for_space)
 
         self._layer_combo.currentIndexChanged.connect(self._on_layer_changed)
         self._min_control.valueChanged.connect(self._on_min_changed)
@@ -183,6 +189,7 @@ class ContrastAdjustmentWindow(QWidget):
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._view_refresh_timer.stop()
+        self._settle_notifier.cancel()
         if ContrastAdjustmentWindow._instance is self:
             ContrastAdjustmentWindow._instance = None
         super().closeEvent(event)
@@ -243,8 +250,9 @@ class ContrastAdjustmentWindow(QWidget):
         self._schedule_view_refresh()
 
     def _schedule_view_refresh(self) -> None:
-        """Coalesce GL updates to ~60 Hz without nested processEvents."""
+        """Coalesce GL updates to ~60 Hz, and republish shm images once settled."""
         self._view_refresh_timer.start(_VIEW_REFRESH_MS)
+        self._settle_notifier.note_contrast_write(self._space)
 
     def _refresh_stos_views(self) -> None:
         """Ask visible STOS GL panels to redraw asynchronously."""

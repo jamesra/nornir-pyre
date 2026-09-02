@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core as QOpenGLFunctions
 from PyQt6.QtCore import Qt, QSize, QPoint, QTimer
-from PyQt6.QtGui import QResizeEvent, QPaintEvent
+from PyQt6.QtGui import QResizeEvent, QPaintEvent, QPainter
 from PyQt6.QtGui import QSurfaceFormat, QOpenGLContext
 
 from pyre.interfaces.managers.gl_context_manager import IGLContextManager
@@ -35,6 +35,7 @@ class GLPanel(QOpenGLWidget):
 
     _glinitialized: bool = False
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
+    _overlay_paint_method: Callable[[QPainter], None] | None = None  # Optional QPainter overlay, drawn after GL
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
     _gl_funcs: QOpenGLFunctions | None = None
 
@@ -269,6 +270,22 @@ class GLPanel(QOpenGLWidget):
 
         # Pinpoint whether GL_INVALID_ENUM is from our draw or from Qt (e.g. swapBuffers) after we return
         check_for_error("at end of paintGL after draw")
+
+    def paintEvent(self, event: QPaintEvent):
+        """Render the GL scene, then optionally paint a 2D overlay (e.g. debug labels) on top.
+
+        QOpenGLWidget composites paintGL()'s output into the widget's backing store as part
+        of the base paintEvent, so a QPainter opened on self afterwards draws on top of it
+        within the same paint, with no native/2D painting mode juggling required.
+        """
+        super().paintEvent(event)
+        if self._overlay_paint_method is None:
+            return
+        painter = QPainter(self)
+        try:
+            self._overlay_paint_method(painter)
+        finally:
+            painter.end()
 
     def activate_context(self):
         """Set this widgets GL context as the current context"""

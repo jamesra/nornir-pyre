@@ -95,6 +95,129 @@ class SharedImagePairRef:
     target: SharedImageRef
 
 
+@dataclass(frozen=True)
+class HostImagePayload:
+    """Host copies of the arrays alignment consumes, plus scalar stats.
+
+    Built on the thread that owns the arrays (the CUDA-owning thread for a CuPy
+    session) so the shared-memory copy itself can run on a worker thread.
+    """
+
+    pixels: NDArray
+    mask: NDArray
+    median: float
+    mean: float
+    std: float
+    min: float
+    max: float
+
+
+def host_image_payload(image: ImagePermutationHelper) -> HostImagePayload:
+    """Host-copy the noise-filled image, blended mask, and stats of *image*."""
+    stats = image.Stats
+    return HostImagePayload(
+        pixels=np.ascontiguousarray(
+            nornir_imageregistration.EnsureNumpyArray(image.ImageWithMaskAsNoise)),
+        mask=np.ascontiguousarray(
+            nornir_imageregistration.EnsureNumpyArray(image.BlendedMask)),
+        median=float(stats.median),
+        mean=float(stats.mean),
+        std=float(stats.std),
+        min=float(stats.min),
+        max=float(stats.max),
+    )
+
+
+class StagedImage:
+    """Owns the shared segments holding one side of an alignment pair.
+
+    Reference counted: :meth:`close` only unlinks once every in-flight job that
+    was handed this generation has released it. Unlinking a segment that a
+    worker still has mapped fails on Windows and faults on POSIX.
+    """
+
+    _ref: SharedImageRef
+    _segments: list[shared_memory.SharedMemory]
+    _refcount: int
+    _close_requested: bool
+    _released: bool
+
+    def __init__(self, ref: SharedImageRef,
+                 segments: list[shared_memory.SharedMemory]) -> None:
+        self._ref = ref
+        self._segments = segments
+        self._refcount = 0
+        self._close_requested = False
+        self._released = False
+
+    @property
+    def ref(self) -> SharedImageRef:
+        """Picklable handle to pass to pool workers."""
+        return self._ref
+
+    @property
+    def in_flight_count(self) -> int:
+        """Number of jobs still holding this generation."""
+        return self._refcount
+
+    @property
+    def released(self) -> bool:
+        """True once the segments have been unlinked."""
+        return self._released
+
+    def retain(self) -> None:
+        """Record that one more job may attach to these segments."""
+        self._refcount += 1
+
+    def release(self) -> None:
+        """Drop one job's hold, unlinking when a close was already requested."""
+        if self._refcount > 0:
+            self._refcount -= 1
+        if self._close_requested:
+            self.close()
+
+    def close(self) -> None:
+        """Unlink the segments once no job holds them. Safe to call repeatedly."""
+        self._close_requested = True
+        if self._released or self._refcount > 0:
+            return
+        self._released = True
+        for segment in self._segments:
+            try:
+                segment.close()
+                segment.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception:
+                _logger.exception("Could not release alignment payload segment %s",
+                                  segment.name)
+        self._segments = []
+
+
+def stage_host_image(payload: HostImagePayload) -> StagedImage | None:
+    """Copy an already host-resident payload into fresh shared segments."""
+    if not shared_memory_supported():
+        return None
+    with ExitStack() as stack:
+        try:
+            image_ref, image_segment = _stage_array(payload.pixels, stack)
+            mask_ref, mask_segment = _stage_array(payload.mask, stack)
+        except Exception:
+            _logger.exception("Could not publish alignment image in shared memory")
+            return None
+        stack.pop_all()
+    ref = SharedImageRef(
+        image=image_ref,
+        mask=mask_ref,
+        median=payload.median,
+        mean=payload.mean,
+        std=payload.std,
+        min=payload.min,
+        max=payload.max,
+    )
+    return StagedImage(ref, [image_segment, mask_segment])
+
+
 class StagedImagePair:
     """Owns the shared segments for one source/target pair.
 

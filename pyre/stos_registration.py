@@ -111,11 +111,26 @@ def sync_stos_registration_roles(
         warped: nornir_imageregistration.ImagePermutationHelper,
         fixed: nornir_imageregistration.ImagePermutationHelper,
 ) -> None:
-    """Record resolved registration roles on ``StosState``."""
+    """Record resolved registration roles on ``StosState`` and republish shm images.
+
+    The internal attribute naming follows the LoadSourceImage / LoadTargetImage
+    convention, where ``_fixed_image_permutations`` holds the Pyre *Source* slot
+    (STOS mapped/warped section) and ``_warped_image_permutations`` holds the
+    Pyre *Target* slot (STOS control/fixed section).  The *warped* and *fixed*
+    parameters use nornir registration semantics (warped = mapped, fixed = control).
+    """
     if not hasattr(stos_state, "_fixed_image_permutations"):
         return
-    stos_state._warped_image_permutations = warped  # type: ignore[attr-defined]
-    stos_state._fixed_image_permutations = fixed  # type: ignore[attr-defined]
+    stos_state._fixed_image_permutations = warped   # type: ignore[attr-defined]
+    stos_state._warped_image_permutations = fixed    # type: ignore[attr-defined]
+    _publish_alignment_images(stos_state)
+
+
+def _publish_alignment_images(stos_state: object) -> None:
+    """Republish both sides' alignment images when the helpers were replaced."""
+    publish = getattr(stos_state, "publish_alignment_images", None)
+    if callable(publish):
+        publish()
 
 
 def wire_stos_state_after_load(
@@ -148,6 +163,7 @@ def wire_stos_state_after_load(
         target_mask = getattr(stos_state, "WarpedImageMaskViewModel", None)
         stos_state._fixed_image_permutations = update_permutations(source_vm, source_mask)  # type: ignore[attr-defined]
         stos_state._warped_image_permutations = update_permutations(target_vm, target_mask)  # type: ignore[attr-defined]
+        _publish_alignment_images(stos_state)
 
 
 def apply_stos_transform_to_controller(
