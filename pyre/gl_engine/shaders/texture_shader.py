@@ -49,8 +49,10 @@ _texture_vertex_shader_program = """
                 // (mesh target slot), not native source corners.
                 target_pos = source_pos;
             }
-            if (length(rigid_interactive_native_shift) > 0.001) {
-                // Uniform is (delta_y, delta_x); native_pos.x is image X, native_pos.y is image Y.
+            // Interactive native shift is rigid-only; must not displace mesh/grid tiles if a
+            // nonzero uniform is left from a prior rigid draw. Apply any nonzero shift (no
+            // 0.001 px dead-zone) so sub-milli-pixel nudges still move.
+            if (use_rigid_path > 0.5) {
                 vec3 shift = vec3(rigid_interactive_native_shift.y,
                                   rigid_interactive_native_shift.x, 0.0);
                 if (rigid_native_is_target > 0.5) {
