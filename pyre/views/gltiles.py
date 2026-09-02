@@ -375,6 +375,10 @@ def _closed_interval_axis_samples(
     Interior lattice samples are control-point source coordinates, so warped
     vertices coincide with those CPs. The endpoints keep neighboring texture
     crops on the same bilinear-sampled seam (e.g. source x=4096).
+
+    Lattice values within a tiny absolute tolerance of an endpoint are snapped
+    to that endpoint before ``np.unique`` so float noise (e.g. 4096 + 1e-9)
+    cannot leave a near-duplicate row and zero-area triangles at the seam.
     """
     lo_f = float(lo)
     hi_f = float(hi)
@@ -382,7 +386,14 @@ def _closed_interval_axis_samples(
         lo_f, hi_f = hi_f, lo_f
     axis_f = np.asarray(axis, dtype=np.float64)
     on_interval = axis_f[(axis_f >= lo_f) & (axis_f <= hi_f)]
-    samples = np.unique(np.concatenate((np.array((lo_f, hi_f), dtype=np.float64), on_interval)))
+    samples = np.concatenate((np.array((lo_f, hi_f), dtype=np.float64), on_interval))
+    span = hi_f - lo_f
+    if span > 0.0:
+        # Cap atol so a tiny interval cannot collapse lo and hi into one sample.
+        atol = min(1e-6, 0.25 * span)
+        samples = np.where(np.abs(samples - lo_f) <= atol, lo_f, samples)
+        samples = np.where(np.abs(samples - hi_f) <= atol, hi_f, samples)
+    samples = np.unique(samples)
     if samples.shape[0] < 2:
         return np.array((lo_f, hi_f), dtype=np.float64)
     return samples
