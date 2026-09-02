@@ -34,7 +34,9 @@ from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
 from pyre.commands.extensions import wheel_scroll_steps
 from pyre.views.composite_display import (
+    display_lookat_for_composite,
     lookat_delta_from_display_delta,
+    lookat_from_display_position,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
     resolve_composite_display_draw_params,
@@ -130,6 +132,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         :param commandqueue: Queue to add commands to if we need to start a new command
         """
         self._last_mouse_position = None
+        self._composite_drag_display_pos: NDArray[np.floating] | None = None
         self._space = space
         self._bounds = bounds
         self._transform_controller = transform_controller
@@ -279,6 +282,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             # Only pan after a right-press established the drag; ignore buttoned moves that arrive first.
             if not (event.buttons() & Qt.MouseButton.RightButton):
                 self._last_mouse_position = (y, x)
+                self._composite_drag_display_pos = None
                 return
 
             dx = x - self._last_mouse_position[nornir_imageregistration.iPoint.X]
@@ -286,7 +290,19 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
             self._last_mouse_position = (y, x)
 
-            self.camera.pan_by_screen_delta(dx, dy, width, height)
+            if (self._view_type() == ViewType.Composite
+                    and self._transform_controller.TransformModel is not None):
+                scale = self.camera.scale
+                if scale != 0.0:
+                    display_delta = np.array((-dy / scale, -dx / scale), dtype=np.float64)
+                    if self._composite_drag_display_pos is None:
+                        self._composite_drag_display_pos = display_lookat_for_composite(
+                            self.camera, self._transform_controller).copy()
+                    self._composite_drag_display_pos = self._composite_drag_display_pos + display_delta
+                    self.camera.lookat = lookat_from_display_position(
+                        self._transform_controller, self._composite_drag_display_pos)
+            else:
+                self.camera.pan_by_screen_delta(dx, dy, width, height)
 
             # Commenting this block until I have a command to translate control points
             # if event.buttons() & Qt.MouseButton.LeftButton:
