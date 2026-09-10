@@ -1,8 +1,10 @@
 ; Inno Setup script for Pyre Windows installer.
 ; Compile from nornir-pyre/packaging/windows after build-freeze.ps1.
 
+; Version must be passed by build-installer.ps1 as /DMyAppVersion=...
+; (reads nornir-pyre/pyproject.toml). Do not hardcode a release version here.
 #ifndef MyAppVersion
-  #define MyAppVersion "1.7.4"
+  #error "Define MyAppVersion (run packaging/windows/build-installer.ps1)"
 #endif
 
 #define MyAppName "Pyre"

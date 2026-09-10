@@ -1,9 +1,20 @@
 # Legacy setuptools entry point. Prefer pyproject.toml for packaging metadata.
+# Version is read from pyproject.toml so it is not duplicated here.
+from pathlib import Path
+
+import tomllib
 from setuptools import find_packages, setup
+
+
+def _version() -> str:
+    data = tomllib.loads(
+        Path(__file__).with_name("pyproject.toml").read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
+
 
 setup(
     name="pyre",
-    version="1.7.4",
+    version=_version(),
     author="James Anderson",
     author_email="James.R.Anderson@utah.edu",
     description="Interactive image registration and visualization for the Nornir ecosystem",

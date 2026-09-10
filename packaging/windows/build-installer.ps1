@@ -3,8 +3,13 @@
     Compile the Inno Setup installer after build-freeze.ps1.
 
 .DESCRIPTION
-    Reads VERSION from the monorepo root unless -Version is supplied, then invokes
-    ISCC.exe against pyre-installer.iss.
+    Reads the Pyre version from nornir-pyre/pyproject.toml unless -Version is
+    supplied, then invokes ISCC.exe against pyre-installer.iss with
+    /DMyAppVersion=...
+
+    Canonical package version lives in pyproject.toml (mirrored in
+    release/package-versions.yaml). Do not use the monorepo root VERSION file
+    for the installer filename — that is the umbrella release id only.
 
     ISCC discovery order:
     1. -IsccPath parameter (if the file exists)
@@ -53,11 +58,28 @@ function Resolve-InnoSetupCompiler {
     return $null
 }
 
+function Get-PyreVersionFromPyproject {
+    param([string]$PyprojectPath)
+
+    if (-not (Test-Path $PyprojectPath)) {
+        throw "Missing pyproject.toml at $PyprojectPath"
+    }
+
+    $text = Get-Content $PyprojectPath -Raw
+    # Prefer [project] table version; first version = "..." in the file is that field.
+    if ($text -match '(?m)^version\s*=\s*"([^"]+)"') {
+        return $Matches[1].Trim()
+    }
+
+    throw "Could not parse project.version from $PyprojectPath"
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..\..")
+$PyreRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
+$PyprojectPath = Join-Path $PyreRoot "pyproject.toml"
 
 if (-not $Version) {
-    $Version = (Get-Content (Join-Path $RepoRoot "VERSION") -Raw).Trim()
+    $Version = Get-PyreVersionFromPyproject -PyprojectPath $PyprojectPath
 }
 
 $BundleExe = Join-Path $ScriptDir "dist\pyre\pyre.exe"
@@ -83,6 +105,7 @@ You can also set INNO_SETUP_ISCC to the full path to ISCC.exe.
 }
 
 Write-Host "Using Inno Setup compiler: $ResolvedIscc"
+Write-Host "Pyre version (from pyproject.toml unless -Version): $Version"
 Write-Host "Building Pyre-$Version-Setup.exe ..."
 & $ResolvedIscc "/DMyAppVersion=$Version" (Join-Path $ScriptDir "pyre-installer.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }

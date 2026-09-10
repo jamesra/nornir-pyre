@@ -28,11 +28,13 @@ From this directory:
 .\validate-frozen.ps1
 ```
 
-Compile the installer (adjust `/DMyAppVersion` to match root `VERSION`):
+Compile the installer (version comes from `nornir-pyre/pyproject.toml`):
 
 ```powershell
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.7.0 pyre-installer.iss
+.\build-installer.ps1
 ```
+
+Optional override: `.\build-installer.ps1 -Version 1.7.5`
 
 Output: `dist/installer/Pyre-<version>-Setup.exe`
 
