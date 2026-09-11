@@ -857,7 +857,7 @@ class StosFileBrowserWindow(QMainWindow):
         open_action.triggered.connect(lambda: self._load_stos_at_index(index))
 
         if self._browse_mode == BrowseMode.stos_group:
-            auto_action = menu.addAction("Open Automatic Transform")
+            auto_action = menu.addAction("Open Input Transform")
             auto_action.setEnabled(row.auto_path is not None)
             auto_action.triggered.connect(
                 lambda: self._load_stos_path(row.auto_path, index, browser_basename=row.basename))

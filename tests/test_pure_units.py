@@ -200,5 +200,54 @@ class TestObservableSet(unittest.TestCase):
         self.assertEqual(calls[0][0], SetObservedAction.CLEAR)
 
 
+class TestResetStosWindowCameras(unittest.TestCase):
+    def test_centers_each_registered_stos_panel(self) -> None:
+        from pyre.common import reset_stos_window_cameras
+        from pyre.interfaces.viewtype import ViewType
+
+        panels = {}
+        windows = {}
+        for vt in (ViewType.Source, ViewType.Target, ViewType.Composite):
+            panel = MagicMock()
+            panels[vt] = panel
+            win = MagicMock()
+            win.imagepanel = panel
+            windows[vt] = win
+
+        manager = MagicMock()
+        manager.__contains__.side_effect = lambda key: key in windows
+        manager.__getitem__.side_effect = lambda key: windows[key]
+
+        reset_stos_window_cameras(manager)
+
+        for panel in panels.values():
+            panel.center_camera.assert_called_once()
+            panel._glpanel.update.assert_called_once()
+
+    def test_skips_missing_view_types(self) -> None:
+        from pyre.common import reset_stos_window_cameras
+        from pyre.interfaces.viewtype import ViewType
+
+        manager = MagicMock()
+        manager.__contains__.return_value = False
+        reset_stos_window_cameras(manager)
+        manager.__getitem__.assert_not_called()
+
+
+class TestDiscardCompositeDisplayCache(unittest.TestCase):
+    def test_clears_pending_preserve_without_returning_it(self) -> None:
+        import numpy as np
+        from nornir_imageregistration.transforms import Rigid
+        from pyre.controllers.transformcontroller import TransformController
+
+        controller = TransformController(
+            Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0))
+        controller._cached_composite_display_lookat = np.array([1.0, 2.0])
+        controller._pending_composite_display_preserve = np.array([9.0, 9.0])
+        controller.discard_composite_display_cache()
+        self.assertIsNone(controller._cached_composite_display_lookat)
+        self.assertIsNone(controller.consume_pending_composite_display_preserve())
+
+
 if __name__ == "__main__":
     unittest.main()

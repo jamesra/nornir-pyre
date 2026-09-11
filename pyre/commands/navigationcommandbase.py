@@ -34,13 +34,13 @@ from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
 from pyre.commands.extensions import wheel_scroll_steps
 from pyre.views.composite_display import (
-    display_lookat_for_composite,
     lookat_delta_from_display_delta,
-    lookat_from_display_position,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
     resolve_composite_display_draw_params,
     target_space_lookat_for_stos_view,
+    is_plausible_world_delta,
+    is_plausible_world_point,
 )
 from pyre.views.gltiles import is_rigid_transform
 
@@ -132,7 +132,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         :param commandqueue: Queue to add commands to if we need to start a new command
         """
         self._last_mouse_position = None
-        self._composite_drag_display_pos: NDArray[np.floating] | None = None
         self._space = space
         self._bounds = bounds
         self._transform_controller = transform_controller
@@ -196,15 +195,41 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         if view == ViewType.Composite and model is not None:
             if is_rigid_transform(model):
                 delta_display = after.target - before.target
+                if not is_plausible_world_delta(
+                        delta_display, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
                 delta_lookat = lookat_delta_from_display_delta(model, delta_display)
-                self.camera.lookat = self.camera.lookat - delta_lookat
+                if not is_plausible_world_delta(
+                        delta_lookat, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
+                proposed = self.camera.lookat - delta_lookat
+                if not is_plausible_world_point(
+                        proposed, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
+                self.camera.lookat = proposed
                 return
             delta_display = after.target - before.target
+            if not is_plausible_world_delta(
+                    delta_display, self.camera,
+                    transform_controller=self._transform_controller):
+                return
             apply_composite_display_pan_delta(
                 self.camera, self._transform_controller, -delta_display)
             return
         delta = after[self.space] - before[self.space]
-        self.camera.lookat = self.camera.lookat - delta
+        if not is_plausible_world_delta(
+                delta, self.camera,
+                transform_controller=self._transform_controller):
+            return
+        proposed = self.camera.lookat - delta
+        if not is_plausible_world_point(
+                proposed, self.camera,
+                transform_controller=self._transform_controller):
+            return
+        self.camera.lookat = proposed
 
     def _translate_camera_by_display_delta(self, display_delta: tuple[float, float]) -> None:
         """Pan the camera; on composite, delta is in target display space."""
@@ -240,12 +265,19 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             return PointPair(target=host_position, source=host_position)
 
         if self._space == Space.Source:
-            mapped = yx_host(self._transform_controller.Transform(position))
+            host_source = yx_host(position)
+            mapped = yx_host(self._transform_controller.Transform(position, extrapolate=True))
+            if not np.all(np.isfinite(mapped)):
+                mapped = host_source
             return PointPair(target=mapped,
-                             source=yx_host(position))
+                             source=host_source)
         elif self._space == Space.Target:
-            mapped = yx_host(self._transform_controller.InverseTransform(position))
-            return PointPair(target=yx_host(position),
+            mapped = yx_host(self._transform_controller.InverseTransform(position, extrapolate=True))
+            host_target = yx_host(position)
+            if not np.all(np.isfinite(mapped)):
+                # Outside hull / cold RBF: keep status usable without poisoning history.
+                mapped = host_target
+            return PointPair(target=host_target,
                              source=mapped)
         else:
             raise ValueError("Unknown space")
@@ -282,7 +314,6 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             # Only pan after a right-press established the drag; ignore buttoned moves that arrive first.
             if not (event.buttons() & Qt.MouseButton.RightButton):
                 self._last_mouse_position = (y, x)
-                self._composite_drag_display_pos = None
                 return
 
             dx = x - self._last_mouse_position[nornir_imageregistration.iPoint.X]
@@ -295,12 +326,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 scale = self.camera.scale
                 if scale != 0.0:
                     display_delta = np.array((-dy / scale, -dx / scale), dtype=np.float64)
-                    if self._composite_drag_display_pos is None:
-                        self._composite_drag_display_pos = display_lookat_for_composite(
-                            self.camera, self._transform_controller).copy()
-                    self._composite_drag_display_pos = self._composite_drag_display_pos + display_delta
-                    self.camera.lookat = lookat_from_display_position(
-                        self._transform_controller, self._composite_drag_display_pos)
+                    if np.all(np.isfinite(display_delta)):
+                        apply_composite_display_pan_delta(
+                            self.camera, self._transform_controller, display_delta)
             else:
                 self.camera.pan_by_screen_delta(dx, dy, width, height)
 
@@ -451,8 +479,21 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
                 with self.camera.defer_change_events():
                     self.camera.scale = new_scale
-                    mouse_position_after_scale = self.get_world_positions(e)
-                    self._adjust_camera_lookat_for_cursor(mouse_position, mouse_position_after_scale)
+                    # Cursor-lock uses before/after world positions. When the camera
+                    # is already lost (runaway lookat from a bad transform), recenter
+                    # instead of amplifying garbage coordinates.
+                    if is_plausible_world_point(
+                            self.camera.lookat, self.camera,
+                            transform_controller=self._transform_controller):
+                        mouse_position_after_scale = self.get_world_positions(e)
+                        self._adjust_camera_lookat_for_cursor(
+                            mouse_position, mouse_position_after_scale)
+                    else:
+                        panel = self._stos_image_panel()
+                        if panel is not None:
+                            panel.center_camera()
+                        else:
+                            self.camera.lookat = (0.0, 0.0)
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
                 self.parent.update()

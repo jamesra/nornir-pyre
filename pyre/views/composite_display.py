@@ -64,6 +64,81 @@ def _as_numpy_f64(values: NDArray[np.floating] | object, *,
     return np.array(values, dtype=np.float64, copy=copy or None)
 
 
+def _finite_yx(values: NDArray[np.floating] | object) -> NDArray[np.floating] | None:
+    """Return a length-2 (y, x) vector when finite; otherwise None."""
+    arr = _as_numpy_f64(values).ravel()
+    if arr.shape[0] < 2 or not np.all(np.isfinite(arr[:2])):
+        return None
+    return arr[:2].copy()
+
+
+def _reference_world_extent(
+        camera: Camera,
+        transform_controller: TransformController | None = None,
+) -> float:
+    """Typical world scale for rejecting absurd camera / display positions."""
+    # Floor covers stub cameras / tiny rigid models so ordinary pan deltas
+    # (a few pixels) are not rejected when visible size is unavailable.
+    extent = 1000.0
+    visible = getattr(camera, "visible_world_size", None)
+    if visible is not None:
+        try:
+            vis = np.asarray(visible, dtype=np.float64).ravel()
+            if vis.size > 0 and np.all(np.isfinite(vis)):
+                extent = max(extent, float(np.max(np.abs(vis))))
+        except Exception:
+            pass
+    if transform_controller is not None:
+        width = getattr(transform_controller, "width", None)
+        height = getattr(transform_controller, "height", None)
+        if width is not None and height is not None:
+            try:
+                extent = max(extent, float(width), float(height))
+            except Exception:
+                pass
+        model = getattr(transform_controller, "TransformModel", None)
+        if model is not None:
+            for attr in ("FixedBoundingBox", "MappedBoundingBox"):
+                if not hasattr(model, attr):
+                    continue
+                try:
+                    bb = getattr(model, attr)
+                    extent = max(extent, float(bb.Width), float(bb.Height))
+                except Exception:
+                    pass
+    return extent
+
+
+def is_plausible_world_delta(
+        delta: NDArray[np.floating] | object,
+        camera: Camera,
+        *,
+        max_factor: float = 2.0,
+        transform_controller: TransformController | None = None,
+) -> bool:
+    """True when a pan/zoom cursor-lock delta fits in a couple of viewports."""
+    arr = _finite_yx(delta)
+    if arr is None:
+        return False
+    limit = _reference_world_extent(camera, transform_controller) * max_factor
+    return float(np.max(np.abs(arr))) <= limit
+
+
+def is_plausible_world_point(
+        point: NDArray[np.floating] | object,
+        camera: Camera,
+        *,
+        max_factor: float = 100.0,
+        transform_controller: TransformController | None = None,
+) -> bool:
+    """True when a world point is finite and within a generous image/view bound."""
+    arr = _finite_yx(point)
+    if arr is None:
+        return False
+    limit = _reference_world_extent(camera, transform_controller) * max_factor
+    return float(np.max(np.abs(arr))) <= limit
+
+
 def apply_rigid_yx(matrix: NDArray[np.floating], point_yx: NDArray[np.floating]) -> NDArray[np.floating]:
     """Apply a 3x3 homogeneous (Y, X) rigid matrix to a (y, x) point."""
     yx_in = np.array([point_yx[0], point_yx[1], 1.0], dtype=np.float64)
@@ -192,27 +267,69 @@ def _ui_transform_point(
     fn = transform_controller.Transform if forward else transform_controller.InverseTransform
     return _transform_single_point(fn, yx, extrapolate=True)
 
+def _fallback_display_lookat(
+        camera: Camera,
+        transform_controller: TransformController,
+        lookat: NDArray[np.floating],
+) -> NDArray[np.floating]:
+    """Finite display-space center when Transform(lookat) is unusable."""
+    if is_plausible_world_point(
+            lookat, camera, transform_controller=transform_controller):
+        return np.asarray(lookat, dtype=np.float64).ravel()[:2].copy()
+    model = transform_controller.TransformModel
+    if model is not None and hasattr(model, "FixedBoundingBox"):
+        try:
+            center = np.asarray(model.FixedBoundingBox.Center, dtype=np.float64).ravel()[:2]
+            if _finite_yx(center) is not None:
+                return center.copy()
+        except Exception:
+            pass
+    return np.zeros(2, dtype=np.float64)
+
+
 def display_lookat_for_composite(
         camera: Camera,
         transform_controller: TransformController,
 ) -> NDArray[np.floating]:
     """Return the camera lookat mapped into composite target display space."""
     model = transform_controller.TransformModel
+    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
     if model is None:
-        return np.asarray(camera.lookat, dtype=np.float64)
+        return _fallback_display_lookat(camera, transform_controller, lookat)
+
+    def _acceptable_display(candidate: NDArray[np.floating] | None) -> NDArray[np.floating] | None:
+        if candidate is None:
+            return None
+        if is_plausible_world_point(
+                candidate, camera, transform_controller=transform_controller):
+            return candidate
+        return None
+
     if is_rigid_transform(model):
         view_forward = forward_for_composite_view(transform_controller, model)
-        return apply_rigid_yx(view_forward, camera.lookat)
-    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+        mapped = _acceptable_display(_finite_yx(apply_rigid_yx(view_forward, lookat)))
+        return mapped if mapped is not None else _fallback_display_lookat(
+            camera, transform_controller, lookat)
     src_key = (float(lookat[0]), float(lookat[1]))
     cached = transform_controller._cached_composite_display_lookat
     if cached is not None and transform_controller._cached_composite_lookat_src == src_key:
-        return cached
+        finite_cached = _acceptable_display(_finite_yx(cached))
+        if finite_cached is not None:
+            return finite_cached
     if transform_controller.freeze_composite_display_during_point_drag():
         if cached is not None:
-            return cached
-        return lookat.copy()
-    result = _ui_transform_point(transform_controller, True, lookat)
+            finite_cached = _acceptable_display(_finite_yx(cached))
+            if finite_cached is not None:
+                return finite_cached
+        return _fallback_display_lookat(camera, transform_controller, lookat)
+    result = _acceptable_display(_finite_yx(_ui_transform_point(transform_controller, True, lookat)))
+    if result is None:
+        # Folded / runaway meshes can map lookat to NaN or astronomical values.
+        if cached is not None:
+            finite_cached = _acceptable_display(_finite_yx(cached))
+            if finite_cached is not None:
+                return finite_cached
+        return _fallback_display_lookat(camera, transform_controller, lookat)
     transform_controller._cached_composite_display_lookat = result
     transform_controller._cached_composite_lookat_src = src_key
     return result
@@ -222,7 +339,11 @@ def lookat_from_display_position(
         transform_controller: TransformController,
         display_yx: NDArray[np.floating],
 ) -> NDArray[np.floating]:
-    """Map a composite display-space (y,x) position back to source-camera lookat."""
+    """Map a composite display-space (y,x) position back to source-camera lookat.
+
+    Returns a non-finite vector when InverseTransform cannot map the point (caller
+    must not assign that to ``camera.lookat``).
+    """
     return _ui_transform_point(transform_controller, False, display_yx)
 
 def rebase_composite_camera_after_rigid_gesture(
@@ -240,7 +361,10 @@ def rebase_composite_camera_after_rigid_gesture(
     if model is None or not is_rigid_transform(model):
         return
     display_yx = display_lookat_for_composite(camera, transform_controller)
-    camera.lookat = lookat_from_display_position(transform_controller, display_yx)
+    new_lookat = lookat_from_display_position(transform_controller, display_yx)
+    if is_plausible_world_point(
+            new_lookat, camera, transform_controller=transform_controller):
+        camera.lookat = new_lookat
 
 
 def rebase_composite_camera_to_display(
@@ -253,7 +377,10 @@ def rebase_composite_camera_to_display(
     Used when composite display freeze lifts after control-point registration or remesh:
     keep the on-screen target-display framing still while the warp changes.
     """
-    camera.lookat = lookat_from_display_position(transform_controller, display_yx)
+    new_lookat = lookat_from_display_position(transform_controller, display_yx)
+    if is_plausible_world_point(
+            new_lookat, camera, transform_controller=transform_controller):
+        camera.lookat = new_lookat
 
 
 def visible_rectangle_around_lookat(
@@ -358,18 +485,36 @@ def apply_composite_display_pan_delta(
     """Pan the composite camera so display space shifts by ``delta_display``."""
     model = transform_controller.TransformModel
     delta = np.asarray(delta_display, dtype=np.float64).ravel()[:2]
+    if not is_plausible_world_delta(
+            delta, camera, transform_controller=transform_controller):
+        return
     if model is None:
         camera.translate(delta)
         return
     if is_rigid_transform(model):
-        camera.translate(lookat_delta_from_display_delta(model, delta))
+        lookat_delta = lookat_delta_from_display_delta(model, delta)
+        if not is_plausible_world_delta(
+                lookat_delta, camera, transform_controller=transform_controller):
+            return
+        camera.translate(lookat_delta)
         return
     if transform_controller.freeze_composite_display_during_point_drag():
         _pan_frozen_mesh_composite_display(camera, transform_controller, delta)
         return
     current_display = display_lookat_for_composite(camera, transform_controller)
-    camera.lookat = lookat_from_display_position(
+    new_lookat = lookat_from_display_position(
         transform_controller, current_display + delta)
+    if not is_plausible_world_point(
+            new_lookat, camera, transform_controller=transform_controller):
+        return
+    # Reject InverseTransform blow-ups that stay inside the absolute bound but
+    # travel many image-widths for a one-viewport pan.
+    travel = np.asarray(new_lookat, dtype=np.float64).ravel()[:2] - np.asarray(
+        camera.lookat, dtype=np.float64).ravel()[:2]
+    if not is_plausible_world_delta(
+            travel, camera, max_factor=10.0, transform_controller=transform_controller):
+        return
+    camera.lookat = new_lookat
 
 
 def display_mouse_coords(
@@ -396,12 +541,18 @@ def world_point_pair_for_composite_mouse(
     if display_pos is None:
         return None
     display_yx = _as_numpy_f64(display_pos)
-    if not np.all(np.isfinite(display_yx)):
+    if not is_plausible_world_point(
+            display_yx, camera, transform_controller=transform_controller):
         return None
     if transform_controller.freeze_composite_display_during_point_drag():
         source_pos = display_yx
     else:
         source_pos = _ui_transform_point(transform_controller, False, display_yx)
+        if not is_plausible_world_point(
+                source_pos, camera, transform_controller=transform_controller):
+            # Keep status/pan usable when InverseTransform is outside the hull
+            # or explodes to astronomical coordinates.
+            source_pos = display_yx
     return PointPair(
         target=display_yx,
         source=_as_numpy_f64(source_pos),
@@ -467,10 +618,35 @@ def camera_lookat_from_target_space(
         target_yx: nornir_imageregistration.PointLike,
         space: Space,
 ) -> NDArray[np.floating]:
-    """Map a Target-space point into a panel camera's native lookat space."""
+    """Map a Target-space point into a panel camera's native lookat space.
+
+    When InverseTransform yields a non-finite or runaway source point (folded mesh,
+    cold RBF with extrapolate disabled), returns the finite target point unchanged so
+    callers do not poison ``camera.lookat``.
+    """
     point = np.asarray(target_yx, dtype=np.float64).ravel()[:2]
     if space != Space.Source:
         return point
     if transform_controller is None or transform_controller.TransformModel is None:
         return point
-    return _ui_transform_point(transform_controller, False, point)
+    mapped = _ui_transform_point(transform_controller, False, point)
+    finite = _finite_yx(mapped)
+    if finite is None:
+        return point.copy()
+    # Without a camera, bound against transform extents alone.
+    extent = 1.0
+    model = transform_controller.TransformModel
+    for attr in ("MappedBoundingBox", "FixedBoundingBox"):
+        if hasattr(model, attr):
+            try:
+                bb = getattr(model, attr)
+                extent = max(extent, float(bb.Width), float(bb.Height))
+            except Exception:
+                pass
+    width = transform_controller.width
+    height = transform_controller.height
+    if width is not None and height is not None:
+        extent = max(extent, float(width), float(height))
+    if float(np.max(np.abs(finite))) > extent * 100.0:
+        return point.copy()
+    return finite

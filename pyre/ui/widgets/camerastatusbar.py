@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QStatusBar, QWidget, QLabel, QProgressBar, QPushButton, QHBoxLayout
+import numpy as np
 
 import nornir_imageregistration
 from pyre.space import Space
@@ -163,11 +164,24 @@ class CameraStatusBar(QStatusBar):
             self._labels[field].setText(text)
 
     def update_status_bar(self, space: Space, point: tuple[float, float]):
+        def _fmt(coord: float) -> str:
+            return f'{coord: 0.1f}' if np.isfinite(coord) else 'n/a'
+
         if space == Space.Source:
-            src_txt = f'Source space: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
+            if point is None:
+                src_txt = ''
+            else:
+                src_txt = (
+                    f'Source space: {_fmt(point[nornir_imageregistration.iPoint.X])}x '
+                    f'{_fmt(point[nornir_imageregistration.iPoint.Y])}y')
             self.setStatusText(src_txt, 0)
         elif space == Space.Target:
-            tgt_txt = f'Target space: {point[nornir_imageregistration.iPoint.X]: 0.1f}x {point[nornir_imageregistration.iPoint.Y]: 0.1f}y' if point is not None else ''
+            if point is None:
+                tgt_txt = ''
+            else:
+                tgt_txt = (
+                    f'Target space: {_fmt(point[nornir_imageregistration.iPoint.X])}x '
+                    f'{_fmt(point[nornir_imageregistration.iPoint.Y])}y')
             self.setStatusText(tgt_txt, 1)
         else:
             raise ValueError("Invalid space")

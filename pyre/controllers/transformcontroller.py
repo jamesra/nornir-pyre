@@ -272,6 +272,67 @@ def host_transform_snapshot(
     return clone  # type: ignore[return-value]
 
 
+_VIRTUAL_CORNER_MARGIN = 0.25
+
+
+def _compute_virtual_corner_pairs(
+        model: nornir_imageregistration.ITransform,
+        source_shape: tuple[int, int],
+        target_shape: tuple[int, int],
+        margin: float = _VIRTUAL_CORNER_MARGIN,
+) -> NDArray[np.floating] | None:
+    """Compute virtual boundary control-point rows (Nx4: TargetY, TargetX, SourceY, SourceX).
+
+    Generates up to 8 points: 4 anchored at the target image corners (with margin)
+    and inverse-transformed to source space, plus 4 anchored at the source image
+    corners and forward-transformed to target space.  Points with NaN/Inf mapping
+    are discarded.
+    """
+
+    def _corners(shape: tuple[int, int], m: float) -> list[tuple[float, float]]:
+        h, w = shape
+        mh, mw = h * m, w * m
+        return [
+            (-mh, -mw),
+            (-mh, w + mw),
+            (h + mh, -mw),
+            (h + mh, w + mw),
+        ]
+
+    pairs: list[NDArray[np.floating]] = []
+
+    for ty, tx in _corners(target_shape, margin):
+        target_yx = np.array([[ty, tx]], dtype=np.float64)
+        try:
+            source_yx = np.asarray(
+                model.InverseTransform(target_yx, extrapolate=True), dtype=np.float64).reshape(1, 2)
+        except Exception:
+            continue
+        if not np.all(np.isfinite(source_yx)):
+            continue
+        pairs.append(np.array([ty, tx, float(source_yx[0, 0]), float(source_yx[0, 1])],
+                              dtype=np.float64))
+
+    for sy, sx in _corners(source_shape, margin):
+        source_yx = np.array([[sy, sx]], dtype=np.float64)
+        try:
+            target_yx = np.asarray(
+                model.Transform(source_yx, extrapolate=True), dtype=np.float64).reshape(1, 2)
+        except Exception:
+            continue
+        if not np.all(np.isfinite(target_yx)):
+            continue
+        ty, tx = float(target_yx[0, 0]), float(target_yx[0, 1])
+        # Skip if near an already-added target-anchored corner
+        if any(abs(p[0] - ty) < 50 and abs(p[1] - tx) < 50 for p in pairs):
+            continue
+        pairs.append(np.array([ty, tx, sy, sx], dtype=np.float64))
+
+    if not pairs:
+        return None
+    return np.vstack([p.reshape(1, 4) for p in pairs])
+
+
 def CreateDefaultTransform(transform_type: nornir_imageregistration.transforms.TransformType,
                            FixedShape: NDArray | None = None,
                            WarpedShape: NDArray | None = None):
@@ -388,6 +449,7 @@ class TransformController:
     _registration_published_helpers: dict[Space, ImagePermutationHelper]
     _registration_leases: dict[int, PublishedPairLease]
     _registration_job_generations: dict[int, tuple[int | None, int | None]]
+    _virtual_boundary_indices: list[int] | None
 
     @property
     def interactive_edit_in_progress(self) -> bool:
@@ -491,6 +553,18 @@ class TransformController:
         self._pending_composite_display_preserve = None
         return pending
 
+    def discard_composite_display_cache(self) -> None:
+        """Drop composite lookat/bounds caches without rebasing to a prior display point.
+
+        Used when loading a new ``.stos`` so framing from the previous transform cannot
+        leak into the new session.
+        """
+        self._pending_composite_display_preserve = None
+        self._cached_composite_display_lookat = None
+        self._cached_composite_display_bounds = None
+        self._cached_composite_lookat_src = None
+        self._cached_composite_bounds_src = None
+
     @property
     def interactive_edit_space(self) -> Space | None:
         """Which display space is being edited during an interactive drag (Source=fixed, Target=warped)."""
@@ -588,6 +662,8 @@ class TransformController:
         self._interactive_edit_depth += 1
         nornir_imageregistration.interactive_edit.begin()
         self._pending_moved_indices.clear()
+        if self._interactive_edit_depth == 1:
+            self._inject_virtual_boundary_points()
 
     def end_interactive_edit(self) -> None:
         """End continuous edit and run any deferred full refresh."""
@@ -595,6 +671,7 @@ class TransformController:
             self._interactive_edit_depth -= 1
         nornir_imageregistration.interactive_edit.end()
         if self._interactive_edit_depth == 0:
+            self._remove_virtual_boundary_points()
             was_cp_drag = self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
             self._interactive_edit_space = None
             self._interactive_gesture = TransformGesture.NONE
@@ -772,6 +849,7 @@ class TransformController:
         self._interactive_repaint_pending = False
         self._pending_moved_indices.clear()
         self._full_refresh_needed = False
+        self._hold_composite_display_until_prewarm = False
 
         value = normalize_rigid_transform_for_pyre_editing(value)
         old_transform = self._TransformModel
@@ -815,7 +893,9 @@ class TransformController:
         elif self.freeze_composite_display_during_point_drag():
             kwargs['extrapolate'] = False
         elif not self.rbf_prewarm_ready:
-            kwargs.setdefault('extrapolate', False)
+            # Force off: setdefault would leave caller extrapolate=True and build RBF
+            # on the UI thread while the prewarm worker also holds the CUDA context.
+            kwargs['extrapolate'] = False
         return self.TransformModel.Transform(points, **kwargs)
 
     def InverseTransform(self, points: NDArray[np.floating], **kwargs):
@@ -824,7 +904,7 @@ class TransformController:
         elif self.freeze_composite_display_during_point_drag():
             kwargs['extrapolate'] = False
         elif not self.rbf_prewarm_ready:
-            kwargs.setdefault('extrapolate', False)
+            kwargs['extrapolate'] = False
         return self.TransformModel.InverseTransform(points, **kwargs)
 
     def AddOnChangeEventListener(self, func: Callable):
@@ -1055,6 +1135,7 @@ class TransformController:
         self._registration_published_helpers = {}
         self._registration_leases = {}
         self._registration_job_generations = {}
+        self._virtual_boundary_indices = None
 
         self.TransformModel = TransformModel
 
@@ -1079,6 +1160,93 @@ class TransformController:
             self, model: nornir_imageregistration.ITransform | None) -> bool:
         """True when tile remesh must wait for off-UI Delaunay/RBF install (mesh)."""
         return getattr(model, "type", None) == nornir_imageregistration.transforms.TransformType.MESH
+
+    def _transform_is_mesh_like(self) -> bool:
+        """True when the live model is a mesh (not grid, not rigid) that benefits from virtual boundary points."""
+        model = self._TransformModel
+        if model is None:
+            return False
+        model_type = getattr(model, "type", None)
+        return model_type == nornir_imageregistration.transforms.TransformType.MESH
+
+    def _image_shapes_for_virtual_points(
+            self) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+        """Return (source_shape, target_shape) as (H, W) tuples, or None if unavailable."""
+        source_helper = self._registration_published_helpers.get(Space.Source)
+        target_helper = self._registration_published_helpers.get(Space.Target)
+        source_shape = None
+        target_shape = None
+        if source_helper is not None:
+            try:
+                s = source_helper.Image.shape
+                source_shape = (int(s[0]), int(s[1]))
+            except Exception:
+                pass
+        if target_helper is not None:
+            try:
+                s = target_helper.Image.shape
+                target_shape = (int(s[0]), int(s[1]))
+            except Exception:
+                pass
+        if source_shape is None or target_shape is None:
+            model = self._TransformModel
+            if isinstance(model, nornir_imageregistration.IControlPoints):
+                if source_shape is None:
+                    bb = model.MappedBoundingBox
+                    source_shape = (int(bb.Height), int(bb.Width))
+                if target_shape is None:
+                    bb = model.FixedBoundingBox
+                    target_shape = (int(bb.Height), int(bb.Width))
+        return source_shape, target_shape
+
+    def _inject_virtual_boundary_points(self) -> None:
+        """Add virtual corner points to extend the Delaunay hull during interactive edits.
+
+        Mesh transforms only cover the convex hull of their control points.
+        Adding corners that span the full image (with margin) ensures tiles
+        render everywhere while extrapolate=False is active during the drag.
+        """
+        model = self._TransformModel
+        if model is None or not self._transform_is_mesh_like():
+            return
+        if not isinstance(model, nornir_imageregistration.transforms.IControlPointAddRemove):
+            return
+        source_shape, target_shape = self._image_shapes_for_virtual_points()
+        if source_shape is None or target_shape is None:
+            return
+
+        pairs = _compute_virtual_corner_pairs(model, source_shape, target_shape)
+        if pairs is None or len(pairs) == 0:
+            return
+
+        start_count = self.NumPoints
+        for pair_row in pairs:
+            model.AddPoint(pair_row)
+        end_count = self.NumPoints
+        if end_count > start_count:
+            added = list(range(start_count, end_count))
+            self._virtual_boundary_indices = added
+            self._reconcile_point_ids()
+            _logger.info("Injected %d virtual boundary points (indices %s)",
+                         len(added), added)
+
+    def _remove_virtual_boundary_points(self) -> None:
+        """Remove virtual boundary points added by :meth:`_inject_virtual_boundary_points`."""
+        indices = self._virtual_boundary_indices
+        self._virtual_boundary_indices = None
+        if not indices:
+            return
+        model = self._TransformModel
+        if model is None or not isinstance(model, nornir_imageregistration.transforms.IControlPointAddRemove):
+            return
+        try:
+            drop_ids = [self.point_id_for_index(i) for i in indices]
+            self._forget_point_ids([pid for pid in drop_ids if pid is not None])
+            model.RemovePoint(np.array(sorted(indices), dtype=np.intp))
+            self._reconcile_point_ids()
+            _logger.info("Removed %d virtual boundary points", len(indices))
+        except Exception:
+            _logger.exception("Failed to remove virtual boundary points")
 
     def _model_has_installed_rbf(
             self, model: nornir_imageregistration.ITransform | None = None) -> bool:

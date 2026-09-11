@@ -221,8 +221,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                     self.camera, self._transform_controller)
         self._transform_controller.end_interactive_edit()
         if display_yx is not None:
-            self.camera.lookat = lookat_from_display_position(
+            new_lookat = lookat_from_display_position(
                 self._transform_controller, display_yx)
+            if np.all(np.isfinite(new_lookat)):
+                self.camera.lookat = new_lookat
 
     def _restore_original_state(self) -> None:
         """Undo the gesture by restoring the parameters captured at construction.
@@ -247,8 +249,10 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         self._transform_controller.end_interactive_edit()
         self._restore_original_state()
         if display_yx is not None:
-            self.camera.lookat = lookat_from_display_position(
+            new_lookat = lookat_from_display_position(
                 self._transform_controller, display_yx)
+            if np.all(np.isfinite(new_lookat)):
+                self.camera.lookat = new_lookat
         super().cancel()
         return
 

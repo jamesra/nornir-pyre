@@ -144,6 +144,23 @@ def SyncWindows(LookAt, scale: float, window_manager: IWindowManager) -> None:
         window_manager[vt].lookatfixedpoint(LookAt, scale)
 
 
+def reset_stos_window_cameras(window_manager: IWindowManager) -> None:
+    """Center Source/Target/Composite cameras on their images after a STOS load."""
+    for vt in (ViewType.Source, ViewType.Target, ViewType.Composite):
+        if vt not in window_manager:
+            continue
+        win = window_manager[vt]
+        panel = getattr(win, "imagepanel", None)
+        if panel is None:
+            continue
+        center = getattr(panel, "center_camera", None)
+        if callable(center):
+            center()
+        glpanel = getattr(panel, "_glpanel", None)
+        if glpanel is not None:
+            glpanel.update()
+
+
 def sync_stos_windows(LookAt, scale: float) -> None:
     """Sync cameras using the current :class:`pyre.state.StosState` window manager."""
     config = pyre.state.get_current_stos_config()
@@ -412,6 +429,36 @@ def create_pyre_grid_refinement_settings(
     )
 
 
+def _as_stos_grid_transform(
+        transform: ITransform,
+        settings: GridRefinement,
+) -> ITransform:
+    """Resample a refine result onto the STOS grid lattice (host arrays).
+
+    ``RefineTransform`` works with irregular ``MeshWithRBFFallback`` control
+    points between passes. ``RefineStosFile`` always converts the final mesh to
+    a grid before save; Pyre must do the same so the UI stays on
+    ``TransformType.GRID`` rather than flipping to mesh.
+    """
+    if getattr(transform, 'type', None) == nornir_imageregistration.transforms.TransformType.GRID:
+        host = snapshot_transform_for_preview(transform)
+        if host is not None and getattr(
+                host, 'type', None) == nornir_imageregistration.transforms.TransformType.GRID:
+            return host
+
+    source_image = settings.source_image
+    if source_image is None:
+        raise ValueError("GridRefinement.source_image is required to convert refine output to a grid")
+    source_shape = np.asarray(source_image.shape[:2], dtype=np.int64)
+    return nornir_imageregistration.transforms.converters.ConvertTransformToGridTransform(
+        transform,
+        source_image_shape=source_shape,
+        cell_size=settings.cell_size,
+        grid_spacing=settings.grid_spacing,
+        prefer_gpu=False,
+    )
+
+
 def compute_grid_refine_transform(
         transform: ITransform,
         settings: GridRefinement,
@@ -421,10 +468,31 @@ def compute_grid_refine_transform(
     """Run grid refine for *transform* using *settings*; intended for background workers.
 
     Forwards *progress_callback* so ``RefineTransform`` can preview each pass.
+    Pass previews and the final result are converted to a host ``Grid`` transform
+    (same as ``RefineStosFile``), so Pyre never installs a mesh from this path.
     Planned pass count is ``settings.num_iterations`` in this one call — do not
     emulate N iterations with N one-pass jobs.
     """
     with settings:
+        def _grid_preview_callback(current, total, status, preview=None, **kwargs):
+            if progress_callback is None:
+                return
+            grid_preview = None
+            if preview is not None:
+                try:
+                    grid_preview = _as_stos_grid_transform(preview, settings)
+                except Exception:
+                    logger.exception("Could not convert refine preview to a grid transform")
+                    grid_preview = preview
+            if grid_preview is None and not kwargs:
+                progress_callback(current, total, status)
+                return
+            try:
+                progress_callback(current, total, status, grid_preview, **kwargs)
+            except TypeError:
+                progress_callback(current, total, status)
+
+        callback = _grid_preview_callback if progress_callback is not None else None
         result = nornir_imageregistration.RefineTransform(
             transform,
             settings=settings,
@@ -432,13 +500,13 @@ def compute_grid_refine_transform(
             SavePlots=save_plots,
             outputDir=tempfile.gettempdir(),
             cancel_event=cancel_event,
-            progress_callback=progress_callback,
+            progress_callback=callback,
         )
         # Convert on this worker thread: GUI paint must not use CuPy arrays
         # allocated here (cudaErrorIllegalAddress).
         host = snapshot_transform_for_preview(result)
-        return host if host is not None else result
-
+        to_grid = host if host is not None else result
+        return _as_stos_grid_transform(to_grid, settings)
 
 def GridRefineTransform(settings: GridRefinement | None):
     """Refine the current STOS transform using grid refinement. Updates TransformController.TransformModel in place."""

@@ -22,6 +22,7 @@ from pyre.common import (
     build_stos_object_for_save,
     compute_grid_refine_transform,
     create_pyre_grid_refinement_settings,
+    reset_stos_window_cameras,
     save_stos_object,
     stos_image_dims_from_stos_config,
 )
@@ -219,6 +220,7 @@ class StosWindow(PyreWindowBase):
                                                   transform_controller=transform_controller,
                                                   imagename_space_mapping=imagename_space_mapping,
                                                   selected_points=self._selected_points)
+        self.imagepanel.show_lines = self._settings.ui.show_mesh_lines
 
         # Set the image panel as the central widget
         self.setCentralWidget(self.imagepanel)
@@ -284,12 +286,9 @@ class StosWindow(PyreWindowBase):
         menuTransforms = menu.addAction("&Transforms\u2026")
         menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
         menu.addSeparator()
-        menuSourceContrast = menu.addAction("&Source Contrast\u2026")
-        menuSourceContrast.triggered.connect(  # type: ignore[union-attr]
-            lambda _checked=False: self.onContrastAdjustment(Space.Source))
-        menuTargetContrast = menu.addAction("&Target Contrast\u2026")
-        menuTargetContrast.triggered.connect(  # type: ignore[union-attr]
-            lambda _checked=False: self.onContrastAdjustment(Space.Target))
+        menuContrast = menu.addAction("&Contrast\u2026")
+        menuContrast.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onContrastAdjustment())
         return menu
 
     def __createWindowsMenu(self):
@@ -646,6 +645,43 @@ class StosWindow(PyreWindowBase):
         """Open Settings → Transforms dialog for registration defaults."""
         from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
         TransformsSettingsDialog.edit_settings(self._settings, parent=self)
+        self._sync_mesh_lines_from_settings()
+
+    def _sync_mesh_lines_from_settings(self) -> None:
+        """Push ``ui.show_mesh_lines`` to every visible STOS panel."""
+        show = self._settings.ui.show_mesh_lines
+        from pyre.ui.windows.stoswindow import StosWindow
+        # #region agent log
+        import json as _json, time as _time, os as _os
+        _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
+        _synced = []
+        # #endregion
+        for vt in (ViewType.Composite, ViewType.Source, ViewType.Target):
+            if vt not in self._window_manager:
+                continue
+            win = self._window_manager[vt]
+            if isinstance(win, StosWindow) and win.isVisible():
+                win.imagepanel.show_lines = show
+                win.imagepanel._glpanel.update()
+                # #region agent log
+                _synced.append(vt.value)
+                # #endregion
+        # #region agent log
+        with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"A","location":"stoswindow.py:_sync_mesh_lines","message":"sync_panels","data":{"show":show,"synced_views":_synced},"timestamp":int(_time.time()*1000)}) + "\n")
+        # #endregion
+
+    def _auto_enable_mesh_lines(self) -> None:
+        """Turn on mesh lines after a non-rigid transform is installed."""
+        import nornir_imageregistration
+        model = self._transform_controller.TransformModel
+        # #region agent log
+        import json as _json, time as _time, os as _os
+        _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
+        with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"A","location":"stoswindow.py:_auto_enable_mesh_lines","message":"auto_enable_check","data":{"model_type":type(model).__name__ if model else "None","is_rigid":isinstance(model, nornir_imageregistration.IRigidTransform) if model else True,"current_show_mesh_lines":self._settings.ui.show_mesh_lines},"timestamp":int(_time.time()*1000)}) + "\n")
+        # #endregion
+        if model is not None and not isinstance(model, nornir_imageregistration.IRigidTransform):
+            self._settings.ui.show_mesh_lines = True
+            self._sync_mesh_lines_from_settings()
 
     def onContrastAdjustment(self, space: Space | None = None) -> None:
         """Open the non-modal contrast window for Source or Target."""
@@ -831,6 +867,7 @@ class StosWindow(PyreWindowBase):
                 self._transform_controller.apply_external_transform(resulting_transform)
                 from pyre.common import repaint_peer_stos_gl_panels
                 repaint_peer_stos_gl_panels(self._window_manager)
+                self._auto_enable_mesh_lines()
 
         self._submit_registration_job(
             title=title,
@@ -870,6 +907,7 @@ class StosWindow(PyreWindowBase):
                 self._transform_controller.apply_external_transform(resulting_transform)
                 from pyre.common import repaint_peer_stos_gl_panels
                 repaint_peer_stos_gl_panels(self._window_manager)
+                self._auto_enable_mesh_lines()
 
         self._submit_registration_job(
             title=title,
@@ -903,12 +941,35 @@ class StosWindow(PyreWindowBase):
             self._settings.ui.target_contrast,
         )
         # Host mesh so the worker never shares CuPy control points with paintGL.
+        # Always taken from the live TransformController model (manual rigid edits
+        # included) — never reloaded from the .stos path on disk.
         transform_snapshot = snapshot_transform_for_preview(
             self._transform_controller.TransformModel)
         if transform_snapshot is None:
             logger.warning("%s: could not snapshot the live transform", title)
             return
-
+        live = self._transform_controller.TransformModel
+        if isinstance(live, nornir_imageregistration.IRigidTransform):
+            offset = np.asarray(getattr(live, "target_offset", (0.0, 0.0)), dtype=np.float64).ravel()[:2]
+            snap_offset = np.asarray(
+                getattr(transform_snapshot, "target_offset", (0.0, 0.0)), dtype=np.float64).ravel()[:2]
+            logger.info(
+                "%s input transform=%s angle_deg=%.3f offset_yx=(%.2f, %.2f) "
+                "snapshot_offset_yx=(%.2f, %.2f) (live model, not .stos reload)",
+                title,
+                type(live).__name__,
+                float(np.degrees(float(getattr(live, "angle", 0.0) or 0.0))),
+                float(offset[0]), float(offset[1]),
+                float(snap_offset[0]), float(snap_offset[1]),
+            )
+        else:
+            n_pts = leading_axis_len(getattr(live, "points", None))
+            logger.info(
+                "%s input transform=%s points=%s (live model, not .stos reload)",
+                title,
+                type(live).__name__,
+                n_pts,
+            )
         user_iterations = user_settings.num_iterations
         user_grid_spacing = user_settings.grid_spacing
         user_cell_size = user_settings.cell_size
@@ -947,12 +1008,41 @@ class StosWindow(PyreWindowBase):
             self._transform_controller.apply_external_transform(updated_transform)
             from pyre.common import repaint_peer_stos_gl_panels
             repaint_peer_stos_gl_panels(self._window_manager)
+            self._auto_enable_mesh_lines()
+
+        def _points_unchanged(updated_transform) -> bool:
+            """True when refine handed back the same control points it was given."""
+            before = getattr(transform_snapshot, "points", None)
+            after = getattr(updated_transform, "points", None)
+            if before is None or after is None:
+                return False
+            before = nornir_imageregistration.EnsureNumpyArray(before)
+            after = nornir_imageregistration.EnsureNumpyArray(after)
+            return before.shape == after.shape and bool(np.allclose(before, after))
 
         def _on_preview(updated_transform) -> None:
             _apply_refine_transform(updated_transform, kind="pass preview")
+            # #region agent log
+            import json as _json, time as _time, os as _os
+            _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
+            with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"M","location":"stoswindow.py:_on_preview","message":"preview_delivered","data":{"points":leading_axis_len(getattr(updated_transform, "points", None)),"unchanged_from_input":_points_unchanged(updated_transform)},"timestamp":int(_time.time()*1000)}) + "\n")
+            # #endregion
 
         def _on_success(updated_transform) -> None:
             _apply_refine_transform(updated_transform, kind="result")
+            unchanged = _points_unchanged(updated_transform)
+            # #region agent log
+            import json as _json, time as _time, os as _os
+            _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
+            with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"M","location":"stoswindow.py:_on_success","message":"result_delivered","data":{"points":leading_axis_len(getattr(updated_transform, "points", None)),"unchanged_from_input":unchanged},"timestamp":int(_time.time()*1000)}) + "\n")
+            # #endregion
+            if unchanged:
+                msg = (f"{title}: no cells registered well enough; the prior transform "
+                       f"was kept unchanged. See the log for rejection counts.")
+                logger.warning(msg)
+                sb = self.statusBar()
+                if sb is not None:
+                    sb.showMessage(msg, 20000)
 
         self._submit_registration_job(
             title=title,
@@ -1252,6 +1342,8 @@ class StosWindow(PyreWindowBase):
         settings.stos.stos_browser_basename = browser_basename
         transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
         stos_transform_controller.TransformModel = transform
+        # Do not rebase composite to framing from the previous file/transform.
+        stos_transform_controller.discard_composite_display_cache()
 
         settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
                                                       mask_fullpath=load_result.source.mask_fullpath)
@@ -1272,6 +1364,7 @@ class StosWindow(PyreWindowBase):
             sync_stos_registration_roles(stos_config, warped, fixed)
 
         StosWindow.update_window_titles(settings, window_manager)
+        reset_stos_window_cameras(window_manager)
         return load_result
 
     @staticmethod

@@ -152,6 +152,9 @@ class Camera(IReadOnlyCamera):
 
     @scale.setter
     def scale(self, value: float):
+        if not np.isfinite(value) or value == 0.0:
+            self._log.debug("Ignoring non-finite camera scale %s", value)
+            return
 
         if value > self.max_zoom:
             value = self.max_zoom
@@ -210,9 +213,13 @@ class Camera(IReadOnlyCamera):
         """
         self._config = settings.ui
         self._log = log
-        self._lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)  # centered on
+        lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)
+        if not np.all(np.isfinite(lookat)):
+            log.warning("Camera initialized with non-finite lookat %s; using (0, 0)", position)
+            lookat = np.zeros(2, dtype=float)
+        self._lookat = lookat  # centered on
         self._angle = 0  # tilt
-        self._scale = scale  # zoom
+        self._scale = float(scale) if np.isfinite(scale) and scale != 0.0 else 1.0
         self.__OnChangeEventListeners = []
         self._deferred_change_depth = 0
         self._deferred_change_pending = False
@@ -259,6 +266,9 @@ class Camera(IReadOnlyCamera):
         # print("Translate X: %g Y: %g" % (delta[1], delta[0]))
         # Camera state is UI-side and should remain NumPy-backed even when compute paths use CuPy.
         delta = nornir_imageregistration.EnsureNumpyArray(delta, float)
+        if not np.all(np.isfinite(delta)):
+            self._log.debug("Ignoring non-finite camera translate delta %s", delta)
+            return
         self.lookat = self.lookat + delta
 
     @property
@@ -267,14 +277,16 @@ class Camera(IReadOnlyCamera):
 
     @lookat.setter
     def lookat(self, point: nornir_imageregistration.PointLike):
-        """:param tuple point: (y,x)
-           :param float scale: scale
+        """Set the camera center in world (y, x). Non-finite values are ignored.
+
+        Bad mesh/grid InverseTransforms can yield NaN; accepting those would leave the
+        view stuck at infinity until the user reloads.
         """
-        self._lookat = np.array(point, dtype=float)
-        # self._scale = scale
-
-        # print("X: %g Y: %g S: %g" % (self.x, self.y, self.scale))
-
+        candidate = np.asarray(point, dtype=float).ravel()[:2]
+        if candidate.shape[0] < 2 or not np.all(np.isfinite(candidate)):
+            self._log.debug("Ignoring non-finite camera lookat %s", point)
+            return
+        self._lookat = np.array(candidate, dtype=float, copy=True)
         self._FireChangeEvent()
 
     @property
