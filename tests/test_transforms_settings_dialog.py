@@ -30,6 +30,14 @@ class TestTryFlippedDefault(unittest.TestCase):
         self.assertTrue(app.stos.brute_registration.try_flipped)
 
 
+class TestGridRefineAngleSearchDefault(unittest.TestCase):
+    def test_angle_search_range_defaults_to_zero(self) -> None:
+        defaults = GridRefineDefaults()
+        self.assertEqual(0.0, defaults.max_angle)
+        self.assertEqual(0.0, AppSettings().stos.grid_refine.max_angle)
+        self.assertEqual([0.0], list(defaults.to_angle_search_range().angle_range))
+
+
 class TestTransformsSettingsDialog(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

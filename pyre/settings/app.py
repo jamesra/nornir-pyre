@@ -69,7 +69,7 @@ class GridRefineDefaults(BaseModel):
     cell_size: int = 256
     grid_spacing: int = 192
     num_iterations: int = 5
-    max_angle: float = 5.0
+    max_angle: float = 0.0
     angle_step_size: float = 3.0
 
     def to_angle_search_range(self) -> AngleSearchRange:
