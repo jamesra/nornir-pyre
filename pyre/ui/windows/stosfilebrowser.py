@@ -1,14 +1,14 @@
 """Stos Directory window — browse STOS group folders with Manual override support.
 
-- Open Folder scans a STOS group directory and merges automatic ``*.stos`` files with
-  overrides in ``Manual/`` (Nornir buildmanager layout).
+- Open Folder scans a STOS group directory and merges group-root ``*.stos`` files with
+  ``Automatic/`` input transforms and overrides in ``Manual/`` (Nornir buildmanager layout).
 - Refresh re-scans the current folder (disk changes) without reopening the dialog.
 - Rows with a manual override show ``[Manual]`` and load the manual file on double-click
   (any table column) or Enter.
 - Manual-only rows (manual present, automatic missing) use a darker yellow list color.
-- **File Source** selector (Auto / Original / Manual) controls which variant loads on open and navigation.
+- **File Source** selector (Auto / Original / Input / Manual) controls which variant loads on open and navigation.
 - When the selected source cannot resolve a path, load falls back to Auto (manual preferred).
-- Right-click offers Open automatic vs manual when both exist, and copy the resolved
+- Right-click offers Open Input Transform (``Automatic/``) vs Open Manual Override, and copy the resolved
   file path to the clipboard.
 - Delete removes only the automatic ``*.stos`` file after Yes/Enter confirmation; never Manual/.
 - Opening a folder named ``Manual`` prompts to use the parent STOS group instead; flat
@@ -360,7 +360,8 @@ class StosFileBrowserWindow(QMainWindow):
     def _row_matches_select_path(self, row: StosBrowserRow, filepath: str) -> bool:
         """True when *row* is the last-session file by path or basename."""
         norm = os.path.normcase(os.path.abspath(filepath))
-        for candidate in (row.auto_path, row.manual_path, row.default_load_path):
+        for candidate in (
+                row.auto_path, row.input_path, row.manual_path, row.default_load_path):
             if candidate and os.path.normcase(os.path.abspath(candidate)) == norm:
                 return True
         wanted = {os.path.normcase(os.path.basename(filepath))}
@@ -759,6 +760,9 @@ class StosFileBrowserWindow(QMainWindow):
     def _row_has_auto(self, row: StosBrowserRow) -> bool:
         return row.auto_path is not None and os.path.isfile(row.auto_path)
 
+    def _row_has_input(self, row: StosBrowserRow) -> bool:
+        return row.has_input_transform
+
     def _row_has_manual(self, row: StosBrowserRow) -> bool:
         return row.manual_path is not None and os.path.isfile(row.manual_path)
 
@@ -771,11 +775,14 @@ class StosFileBrowserWindow(QMainWindow):
     def _update_source_selector_for_current_row(self) -> None:
         row = self._current_row()
         if row is None:
-            self._file_source_selector.set_row_availability(has_auto=False, has_manual=False)
+            self._file_source_selector.set_row_availability(
+                has_auto=False, has_manual=False, has_input=False)
             return
         has_auto = self._row_has_auto(row)
         has_manual = self._row_has_manual(row)
-        self._file_source_selector.set_row_availability(has_auto=has_auto, has_manual=has_manual)
+        has_input = self._row_has_input(row)
+        self._file_source_selector.set_row_availability(
+            has_auto=has_auto, has_manual=has_manual, has_input=has_input)
         current = self._file_source_selector.source()
         if row.load_path_for_source(current) is None:
             fallback = StosFileSource.auto
@@ -804,7 +811,8 @@ class StosFileBrowserWindow(QMainWindow):
 
     def _missing_source_message(self, source: StosFileSource, row: StosBrowserRow) -> str:
         label = {
-            StosFileSource.original: "Original (automatic)",
+            StosFileSource.original: "Original (output)",
+            StosFileSource.input: "Input (Automatic folder)",
             StosFileSource.manual: "Manual",
         }.get(source, source.value)
         return f"No {label} STOS file exists for {row.basename}."
@@ -823,9 +831,10 @@ class StosFileBrowserWindow(QMainWindow):
 
     @staticmethod
     def _row_tooltip(row: StosBrowserRow, scored_values: list[float] | None = None) -> str:
-        auto = row.auto_path or "(none)"
+        output = row.auto_path or "(none)"
+        input_transform = row.input_path or "(none)"
         manual = row.manual_path or "(none)"
-        tip = f"Automatic: {auto}\nManual: {manual}"
+        tip = f"Output: {output}\nInput: {input_transform}\nManual: {manual}"
         if row.is_manual_only:
             tip += "\n(automatic missing)"
         if row.quality_score is not None:
@@ -857,10 +866,10 @@ class StosFileBrowserWindow(QMainWindow):
         open_action.triggered.connect(lambda: self._load_stos_at_index(index))
 
         if self._browse_mode == BrowseMode.stos_group:
-            auto_action = menu.addAction("Open Input Transform")
-            auto_action.setEnabled(row.auto_path is not None)
-            auto_action.triggered.connect(
-                lambda: self._load_stos_path(row.auto_path, index, browser_basename=row.basename))
+            input_action = menu.addAction("Open Input Transform")
+            input_action.setEnabled(row.has_input_transform)
+            input_action.triggered.connect(
+                lambda: self._load_stos_path(row.input_path, index, browser_basename=row.basename))
 
             manual_action = menu.addAction("Open Manual Override")
             manual_action.setEnabled(row.manual_path is not None)

@@ -25,6 +25,7 @@ from pyre.settings.app import (
     PointRegistrationSettings,
     UISettings,
 )
+from pyre.settings.persistence import save_app_settings
 
 
 class TransformsSettingsDialog(QDialog):
@@ -119,11 +120,29 @@ class TransformsSettingsDialog(QDialog):
         self._grid_angle_step.setSingleStep(0.5)
         self._grid_angle_step.setValue(defaults.angle_step_size)
 
+        self._preview_pass_transforms = QCheckBox(page)
+        self._preview_pass_transforms.setChecked(bool(defaults.preview_pass_transforms))
+        self._preview_pass_transforms.setToolTip(
+            "Update the view after each refine pass. Off by default because "
+            "resampling the mesh onto the STOS grid is expensive.")
+
+        self._gpu_preview_grid_convert = QCheckBox(page)
+        self._gpu_preview_grid_convert.setChecked(bool(defaults.gpu_preview_grid_convert))
+        self._gpu_preview_grid_convert.setToolTip(
+            "Use the GPU when converting pass previews to a grid. Has no effect "
+            "unless pass previews are on. The final result is always converted.")
+        self._gpu_preview_grid_convert.setEnabled(
+            self._preview_pass_transforms.isChecked())
+        self._preview_pass_transforms.toggled.connect(
+            self._gpu_preview_grid_convert.setEnabled)
+
         form.addRow("Cell size", self._cell_size)
         form.addRow("Grid spacing", self._grid_spacing)
         form.addRow("# of iterations", self._num_iterations)
         form.addRow("Max angle (± degrees)", self._grid_max_angle)
         form.addRow("Angle step (degrees)", self._grid_angle_step)
+        form.addRow("Preview pass transforms", self._preview_pass_transforms)
+        form.addRow("GPU preview grid convert", self._gpu_preview_grid_convert)
         return page
 
     def _build_point_tab(self, point: PointRegistrationSettings) -> QWidget:
@@ -152,10 +171,17 @@ class TransformsSettingsDialog(QDialog):
         self._point_estimate_angle.setToolTip(
             "Add a log-polar angle estimate to the angles searched above.")
 
+        self._show_mesh_lines = QCheckBox(page)
+        self._show_mesh_lines.setChecked(bool(self._settings.ui.show_mesh_lines))
+        self._show_mesh_lines.setToolTip(
+            "Show mesh/grid triangulation lines and control point glyphs "
+            "on the Source and Target image panels.")
+
         form.addRow("Alignment area", self._alignment_area)
         form.addRow("Max angle (± degrees)", self._point_max_angle)
         form.addRow("Angle step (degrees)", self._point_angle_step)
         form.addRow("Estimate angle", self._point_estimate_angle)
+        form.addRow("Show mesh lines", self._show_mesh_lines)
         return page
 
     def _build_debug_tab(self, ui: UISettings) -> QWidget:
@@ -195,6 +221,8 @@ class TransformsSettingsDialog(QDialog):
             num_iterations=int(self._num_iterations.value()),
             max_angle=float(self._grid_max_angle.value()),
             angle_step_size=float(self._grid_angle_step.value()),
+            preview_pass_transforms=self._preview_pass_transforms.isChecked(),
+            gpu_preview_grid_convert=self._gpu_preview_grid_convert.isChecked(),
         )
 
         self._settings.stos.point_registration = PointRegistrationSettings(
@@ -207,6 +235,7 @@ class TransformsSettingsDialog(QDialog):
         )
 
         self._settings.ui.show_control_point_ids = self._show_control_point_ids.isChecked()
+        self._settings.ui.show_mesh_lines = self._show_mesh_lines.isChecked()
 
     @staticmethod
     def edit_settings(settings: AppSettings, parent: QWidget | None = None) -> bool:
@@ -215,4 +244,5 @@ class TransformsSettingsDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return False
         dlg.apply_to_settings()
+        save_app_settings(settings)
         return True

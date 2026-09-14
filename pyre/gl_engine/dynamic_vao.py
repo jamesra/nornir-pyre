@@ -45,6 +45,8 @@ class DynamicVAO(ContextAwareVAOHelper, IVAO):
     def __init__(self):
         """Initialize a new DynamicVAO."""
         super().__init__()
+        # Index buffer lifetime belongs to GLIndexBuffer, not this VAO.
+        self._owns_index_buffer = False
 
     def begin_init(self):
         """
@@ -66,7 +68,7 @@ class DynamicVAO(ContextAwareVAOHelper, IVAO):
             context = QOpenGLContext.currentContext()
             try:
                 # Create and bind the VAO
-                vao_id = gl.glGenVertexArrays(1)
+                vao_id = int(gl.glGenVertexArrays(1))
                 if vao_id == 0:
                     raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
                 raise_on_error("after glGenVertexArrays", RuntimeError("glGenVertexArrays failed"))
@@ -170,7 +172,7 @@ class DynamicVAO(ContextAwareVAOHelper, IVAO):
             RuntimeError: If VAO creation fails
         """
         # Create VAO
-        vao_id = gl.glGenVertexArrays(1)
+        vao_id = int(gl.glGenVertexArrays(1))
         if vao_id == 0:
             raise RuntimeError("glGenVertexArrays returned 0 (invalid VAO)")
         raise_on_error("after glGenVertexArrays in _create_vao_for_context")

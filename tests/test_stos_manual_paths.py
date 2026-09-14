@@ -38,6 +38,7 @@ ensure_manual_directory = _smp.ensure_manual_directory
 is_manual_input_directory = _smp.is_manual_input_directory
 manual_directory = _smp.manual_directory
 parent_stos_group_folder = _smp.parent_stos_group_folder
+path_to_input_transform = _smp.path_to_input_transform
 path_to_manual_transform = _smp.path_to_manual_transform
 resolve_default_load_path = _smp.resolve_default_load_path
 resolve_load_path = _smp.resolve_load_path
@@ -63,6 +64,17 @@ class TestManualDirectoryHelpers(unittest.TestCase):
             found = path_to_manual_transform(tmp, "33-34.stos")
             self.assertEqual(found, stos_path)
             self.assertIsNone(path_to_manual_transform(tmp, "missing.stos"))
+
+    def test_path_to_input_transform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            automatic = os.path.join(tmp, "Automatic")
+            os.makedirs(automatic)
+            stos_path = os.path.join(automatic, "33-34.stos")
+            with open(stos_path, "w", encoding="utf-8") as handle:
+                handle.write("x")
+            found = path_to_input_transform(tmp, "33-34.stos")
+            self.assertEqual(found, stos_path)
+            self.assertIsNone(path_to_input_transform(tmp, "missing.stos"))
 
     def test_is_manual_input_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -151,6 +163,24 @@ class TestResolveLoadPath(unittest.TestCase):
             )
             self.assertIsNone(resolve_load_path(None, manual, StosFileSource.original))
 
+    def test_input_uses_automatic_folder_not_group_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            input_stos = os.path.join(tmp, "Automatic", "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(auto)
+            self._touch(input_stos)
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.input, input_path=input_stos),
+                input_stos,
+            )
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.original, input_path=input_stos),
+                auto,
+            )
+            self.assertIsNone(resolve_load_path(auto, manual, StosFileSource.input))
+
 
 class TestResolveStosRestorePath(unittest.TestCase):
     def _touch(self, path: str) -> None:
@@ -174,6 +204,22 @@ class TestResolveStosRestorePath(unittest.TestCase):
             )
             self.assertEqual(resolved, manual)
 
+    def test_startup_input_restores_automatic_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            basename = "10-11.stos"
+            auto = os.path.join(tmp, basename)
+            input_stos = os.path.join(tmp, "Automatic", basename)
+            self._touch(auto)
+            self._touch(input_stos)
+            resolved = resolve_stos_restore_path(
+                auto,
+                stos_group_folder=tmp,
+                stos_browser_basename=basename,
+                stos_file_source="input",
+                flat_manual=False,
+            )
+            self.assertEqual(resolved, input_stos)
+
 
 class TestScanStosBrowserRows(unittest.TestCase):
     def _touch(self, path: str) -> None:
@@ -193,6 +239,37 @@ class TestScanStosBrowserRows(unittest.TestCase):
             self.assertTrue(merged.has_manual_override)
             self.assertEqual(merged.default_load_path, merged.manual_path)
             self.assertIsNotNone(by_name["20-21.stos"].auto_path)
+
+    def test_group_mode_merges_automatic_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "945-943.stos")
+            automatic = os.path.join(tmp, "Automatic", "945-943.stos")
+            self._touch(output)
+            self._touch(automatic)
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row.auto_path, output)
+            self.assertEqual(row.input_path, automatic)
+            self.assertTrue(row.has_input_transform)
+            self.assertEqual(
+                row.load_path_for_source(StosFileSource.input),
+                automatic,
+            )
+            self.assertEqual(
+                row.load_path_for_source(StosFileSource.original),
+                output,
+            )
+
+    def test_group_mode_input_only_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            automatic = os.path.join(tmp, "Automatic", "05-06.stos")
+            self._touch(automatic)
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0].auto_path)
+            self.assertEqual(rows[0].input_path, automatic)
+            self.assertTrue(rows[0].has_input_transform)
 
     def test_group_mode_manual_only_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

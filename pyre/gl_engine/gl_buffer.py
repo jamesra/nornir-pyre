@@ -116,6 +116,16 @@ class GLBuffer(IBuffer):
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
         check_for_error()
 
+    def release(self) -> None:
+        """Delete the GL buffer now (current context) and clear the name so ``__del__`` is a no-op."""
+        if self._buffer is None:
+            return
+        buffer_name = int(self._buffer)
+        self._buffer = None
+        delete_gl_object_on_teardown(
+            lambda: gl.glDeleteBuffers(1, [buffer_name]),
+            f"vertex buffer {buffer_name}")
+
     def __del__(self):
         if self._buffer is not None:
             buffer_name = int(self._buffer)
@@ -217,6 +227,16 @@ class GLIndexBuffer(IIndexBuffer):
 
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, 0)
         check_for_error()
+
+    def release(self) -> None:
+        """Delete the GL index buffer now and clear the name so ``__del__`` is a no-op."""
+        if self._buffer is None:
+            return
+        buffer_name = int(self._buffer)
+        self._buffer = None
+        delete_gl_object_on_teardown(
+            lambda: gl.glDeleteBuffers(1, [buffer_name]),
+            f"index buffer {buffer_name}")
 
     def __del__(self):
         if self._buffer is not None:

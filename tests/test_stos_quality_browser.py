@@ -36,13 +36,17 @@ def test_format_quality_score() -> None:
 def test_score_path_prefers_source(tmp_path: Path) -> None:
     auto = tmp_path / 'a.stos'
     manual = tmp_path / 'Manual' / 'a.stos'
+    automatic = tmp_path / 'Automatic' / 'a.stos'
     auto.write_text('x')
     manual.parent.mkdir()
     manual.write_text('y')
-    row = StosBrowserRow('a.stos', str(auto), str(manual))
+    automatic.parent.mkdir()
+    automatic.write_text('z')
+    row = StosBrowserRow('a.stos', str(auto), str(manual), str(automatic))
     assert score_path_for_row(row, StosFileSource.original) == str(auto)
     assert score_path_for_row(row, StosFileSource.manual) == str(manual)
     assert score_path_for_row(row, StosFileSource.auto) == str(manual)
+    assert score_path_for_row(row, StosFileSource.input) == str(automatic)
 
 
 def test_attach_quality_scores_and_histogram(tmp_path: Path) -> None:

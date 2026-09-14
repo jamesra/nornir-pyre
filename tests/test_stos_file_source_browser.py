@@ -26,6 +26,7 @@ class TestStosBrowserFileSource(unittest.TestCase):
             auto_path: str | None,
             manual_path: str | None,
             source: StosFileSource,
+            input_path: str | None = None,
     ) -> StosFileBrowserWindow:
         settings = AppSettings(stos=StosSettings(stos_file_source=source.value))
         browser = StosFileBrowserWindow(parent=None, settings=settings)
@@ -36,6 +37,7 @@ class TestStosBrowserFileSource(unittest.TestCase):
                 basename="10-11.stos",
                 auto_path=auto_path,
                 manual_path=manual_path,
+                input_path=input_path,
             )
         ]
         browser._current_index = 0
@@ -152,6 +154,64 @@ class TestStosBrowserFileSource(unittest.TestCase):
             assert pending is not None
             self.assertEqual(pending.filepath, auto)
             self.assertEqual(pending.index, 0)
+
+    def test_load_at_index_uses_automatic_when_source_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            input_stos = os.path.join(tmp, "Automatic", "10-11.stos")
+            os.makedirs(os.path.dirname(input_stos), exist_ok=True)
+            open(auto, "w", encoding="utf-8").close()
+            open(input_stos, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto,
+                manual_path=None,
+                input_path=input_stos,
+                source=StosFileSource.input,
+            )
+            browser._load_stos_at_index(0)
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, input_stos)
+
+    def test_open_input_transform_loads_automatic_not_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            input_stos = os.path.join(tmp, "Automatic", "10-11.stos")
+            os.makedirs(os.path.dirname(input_stos), exist_ok=True)
+            open(auto, "w", encoding="utf-8").close()
+            open(input_stos, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto,
+                manual_path=None,
+                input_path=input_stos,
+                source=StosFileSource.original,
+            )
+            browser._load_stos_path(browser._rows[0].input_path, 0, browser_basename="10-11.stos")
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, input_stos)
+            self.assertNotEqual(pending.filepath, auto)
+
+    def test_missing_input_falls_back_to_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            open(auto, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto,
+                manual_path=None,
+                input_path=None,
+                source=StosFileSource.input,
+            )
+            with patch("pyre.ui.windows.stosfilebrowser.QMessageBox.information") as mock_box:
+                browser._load_stos_at_index(0)
+            mock_box.assert_not_called()
+            pending = browser._pending_load
+            self.assertIsNotNone(pending)
+            assert pending is not None
+            self.assertEqual(pending.filepath, auto)
+            self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
 
     def test_item_activated_loads_stos(self) -> None:
         """Enter / platform activate on a table item must queue a STOS load."""

@@ -57,6 +57,11 @@ class ContextAwareVAOHelper(ABC):
     _buffers: set[IBuffer]
     _indices: Optional[NDArray]
     _index_buffer_id: Optional[int]
+    # When False, GLIndexBuffer (or similar) owns deletion of ``_index_buffer_id``.
+    # DynamicVAO must leave this False — otherwise VAO ``__del__`` and the index
+    # buffer ``__del__`` both call glDeleteBuffers on the same name; the second
+    # delete can free a recycled buffer still used by a live tile (NULL draw).
+    _owns_index_buffer: bool
 
     def __init__(self):
         """Initialize the context-aware VAO helper."""
@@ -67,6 +72,7 @@ class ContextAwareVAOHelper(ABC):
         self._buffers = set()
         self._indices = None
         self._index_buffer_id = None
+        self._owns_index_buffer = True
 
     @property
     def num_elements(self) -> int:
@@ -317,8 +323,12 @@ class ContextAwareVAOHelper(ABC):
 
         self._context_vaos = retained
 
-        # Delete index buffer if we own it
-        if self._index_buffer_id is not None and current_context is not None:
+        # Delete index buffer only when this VAO allocated it (ShaderVAO).
+        if (
+                self._owns_index_buffer
+                and self._index_buffer_id is not None
+                and current_context is not None
+        ):
             try:
                 gl.glDeleteBuffers(1, [self._index_buffer_id])
                 check_for_error("after glDeleteBuffers for index buffer")

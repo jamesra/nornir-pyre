@@ -13,12 +13,14 @@ from pyre.viewmodels.controlpointmap import ControlPointMap
 def find_control_point_interactions(
         control_point_map: ControlPointMap, world_position: PointLike, search_radius: float, scale: float
 ) -> set[int]:
-    """Return the nearest control point within the on-screen glyph.
+    """Return the nearest control point within twice the on-screen glyph extent.
 
     Glyphs are a ±0.5 quad scaled by ``search_radius * scale`` (``scale`` is
     ``1/camera.scale``), so the visual half-extent is ``0.5 * search_radius * scale``.
+    The hit radius is double that: a press just outside the glyph should still pick
+    the point rather than fall through to box select.
     """
-    return control_point_map.find_nearest_within(world_position, 0.5 * search_radius * scale)  # type: ignore[arg-type]
+    return control_point_map.find_nearest_within(world_position, search_radius * scale)  # type: ignore[arg-type]
 
 
 def drag_translate_interactions(
@@ -38,6 +40,15 @@ def resolve_space_register_action(
         selected = set(event.existing_selections or ())
         return ControlPointActionResult(action, selected | interactions)
     return None
+
+
+def middle_click_create_action(event: SelectionEventData) -> ControlPointActionResult | None:
+    """Middle-click creates a control point at the cursor with no keyboard modifiers."""
+    if not event.IsMouseInput or event.input != InputEvent.Press:
+        return None
+    if not event.IsMiddleMousePressed or not event.NoModifierKeys:
+        return None
+    return ControlPointActionResult(ControlPointAction.CREATE, set())
 
 
 def resolve_delete_key_action(
@@ -71,6 +82,10 @@ def mesh_get_possible_actions(
         interactions: set[int],
         can_delete_fn: Callable[[SelectionEventData, set[int]], bool]) -> ControlPointActionResult:
     """Shared hover/preview action resolution for mesh and grid transforms."""
+    middle_create = middle_click_create_action(event)
+    if middle_create is not None:
+        return middle_create
+
     actions = ControlPointAction.NONE
     if event.IsMouseInput | event.IsKeyboardInput:
         if len(interactions) == 0:
@@ -144,6 +159,10 @@ def mesh_get_action(
     delete_key = resolve_delete_key_action(event, interactions, can_delete_fn)
     if delete_key is not None:
         return delete_key
+
+    middle_create = middle_click_create_action(event)
+    if middle_create is not None:
+        return middle_create
 
     action = ControlPointAction.NONE
     if event.IsMouseInput or event.IsKeyboardInput:

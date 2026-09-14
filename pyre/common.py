@@ -432,6 +432,8 @@ def create_pyre_grid_refinement_settings(
 def _as_stos_grid_transform(
         transform: ITransform,
         settings: GridRefinement,
+        *,
+        prefer_gpu: bool = False,
 ) -> ITransform:
     """Resample a refine result onto the STOS grid lattice (host arrays).
 
@@ -455,7 +457,7 @@ def _as_stos_grid_transform(
         source_image_shape=source_shape,
         cell_size=settings.cell_size,
         grid_spacing=settings.grid_spacing,
-        prefer_gpu=False,
+        prefer_gpu=prefer_gpu,
     )
 
 
@@ -464,23 +466,25 @@ def compute_grid_refine_transform(
         settings: GridRefinement,
         cancel_event: threading.Event | None = None,
         progress_callback=None,
-        save_plots: bool = True) -> ITransform:
+        save_plots: bool = True,
+        preview_pass_transforms: bool = False,
+        gpu_preview_grid_convert: bool = False) -> ITransform:
     """Run grid refine for *transform* using *settings*; intended for background workers.
 
-    Forwards *progress_callback* so ``RefineTransform`` can preview each pass.
-    Pass previews and the final result are converted to a host ``Grid`` transform
-    (same as ``RefineStosFile``), so Pyre never installs a mesh from this path.
-    Planned pass count is ``settings.num_iterations`` in this one call — do not
-    emulate N iterations with N one-pass jobs.
+    Forwards *progress_callback* so ``RefineTransform`` can report pass progress.
+    When *preview_pass_transforms* is True, each pass snapshot is converted to a
+    host ``Grid`` (optionally via GPU) so Pyre can update the view. The final
+    result is always converted. Planned pass count is ``settings.num_iterations``.
     """
     with settings:
         def _grid_preview_callback(current, total, status, preview=None, **kwargs):
             if progress_callback is None:
                 return
             grid_preview = None
-            if preview is not None:
+            if preview_pass_transforms and preview is not None:
                 try:
-                    grid_preview = _as_stos_grid_transform(preview, settings)
+                    grid_preview = _as_stos_grid_transform(
+                        preview, settings, prefer_gpu=gpu_preview_grid_convert)
                 except Exception:
                     logger.exception("Could not convert refine preview to a grid transform")
                     grid_preview = preview

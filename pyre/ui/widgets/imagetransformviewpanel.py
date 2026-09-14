@@ -45,7 +45,11 @@ from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
-from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
+from pyre.views.transformcontrollerview import (
+    BinarySelectionMapper,
+    TransformControllerView,
+    selected_blink_phase,
+)
 from pyre.viewmodels.controlpointmap import ControlPointMap
 from pyre.transform_edit_policy import source_panel_hint_message, rigid_rotation_locked
 from pyre.views.composite_display import (
@@ -65,7 +69,16 @@ from pyre.views.registration_roi_overlay import (
 
 
 GLYPH_TIMER_IDLE_MS = 100
-GLYPH_TIMER_BUSY_MS = 33
+# While a registration is in flight: 5 Hz. Selected blink is wall-clock 2 Hz;
+# the busy comet is 1 rev/s (5 samples/rev). 33 ms was smoother spin, not blink.
+GLYPH_TIMER_REGISTRATION_MS = 200
+
+
+def glyph_timer_interval_ms(*, point_queue_busy: bool, job_busy: bool) -> int:
+    """Return the glyph-paint interval; slower while any registration is running."""
+    if point_queue_busy or job_busy:
+        return GLYPH_TIMER_REGISTRATION_MS
+    return GLYPH_TIMER_IDLE_MS
 
 
 @dataclass
@@ -527,10 +540,13 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 QTimer.singleShot(0, self._glpanel.update)
 
     def _glyph_timer_interval_ms(self) -> int:
-        """Faster glyph-only paints while any control point is queued."""
-        if self._transform_controller.busy_point_ids:
-            return GLYPH_TIMER_BUSY_MS
-        return GLYPH_TIMER_IDLE_MS
+        """Faster idle glyph paints; 5 Hz while a point queue or registration job is busy."""
+        from pyre.registration_job import get_registration_job_runner
+
+        return glyph_timer_interval_ms(
+            point_queue_busy=bool(self._transform_controller.busy_point_ids),
+            job_busy=get_registration_job_runner().busy,
+        )
 
     def _on_busy_points_changed(self, controller: TransformController, ids: frozenset[int]) -> None:
         """Repaint immediately so busy glyphs appear without waiting for the blink timer."""
@@ -852,7 +868,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                 cp_view_proj,
                 tween=ControlPointMap.draw_tween_for_pyre_space(self.space),
                 scale_factor=point_scale,
-                blink_phase=self.DebugTickCounter % 2,
+                blink_phase=selected_blink_phase(),
                 display_point_rows=composite_control_point_draw_rows(
                     self.transform_controller, self.space)
                 if self.view_type == ViewType.Composite and self.transform_controller is not None

@@ -158,7 +158,8 @@ class TestMultiPassRefineStaysOneJob(unittest.TestCase):
 
         source = inspect.getsource(StosWindow.start_grid_refine_job)
         self.assertIn("num_iterations=user_iterations", source)
-        self.assertIn("on_preview=_on_preview", source)
+        self.assertIn("preview_pass_transforms=preview_passes", source)
+        self.assertIn("on_preview=_on_preview if preview_passes else None", source)
         self.assertIn("kind=\"pass preview\"", source)
         self.assertNotIn("for _ in range(user_iterations)", source)
         self.assertNotIn("GridRegisterAllCommand", source)
@@ -172,3 +173,45 @@ class TestMultiPassRefineStaysOneJob(unittest.TestCase):
         self.assertIn("start_grid_refine_job", source)
         self.assertNotIn("fixed_num_iterations", source)
         self.assertIn("title=\"Refine w/ Grid\"", source)
+
+    def test_start_grid_refine_uses_live_transform_model_not_stos_reload(self) -> None:
+        """Menu Refine w/ Grid must snapshot TransformController, not reload .stos."""
+        import inspect
+
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        source = inspect.getsource(StosWindow.start_grid_refine_job)
+        self.assertIn("snapshot_transform_for_preview", source)
+        self.assertIn("TransformModel", source)
+        self.assertNotIn("StosFile.Load", source)
+        self.assertNotIn("LoadTransform", source)
+        self.assertNotIn("stos_filename", source)
+
+
+class TestRefineGridUsesManualRigid(unittest.TestCase):
+    """Worker input must retain unsaved manual rigid edits."""
+
+    def test_snapshot_preserves_translate_warped_offset(self) -> None:
+        import numpy as np
+        from nornir_imageregistration.refine_shared.progress import (
+            snapshot_transform_for_preview,
+        )
+        from nornir_imageregistration.transforms.rigid import (
+            CenteredSimilarity2DTransform,
+        )
+
+        original = CenteredSimilarity2DTransform((10.0, 20.0), (100.0, 200.0), 0.1)
+        live = CenteredSimilarity2DTransform((10.0, 20.0), (100.0, 200.0), 0.1)
+        live.TranslateWarped(np.array([40.0, -15.0], dtype=np.float64))
+
+        snapshot = snapshot_transform_for_preview(live)
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertIsInstance(snapshot, CenteredSimilarity2DTransform)
+        self.assertFalse(np.allclose(snapshot.target_offset, original.target_offset))
+        self.assertTrue(np.allclose(snapshot.target_offset, live.target_offset))
+        self.assertAlmostEqual(float(snapshot.angle), float(live.angle), places=6)
+
+        # Later UI edits must not mutate the worker snapshot.
+        live.TranslateWarped(np.array([1000.0, 0.0], dtype=np.float64))
+        self.assertFalse(np.allclose(snapshot.target_offset, live.target_offset))

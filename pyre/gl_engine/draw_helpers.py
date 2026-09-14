@@ -61,16 +61,47 @@ def LineIndicesFromTri(T: scipy.spatial.Delaunay) -> list[int]:
     return line_indices
 
 
-def DrawTriangles(verts, Triangles: scipy.spatial.Delaunay):
+def DrawTriangles(verts, Triangles: scipy.spatial.Delaunay, view_proj=None):
+    """Draw mesh triangulation edges using the ColorShader (Core profile)."""
     line_indices = LineIndicesFromTri(Triangles)
     if len(line_indices) == 0:
         return
 
-    zCoords = numpy.ones((len(verts), 1), dtype=verts.dtype)
-    Points = numpy.hstack((verts, zCoords))
-    FlatPoints = Points.ravel().tolist()
-    vertarray = (gl.GLfloat * len(FlatPoints))(*FlatPoints)
-    # Legacy: actual draw would use pyglet or gl; currently no draw call here (commented out in original)
+    if view_proj is None:
+        return
+
+    from pyre.gl_engine import shaders
+
+    if shaders.color_shader is None or not shaders.color_shader.initialized:
+        return
+
+    verts_f32 = numpy.asarray(verts, dtype=numpy.float32)
+    z_col = numpy.zeros((len(verts_f32), 1), dtype=numpy.float32)
+    xyz = numpy.hstack((verts_f32, z_col))
+    interleaved = numpy.hstack((xyz, xyz)).astype(numpy.float32)
+
+    indices_u16 = numpy.array(line_indices, dtype=numpy.uint16)
+
+    from pyre.gl_engine.shader_vao import ShaderVAO
+    vao = ShaderVAO(
+        layout=shaders.color_shader.vertex_layout,
+        verticies=interleaved,
+        indicies=indices_u16,
+    )
+
+    mvp_np = numpy.asarray(view_proj, dtype=numpy.float32)
+
+    try:
+        shaders.color_shader.draw(
+            model_view_proj_matrix=mvp_np,
+            vertex_array_object=vao,
+            tween=0.0,
+            color=(1.0, 1.0, 0.0, 1.0),
+            mode=gl.GL_LINES,
+        )
+    finally:
+        # Free immediately — do not leave GL deletes to GC during a later paint.
+        vao.cleanup()
 
 
 def VertsForRectangle(rect):

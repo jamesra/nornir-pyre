@@ -23,6 +23,14 @@ POINT_INSTANCE_IDLE = 0.0
 POINT_INSTANCE_BUSY = 2.0
 # One revolution per second for the busy comet arc around queued points.
 BUSY_GLYPH_SPIN_RAD_PER_SEC = 2.0 * math.pi
+# 2 Hz on/off. Slower than this (e.g. 1 Hz) reads as a pulse, not a blink.
+SELECTED_BLINK_HALF_PERIOD_S = 0.25
+
+
+def selected_blink_phase(now: float | None = None) -> int:
+    """Return 0 or 1 for selected-glyph blink at :data:`SELECTED_BLINK_HALF_PERIOD_S`."""
+    t = time.monotonic() if now is None else now
+    return int(t / SELECTED_BLINK_HALF_PERIOD_S) % 2
 
 
 def control_point_instance_states(

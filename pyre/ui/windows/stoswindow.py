@@ -651,11 +651,6 @@ class StosWindow(PyreWindowBase):
         """Push ``ui.show_mesh_lines`` to every visible STOS panel."""
         show = self._settings.ui.show_mesh_lines
         from pyre.ui.windows.stoswindow import StosWindow
-        # #region agent log
-        import json as _json, time as _time, os as _os
-        _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
-        _synced = []
-        # #endregion
         for vt in (ViewType.Composite, ViewType.Source, ViewType.Target):
             if vt not in self._window_manager:
                 continue
@@ -663,22 +658,11 @@ class StosWindow(PyreWindowBase):
             if isinstance(win, StosWindow) and win.isVisible():
                 win.imagepanel.show_lines = show
                 win.imagepanel._glpanel.update()
-                # #region agent log
-                _synced.append(vt.value)
-                # #endregion
-        # #region agent log
-        with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"A","location":"stoswindow.py:_sync_mesh_lines","message":"sync_panels","data":{"show":show,"synced_views":_synced},"timestamp":int(_time.time()*1000)}) + "\n")
-        # #endregion
 
     def _auto_enable_mesh_lines(self) -> None:
         """Turn on mesh lines after a non-rigid transform is installed."""
         import nornir_imageregistration
         model = self._transform_controller.TransformModel
-        # #region agent log
-        import json as _json, time as _time, os as _os
-        _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
-        with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"A","location":"stoswindow.py:_auto_enable_mesh_lines","message":"auto_enable_check","data":{"model_type":type(model).__name__ if model else "None","is_rigid":isinstance(model, nornir_imageregistration.IRigidTransform) if model else True,"current_show_mesh_lines":self._settings.ui.show_mesh_lines},"timestamp":int(_time.time()*1000)}) + "\n")
-        # #endregion
         if model is not None and not isinstance(model, nornir_imageregistration.IRigidTransform):
             self._settings.ui.show_mesh_lines = True
             self._sync_mesh_lines_from_settings()
@@ -928,8 +912,8 @@ class StosWindow(PyreWindowBase):
         ``num_iterations`` is the planned pass count of a single refine, not a
         loop of one-pass Shift+Space jobs. Locks, ring pose, residual
         translation, and cell-size adaptation only persist inside that call.
-        ``on_preview`` applies each ``report_pass_transform`` snapshot so the
-        mesh updates after every pass without splitting the job.
+        Pass previews (``report_pass_transform`` → grid convert → UI) are off
+        unless ``grid_refine.preview_pass_transforms`` is enabled.
         """
         from pyre.image_contrast import contrasted_permutation_helper
         source_for_refine = contrasted_permutation_helper(
@@ -974,6 +958,9 @@ class StosWindow(PyreWindowBase):
         user_grid_spacing = user_settings.grid_spacing
         user_cell_size = user_settings.cell_size
         user_angle_range = user_settings.angle_range
+        grid_defaults = self._settings.stos.grid_refine
+        preview_passes = bool(grid_defaults.preview_pass_transforms)
+        gpu_preview_convert = bool(grid_defaults.gpu_preview_grid_convert)
 
         def _worker(cancel_event, progress_callback):
             settings = create_pyre_grid_refinement_settings(
@@ -990,6 +977,8 @@ class StosWindow(PyreWindowBase):
                 cancel_event=cancel_event,
                 progress_callback=progress_callback,
                 save_plots=save_plots,
+                preview_pass_transforms=preview_passes,
+                gpu_preview_grid_convert=gpu_preview_convert,
             )
 
         def _apply_refine_transform(updated_transform, *, kind: str) -> None:
@@ -1022,20 +1011,10 @@ class StosWindow(PyreWindowBase):
 
         def _on_preview(updated_transform) -> None:
             _apply_refine_transform(updated_transform, kind="pass preview")
-            # #region agent log
-            import json as _json, time as _time, os as _os
-            _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
-            with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"M","location":"stoswindow.py:_on_preview","message":"preview_delivered","data":{"points":leading_axis_len(getattr(updated_transform, "points", None)),"unchanged_from_input":_points_unchanged(updated_transform)},"timestamp":int(_time.time()*1000)}) + "\n")
-            # #endregion
 
         def _on_success(updated_transform) -> None:
             _apply_refine_transform(updated_transform, kind="result")
             unchanged = _points_unchanged(updated_transform)
-            # #region agent log
-            import json as _json, time as _time, os as _os
-            _lp = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))), "debug-f7347d.log")
-            with open(_lp, "a") as _f: _f.write(_json.dumps({"sessionId":"f7347d","hypothesisId":"M","location":"stoswindow.py:_on_success","message":"result_delivered","data":{"points":leading_axis_len(getattr(updated_transform, "points", None)),"unchanged_from_input":unchanged},"timestamp":int(_time.time()*1000)}) + "\n")
-            # #endregion
             if unchanged:
                 msg = (f"{title}: no cells registered well enough; the prior transform "
                        f"was kept unchanged. See the log for rejection counts.")
@@ -1049,7 +1028,7 @@ class StosWindow(PyreWindowBase):
             worker=_worker,
             on_success=_on_success,
             error_title=title,
-            on_preview=_on_preview,
+            on_preview=_on_preview if preview_passes else None,
         )
 
     def onRefineGrid(self):

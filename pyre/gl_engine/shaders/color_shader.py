@@ -115,7 +115,8 @@ class ColorShader(BaseShader):
         try:
             gl.glUseProgram(self.program)
             check_for_error()
-            vertex_array_object.bind()
+            if not vertex_array_object.bind():
+                return
 
             gl.glUniform1f(self.tween_location, tween)
             check_for_error()

@@ -58,6 +58,21 @@ class TileGLObjects:
     cp_indices: NDArray[np.integer] | None = None
     cp_weights: NDArray[np.floating] | None = None
 
+    def release(self) -> None:
+        """Free GL names under the current context before dropping this tile.
+
+        Must run while the owning panel context is current. Clearing the tile map
+        without this leaves deletes to ``__del__``, which can free recycled buffer
+        IDs still bound by replacement tiles and crash in ``glDrawElements``.
+        """
+        try:
+            self.vao.cleanup()
+        except Exception:
+            pass
+        self.vertex_buffer.release()
+        self.index_buffer.release()
+        self.mesh_populated = False
+
 
 RenderDataMap = dict[
     tuple[int, int], TileGLObjects]  # Map from grid coordinates to render data for the tile at that grid

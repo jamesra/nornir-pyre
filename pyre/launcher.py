@@ -63,8 +63,9 @@ from . import resource_paths
 from pyre.container import IContainer
 from pyre.stos_container import StosContainer
 import pyre.commands.stos
-from pyre.frozen_paths import configure_frozen_environment, is_frozen, user_settings_path
+from pyre.frozen_paths import configure_frozen_environment
 from pyre.settings import AppSettings
+from pyre.settings.persistence import save_app_settings
 from pyre.ui.window_geometry import apply_saved_window_geometry, capture_window_geometry
 
 from pyre.ui.windows.mosaicwindow import MosaicWindow
@@ -328,21 +329,12 @@ def build_container() -> IContainer:
     return container_interface
 
 
-def _settings_output_path() -> str:
-    if is_frozen():
-        settings_path = user_settings_path()
-        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-        return settings_path
-    return os.path.join(os.path.dirname(__file__), 'settings.json')
-
-
-@atexit.register
+# Registered explicitly in InitializeContainer with the live provider. A bare
+# ``@atexit.register`` here fired a second time after the DI resource was torn down,
+# re-loading settings from disk just to write them back.
 def SaveSettings(settings_provider: Provider[AppSettings] = Provide[IContainer.settings].provider):
     settings = settings_provider()
-    json = settings.model_dump_json(indent=4)
-    output_file = _settings_output_path()
-    with open(output_file, 'w') as file:
-        file.write(json)
+    output_file = save_app_settings(settings)
 
     print(f"Saved settings to {output_file}")
 
@@ -380,9 +372,10 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
 
     print("Starting Pyre")
 
-    # StartProfilerCheck()
-
     nornir_shared.misc.SetupLogging(Level=logging.WARNING)
+    # NDJSON/.pstats under NORNIR_LOG_ROOT; cProfile only during registration jobs.
+    from pyre.phase_profile import ensure_configured
+    ensure_configured()
 
     pyre.state.set_current_stos_config(pyre.state.StosState(
         transform_controller=stos_transform_controller,

@@ -1878,6 +1878,12 @@ class TransformController:
             self._registration_apply_in_progress = False
         self.__OnAlignmentAppliedListeners.invoke(
             point_id, True, f"delta=(dy={dy:+.2f}, dx={dx:+.2f}) w={weight:.4f}")
+        # MovePoint runs under patch_live_tile_vertices, which suppresses OnChange.
+        # Deliver immediately so composite refills now; FireOnChangeEvent coalescing
+        # can wait until the ROI fade timer eases, which is the lag the user sees.
+        self._tile_mesh_cache.clear()
+        self._clear_composite_display_cache()
+        self.notify_views_now()
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""

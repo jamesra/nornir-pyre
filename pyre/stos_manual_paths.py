@@ -8,6 +8,7 @@ import os
 import re
 
 MANUAL_SUBDIR = "Manual"
+AUTOMATIC_SUBDIR = "Automatic"
 
 # Matches the first two integers in a filename (e.g. "0034-0035_grid.stos").
 _SECTION_PAIR_RE = re.compile(r"(\d+)\D+(\d+)")
@@ -25,6 +26,7 @@ class StosFileSource(str, Enum):
 
     auto = "auto"
     original = "original"
+    input = "input"
     manual = "manual"
 
     @classmethod
@@ -66,6 +68,11 @@ def manual_directory(stos_group_folder: str) -> str:
     return os.path.join(stos_group_folder, MANUAL_SUBDIR)
 
 
+def automatic_directory(stos_group_folder: str) -> str:
+    """Return ``{stos_group_folder}/Automatic``."""
+    return os.path.join(stos_group_folder, AUTOMATIC_SUBDIR)
+
+
 def ensure_manual_directory(stos_group_folder: str) -> str:
     """Create ``{stos_group_folder}/Manual`` if needed and return its path."""
     manual_dir = manual_directory(stos_group_folder)
@@ -79,6 +86,12 @@ def path_to_manual_transform(stos_group_folder: str, basename: str) -> str | Non
     return manual_path if os.path.isfile(manual_path) else None
 
 
+def path_to_input_transform(stos_group_folder: str, basename: str) -> str | None:
+    """Return the Automatic/ input transform path when the file exists."""
+    input_path = os.path.join(automatic_directory(stos_group_folder), basename)
+    return input_path if os.path.isfile(input_path) else None
+
+
 def resolve_default_load_path(auto_path: str | None, manual_path: str | None) -> str | None:
     """Prefer the manual override when present."""
     if manual_path and os.path.isfile(manual_path):
@@ -90,6 +103,8 @@ def resolve_load_path(
         auto_path: str | None,
         manual_path: str | None,
         source: StosFileSource,
+        *,
+        input_path: str | None = None,
 ) -> str | None:
     """Return the STOS path for *source* when the backing file exists."""
     if source == StosFileSource.auto:
@@ -97,6 +112,10 @@ def resolve_load_path(
     if source == StosFileSource.original:
         if auto_path and os.path.isfile(auto_path):
             return auto_path
+        return None
+    if source == StosFileSource.input:
+        if input_path and os.path.isfile(input_path):
+            return input_path
         return None
     if source == StosFileSource.manual:
         if manual_path and os.path.isfile(manual_path):
@@ -112,7 +131,7 @@ def resolve_stos_path_in_group(
         *,
         flat_manual: bool = False,
 ) -> str | None:
-    """Resolve auto/manual paths for *basename* under a browser folder."""
+    """Resolve output / Automatic input / Manual paths for *basename* under a browser folder."""
     if flat_manual:
         manual_path = os.path.join(stos_group_folder, basename)
         manual_path = manual_path if os.path.isfile(manual_path) else None
@@ -120,8 +139,9 @@ def resolve_stos_path_in_group(
 
     auto_path = os.path.join(stos_group_folder, basename)
     auto_path = auto_path if os.path.isfile(auto_path) else None
+    input_path = path_to_input_transform(stos_group_folder, basename)
     manual_path = path_to_manual_transform(stos_group_folder, basename)
-    return resolve_load_path(auto_path, manual_path, source)
+    return resolve_load_path(auto_path, manual_path, source, input_path=input_path)
 
 
 def resolve_stos_restore_path(
@@ -154,11 +174,17 @@ class StosBrowserRow:
     basename: str
     auto_path: str | None
     manual_path: str | None
+    input_path: str | None = None
     quality_score: float | None = None
 
     @property
     def has_manual_override(self) -> bool:
         return self.manual_path is not None and os.path.isfile(self.manual_path)
+
+    @property
+    def has_input_transform(self) -> bool:
+        """True when ``Automatic/<basename>`` exists for this row."""
+        return self.input_path is not None and os.path.isfile(self.input_path)
 
     @property
     def is_manual_only(self) -> bool:
@@ -173,7 +199,8 @@ class StosBrowserRow:
 
     def load_path_for_source(self, source: StosFileSource) -> str | None:
         """Return the path to load for *source*."""
-        return resolve_load_path(self.auto_path, self.manual_path, source)
+        return resolve_load_path(
+            self.auto_path, self.manual_path, source, input_path=self.input_path)
 
     def with_quality_score(self, score: float | None) -> StosBrowserRow:
         """Return a copy of this row with *score* attached."""
@@ -181,6 +208,7 @@ class StosBrowserRow:
             basename=self.basename,
             auto_path=self.auto_path,
             manual_path=self.manual_path,
+            input_path=self.input_path,
             quality_score=score,
         )
 
@@ -200,6 +228,24 @@ def _list_stos_files(folder: str) -> list[str]:
     ]
 
 
+def _upsert_browser_row(
+        by_name: dict[str, StosBrowserRow],
+        basename: str,
+        *,
+        auto_path: str | None = None,
+        input_path: str | None = None,
+        manual_path: str | None = None,
+) -> None:
+    """Merge one STOS path into *by_name*, preserving any paths already recorded."""
+    row = by_name.get(basename)
+    by_name[basename] = StosBrowserRow(
+        basename=basename,
+        auto_path=auto_path if auto_path is not None else (row.auto_path if row else None),
+        manual_path=manual_path if manual_path is not None else (row.manual_path if row else None),
+        input_path=input_path if input_path is not None else (row.input_path if row else None),
+    )
+
+
 def scan_stos_browser_rows(folder: str, mode: BrowseMode = BrowseMode.stos_group) -> list[StosBrowserRow]:
     """Build browser rows for *folder* according to *mode*."""
     if mode == BrowseMode.flat_manual:
@@ -210,24 +256,17 @@ def scan_stos_browser_rows(folder: str, mode: BrowseMode = BrowseMode.stos_group
     else:
         by_name: dict[str, StosBrowserRow] = {}
         for path in _list_stos_files(folder):
-            name = os.path.basename(path)
-            row = by_name.get(name)
-            if row is None:
-                by_name[name] = StosBrowserRow(basename=name, auto_path=path, manual_path=None)
-            else:
-                by_name[name] = StosBrowserRow(
-                    basename=name, auto_path=path, manual_path=row.manual_path)
+            _upsert_browser_row(by_name, os.path.basename(path), auto_path=path)
+
+        automatic_folder = automatic_directory(folder)
+        if os.path.isdir(automatic_folder):
+            for path in _list_stos_files(automatic_folder):
+                _upsert_browser_row(by_name, os.path.basename(path), input_path=path)
 
         manual_folder = manual_directory(folder)
         if os.path.isdir(manual_folder):
             for path in _list_stos_files(manual_folder):
-                name = os.path.basename(path)
-                row = by_name.get(name)
-                if row is None:
-                    by_name[name] = StosBrowserRow(basename=name, auto_path=None, manual_path=path)
-                else:
-                    by_name[name] = StosBrowserRow(
-                        basename=name, auto_path=row.auto_path, manual_path=path)
+                _upsert_browser_row(by_name, os.path.basename(path), manual_path=path)
 
         rows = list(by_name.values())
 

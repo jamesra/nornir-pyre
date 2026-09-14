@@ -323,7 +323,8 @@ class TextureShader(BaseShader):
             gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
             check_for_error()
 
-            vertex_array_object.bind()
+            if not vertex_array_object.bind():
+                return
 
             gl.glUniform1f(self.tween_location, float(tween))
             check_for_error()

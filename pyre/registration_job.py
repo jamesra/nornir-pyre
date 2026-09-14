@@ -150,7 +150,11 @@ class RegistrationJobRunner:
             qt_post_to_main(_apply)
 
         def _run() -> T:
-            return worker(cancel_event, progress_cb)
+            # cProfile only on this worker thread — not the Qt UI message loop.
+            from pyre.phase_profile import profile_registration_job
+
+            with profile_registration_job(title):
+                return worker(cancel_event, progress_cb)
 
         future = self._executor.submit(_run)
         future.add_done_callback(

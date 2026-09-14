@@ -3,12 +3,13 @@ from typing import NamedTuple, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QWidget, QHBoxLayout, QGridLayout, QLabel, QSpinBox, QPushButton, QComboBox,
-    QDoubleSpinBox, QGroupBox, QVBoxLayout,
+    QDoubleSpinBox, QGroupBox, QVBoxLayout, QCheckBox,
 )
 
 import nornir_imageregistration.settings
 import pyre.settings
 from pyre.settings.app import AppSettings, GridRefineDefaults
+from pyre.settings.persistence import save_app_settings
 
 
 class GridSettingsDialogResult(NamedTuple):
@@ -137,10 +138,11 @@ class ConvertToGridDialog(QDialog):
         if result is None:
             return None
         if app_settings is not None and result.mode == GridDivisionMode.SPACING:
-            app_settings.stos.grid_refine = GridRefineDefaults(
-                cell_size=result.spacing_y,
-                grid_spacing=result.spacing_y,
-            )
+            # Only the spacing fields belong to this dialog; keep the refine-only
+            # fields (iterations, angles) the user set in the refine dialog.
+            app_settings.stos.grid_refine = app_settings.stos.grid_refine.model_copy(
+                update={"cell_size": result.spacing_y, "grid_spacing": result.spacing_y})
+            save_app_settings(app_settings)
         return result
 
 
@@ -237,6 +239,24 @@ class RefineGridSettingsDialog(QDialog):
         self.angle_step_size_ctrl.setValue(defaults.angle_step_size)
         self.angle_step_size_ctrl.setSingleStep(0.5)
 
+        self.preview_pass_transforms_ctrl = QCheckBox(
+            "Preview pass transforms", panel)
+        self.preview_pass_transforms_ctrl.setChecked(bool(defaults.preview_pass_transforms))
+        self.preview_pass_transforms_ctrl.setToolTip(
+            "Update the view after each refine pass. Off by default because "
+            "resampling the mesh onto the STOS grid is expensive.")
+
+        self.gpu_preview_grid_convert_ctrl = QCheckBox(
+            "GPU preview grid convert", panel)
+        self.gpu_preview_grid_convert_ctrl.setChecked(bool(defaults.gpu_preview_grid_convert))
+        self.gpu_preview_grid_convert_ctrl.setToolTip(
+            "Use the GPU when converting pass previews to a grid. Has no effect "
+            "unless pass previews are on.")
+        self.gpu_preview_grid_convert_ctrl.setEnabled(
+            self.preview_pass_transforms_ctrl.isChecked())
+        self.preview_pass_transforms_ctrl.toggled.connect(
+            self.gpu_preview_grid_convert_ctrl.setEnabled)
+
         # Create the buttons
         self.ok_btn = QPushButton("OK", panel)
         self.ok_btn.clicked.connect(self.accept)
@@ -266,6 +286,10 @@ class RefineGridSettingsDialog(QDialog):
             grid_layout.addWidget(angle_step_size_label, next_row, 0)
             grid_layout.addWidget(self.angle_step_size_ctrl, next_row, 1)
             next_row += 1
+            grid_layout.addWidget(self.preview_pass_transforms_ctrl, next_row, 0, 1, 2)
+            next_row += 1
+            grid_layout.addWidget(self.gpu_preview_grid_convert_ctrl, next_row, 0, 1, 2)
+            next_row += 1
         else:
             iterations_label.hide()
             self.iterations_ctrl.hide()
@@ -273,6 +297,8 @@ class RefineGridSettingsDialog(QDialog):
             self.max_angle_ctrl.hide()
             angle_step_size_label.hide()
             self.angle_step_size_ctrl.hide()
+            self.preview_pass_transforms_ctrl.hide()
+            self.gpu_preview_grid_convert_ctrl.hide()
         grid_layout.addWidget(self.ok_btn, next_row, 0)
         grid_layout.addWidget(self.cancel_btn, next_row, 1)
 
@@ -304,6 +330,8 @@ class RefineGridSettingsDialog(QDialog):
             num_iterations=self.iterations,
             max_angle=self.max_angle,
             angle_step_size=self.angle_step_size,
+            preview_pass_transforms=self.preview_pass_transforms_ctrl.isChecked(),
+            gpu_preview_grid_convert=self.gpu_preview_grid_convert_ctrl.isChecked(),
         )
 
     @staticmethod
@@ -332,15 +360,18 @@ class RefineGridSettingsDialog(QDialog):
         if result == QDialog.DialogCode.Accepted:
             if app_settings is not None:
                 previous = app_settings.stos.grid_refine
-                app_settings.stos.grid_refine = GridRefineDefaults(
-                    cell_size=dlg.cell_size,
-                    grid_spacing=dlg.grid_spacing,
-                    num_iterations=(
+                app_settings.stos.grid_refine = previous.model_copy(update={
+                    "cell_size": dlg.cell_size,
+                    "grid_spacing": dlg.grid_spacing,
+                    "num_iterations": (
                         previous.num_iterations if fixed_num_iterations is not None
                         else dlg.iterations),
-                    max_angle=dlg.max_angle,
-                    angle_step_size=dlg.angle_step_size,
-                )
+                    "max_angle": dlg.max_angle,
+                    "angle_step_size": dlg.angle_step_size,
+                    "preview_pass_transforms": dlg.preview_pass_transforms_ctrl.isChecked(),
+                    "gpu_preview_grid_convert": dlg.gpu_preview_grid_convert_ctrl.isChecked(),
+                })
+                save_app_settings(app_settings)
             return GridSettingsDialogResult(
                 num_iterations=dlg.iterations,
                 cell_size=dlg.cell_size,

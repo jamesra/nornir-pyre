@@ -126,6 +126,13 @@ class TestRegistrationRoiFadeTracker(unittest.TestCase):
         self.assertEqual(set(tracker.started_at), {9})
         self.assertEqual(tracker.started_at[9], 11.0)
 
+    def test_apply_cancels_incomplete_fade(self) -> None:
+        """Clearing busy (registration apply) must drop the ROI, not wait out 5s."""
+        tracker = RegistrationRoiFadeTracker()
+        tracker.sync(frozenset({4}), 1.0)
+        tracker.sync(frozenset(), 2.0)
+        self.assertEqual(set(tracker.started_at), set())
+
 
 class TestPhaseCorrelationRoiOverlays(unittest.TestCase):
     def test_composite_only(self) -> None:

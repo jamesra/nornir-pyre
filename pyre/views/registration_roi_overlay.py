@@ -29,7 +29,11 @@ class RegistrationRoiOverlay:
 
 
 class RegistrationRoiFadeTracker:
-    """Record when each busy session ID first appeared so its box can fade out."""
+    """Record when each busy session ID first appeared so its box can fade out.
+
+    Applying a finished registration clears busy IDs and must cancel any
+    remaining fade so the warped image can update immediately.
+    """
 
     _started_at: dict[int, float]
 
@@ -42,7 +46,7 @@ class RegistrationRoiFadeTracker:
         return self._started_at
 
     def sync(self, busy_ids: frozenset[int], now: float) -> None:
-        """Keep start times for current busy IDs; assign ``now`` to newly busy IDs."""
+        """Keep start times for current busy IDs; drop IDs that are no longer busy."""
         for point_id in [pid for pid in self._started_at if pid not in busy_ids]:
             del self._started_at[point_id]
         for point_id in busy_ids:

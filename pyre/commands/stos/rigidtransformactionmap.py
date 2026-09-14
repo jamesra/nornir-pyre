@@ -6,6 +6,7 @@ from pyre.settings import AppSettings, UISettings
 from pyre.interfaces.managers.command_manager import IActionMap
 from pyre.interfaces.action import ControlPointAction, ControlPointActionResult
 from pyre.container import IContainer
+from pyre.commands.stos.actionmaphelpers import middle_click_create_action
 from PyQt6.QtCore import Qt
 
 
@@ -40,6 +41,10 @@ class RigidTransformActionMap(IActionMap):
         by a left click or SHIFT+right click respectively."""
 
         interactions = set()
+        middle_create = middle_click_create_action(event)
+        if middle_create is not None:
+            return middle_create
+
         actions = ControlPointAction.NONE
         if event.IsMouseInput | event.IsKeyboardInput:
             if event.IsOnlyShiftPressed:
@@ -60,6 +65,10 @@ class RigidTransformActionMap(IActionMap):
         :return: The action that can be taken for the input.  Only one flag should be set.
         """
         interactions = set()
+        middle_create = middle_click_create_action(event)
+        if middle_create is not None:
+            return middle_create
+
         if event.IsKeyboardInput and event.input == InputEvent.Press and event.keycode == Qt.Key.Key_Space:
             action = (
                 ControlPointAction.REFINE_RIGID_ANGLE_SCALE

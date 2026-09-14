@@ -36,6 +36,7 @@ from pyre.views.transformcontrollerview import (
     POINT_INSTANCE_BUSY,
     POINT_INSTANCE_IDLE,
     control_point_instance_states,
+    selected_blink_phase,
 )
 
 
@@ -306,6 +307,13 @@ class TestControlPointInstanceStates(unittest.TestCase):
         np.testing.assert_array_equal(even, np.array([[0.0], [0.0]], dtype=np.float32))
         np.testing.assert_array_equal(odd, np.array([[1.0], [1.0]], dtype=np.float32))
 
+    def test_selected_blink_phase_is_two_hertz(self) -> None:
+        self.assertEqual(selected_blink_phase(0.0), 0)
+        self.assertEqual(selected_blink_phase(0.24), 0)
+        self.assertEqual(selected_blink_phase(0.25), 1)
+        self.assertEqual(selected_blink_phase(0.49), 1)
+        self.assertEqual(selected_blink_phase(0.50), 0)
+
 
 class TestSessionPointIds(unittest.TestCase):
     def test_ids_match_indices_on_load(self) -> None:
@@ -367,6 +375,17 @@ class TestRegistrationApply(unittest.TestCase):
         after = np.asarray(controller.TargetPoints[0], dtype=np.float64)
         np.testing.assert_allclose(after, before + np.array([2.0, 3.0]))
         self.assertTrue(controller._registration_queue.is_idle)
+        self.assertFalse(controller.busy_point_ids)
+
+    def test_apply_notifies_views_immediately(self) -> None:
+        """Spacebar apply must refresh views at once; do not wait for ROI fade or RBF."""
+        controller = TransformController(_mesh(4))
+        notified: list[object] = []
+        controller.AddOnChangeEventListener(lambda c: notified.append(c))
+        controller.enqueue_point_registrations([0], align_fn=lambda **_: _record(2.0, 3.0))
+        self.assertTrue(notified)
+        self.assertFalse(controller.busy_point_ids)
+        self.assertFalse(controller.registration_apply_in_progress)
 
     @unittest.skipUnless(HasCupy(), "requires CuPy")
     def test_enqueue_accepts_cupy_fixed_point(self) -> None:

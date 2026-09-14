@@ -232,6 +232,13 @@ class ImageTransformView(IImageTransformView):
 
     def _invalidate_tile_meshes(self) -> None:
         """Drop tile mesh data so the next draw rebuilds visible tiles only."""
+        if self._tile_render_data:
+            try:
+                self._activate_context()
+            except Exception:
+                pass
+            for tile in self._tile_render_data.values():
+                tile.release()
         self._tile_render_data.clear()
         self._built_mesh_tiles.clear()
 
@@ -518,16 +525,19 @@ class ImageTransformView(IImageTransformView):
                         unused_grid_coords.remove(grid_coords)
 
             for grid_coord in unused_grid_coords:
-                del self._tile_render_data[grid_coord]
+                unused = self._tile_render_data.pop(grid_coord, None)
+                if unused is not None:
+                    unused.release()
 
         except gl.GLError as e:
             print(f"GL error updating tile buffers (will rebuild on next paint): {e}")
             if self._repaint_callback is not None:
                 qt_post_to_main(self._repaint_callback)
 
-    def draw_lines(self, draw_in_fixed_space: bool):
+    def draw_lines(self, draw_in_fixed_space: bool, view_proj: NDArray[np.floating] | None = None):
         """
         :param bool draw_in_fixed_space: True if lines should be drawn in fixed space.  Otherwise draw in warped space
+        :param view_proj: Model-view-projection matrix for the shader.
         """
         if self.transform is None:
             return
@@ -548,7 +558,7 @@ class ImageTransformView(IImageTransformView):
             triangles = self.transform.target_space_trianglulation
 
         if verts is not None and triangles is not None:
-            pyre.views.DrawTriangles(verts, triangles)
+            pyre.views.DrawTriangles(verts, triangles, view_proj)
 
     @classmethod
     def _create_tile_globjects(cls) -> TileGLObjects:
@@ -596,9 +606,12 @@ class ImageTransformView(IImageTransformView):
         :param view_proj:
         :param space:
         :param client_size:
-        :param bounding_box: Size of the client area in pixels. (height, width)
-        :param default_fbo: Ignored for single-image views; used by composite view for overlay target.
-        :return:
+        :param bounding_box:
+        :param default_fbo:
+        :param overlay_viewport_size:
+        :param show_mesh_lines: When True, draw triangulation mesh edges.
+        :param rigid_composite_source_align: When True, align source image rigidly for composite.
+        :param view_type: The ViewType of the panel.
         """
 
         if self._image_viewmodel is None:
@@ -760,6 +773,6 @@ class ImageTransformView(IImageTransformView):
 
         if show_mesh_lines:
             try:
-                self.draw_lines(draw_in_fixed_space=(space == Space.Target))
+                self.draw_lines(draw_in_fixed_space=(space == Space.Target), view_proj=view_proj)
             except Exception as e:
                 warnings.warn(f"draw_lines skipped: {e}")
