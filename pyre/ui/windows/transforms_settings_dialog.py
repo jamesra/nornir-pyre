@@ -138,7 +138,7 @@ class TransformsSettingsDialog(QDialog):
 
         form.addRow("Cell size", self._cell_size)
         form.addRow("Grid spacing", self._grid_spacing)
-        form.addRow("# of iterations", self._num_iterations)
+        form.addRow("Maximum passes", self._num_iterations)
         form.addRow("Max angle (± degrees)", self._grid_max_angle)
         form.addRow("Angle step (degrees)", self._grid_angle_step)
         form.addRow("Preview pass transforms", self._preview_pass_transforms)

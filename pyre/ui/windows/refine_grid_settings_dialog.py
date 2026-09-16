@@ -209,7 +209,7 @@ class RefineGridSettingsDialog(QDialog):
         title = QLabel(title_text, panel)
         cell_size_label = QLabel("Cell Size", panel)
         grid_spacing_label = QLabel("Grid Spacing", panel)
-        iterations_label = QLabel("# of Iterations", panel)
+        iterations_label = QLabel("Maximum passes", panel)
         max_angle_label = QLabel("Max Angle, +/- degrees from 0", panel)
         angle_step_size_label = QLabel("Angle step size in degrees, 0 is always included", panel)
 

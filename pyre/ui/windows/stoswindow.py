@@ -909,9 +909,9 @@ class StosWindow(PyreWindowBase):
     ) -> None:
         """Submit one CPU RefineTransform job using *user_settings* from the dialog.
 
-        ``num_iterations`` is the planned pass count of a single refine, not a
-        loop of one-pass Shift+Space jobs. Locks, ring pose, residual
-        translation, and cell-size adaptation only persist inside that call.
+        ``num_iterations`` is the maximum pass count of a single refine, not a
+        loop of one-pass Shift+Space jobs. Locks, trusted tiers, ring pose, and
+        cell-size adaptation only persist inside that call.
         Pass previews (``report_pass_transform`` → grid convert → UI) are off
         unless ``grid_refine.preview_pass_transforms`` is enabled.
         """

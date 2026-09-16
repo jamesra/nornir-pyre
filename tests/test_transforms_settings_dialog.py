@@ -6,7 +6,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtWidgets import QApplication, QDialog, QLabel
 
 from nornir_imageregistration.settings import SliceToSliceMethod
 from nornir_imageregistration.settings.stos_brute import StosBruteSettings
@@ -110,6 +110,21 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
+
+    def test_grid_refine_dialogs_label_iterations_as_maximum_passes(self) -> None:
+        settings = AppSettings()
+        refine_dialog = RefineGridSettingsDialog(
+            defaults=settings.stos.grid_refine)
+        transforms_dialog = TransformsSettingsDialog(settings)
+
+        self.assertIn(
+            "Maximum passes",
+            {label.text() for label in refine_dialog.findChildren(QLabel)},
+        )
+        self.assertIn(
+            "Maximum passes",
+            {label.text() for label in transforms_dialog.findChildren(QLabel)},
+        )
 
     def test_seeds_from_app_settings_and_writes_back(self) -> None:
         settings = AppSettings()

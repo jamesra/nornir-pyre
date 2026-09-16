@@ -150,14 +150,17 @@ class TestPyreGridRefineHost(unittest.TestCase):
         rigid = nornir_imageregistration.transforms.CenteredSimilarity2DTransform(
             (0.0, 0.0), (32.0, 32.0), 0.0)
         previews: list[object] = []
+        statuses: list[str] = []
 
         def _fake_refine(transform, settings=None, progress_callback=None, **kwargs):
             if progress_callback is not None:
-                progress_callback(1, 2, "pass", preview=mesh_result)
+                progress_callback(
+                    1, 2, "Refine pass 1/2 (todo=7)", preview=mesh_result)
             return mesh_result
 
         def _progress(current, total, status, preview=None, **kwargs):
             previews.append(preview)
+            statuses.append(status)
 
         with create_pyre_grid_refinement_settings(
                 source, target, num_iterations=1, grid_spacing=32, cell_size=32,
@@ -174,6 +177,7 @@ class TestPyreGridRefineHost(unittest.TestCase):
                         rigid, settings, progress_callback=_progress, save_plots=False)
         self.assertEqual(1, convert.call_count)
         self.assertEqual(previews, [None])
+        self.assertEqual(statuses, ["Refine pass 1/2 (todo=7)"])
         convert.assert_called_once()
 
     def test_preview_convert_runs_when_flag_on(self) -> None:

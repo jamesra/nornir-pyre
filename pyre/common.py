@@ -474,7 +474,8 @@ def compute_grid_refine_transform(
     Forwards *progress_callback* so ``RefineTransform`` can report pass progress.
     When *preview_pass_transforms* is True, each pass snapshot is converted to a
     host ``Grid`` (optionally via GPU) so Pyre can update the view. The final
-    result is always converted. Planned pass count is ``settings.num_iterations``.
+    result is always converted. ``settings.num_iterations`` caps the pass count;
+    trusted-mesh convergence may stop the refine earlier.
     """
     with settings:
         def _grid_preview_callback(current, total, status, preview=None, **kwargs):
