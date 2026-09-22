@@ -10,8 +10,8 @@ framebuffer and shader_base.
 from __future__ import annotations
 
 import io
+import logging
 import unittest
-from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from pyre.gl_engine import gl_buffer as gl_buffer_module
@@ -23,20 +23,36 @@ from pyre.gl_engine.shaders import shader_base as shader_base_module
 from pyre.gl_engine.shaders.shader_base import FragmentShader, VertexShader
 
 
+def _capture_teardown_log(fn) -> str:
+    """Collect helper teardown warnings; they go to logging, not stdout."""
+    buffer = io.StringIO()
+    handler = logging.StreamHandler(buffer)
+    log = logging.getLogger(helpers_module.__name__)
+    old_level = log.level
+    log.addHandler(handler)
+    log.setLevel(logging.WARNING)
+    try:
+        fn()
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(old_level)
+    return buffer.getvalue()
+
+
 class _CapturedTeardown:
-    """Runs a callable with a chosen context state, capturing stdout."""
+    """Runs a callable with a chosen context state, capturing teardown warnings."""
 
     def __init__(self, context_current: bool) -> None:
         self._current = object() if context_current else None
         self.output = ''
 
     def run(self, fn) -> None:
-        buffer = io.StringIO()
-        with patch.object(helpers_module.QOpenGLContext, 'currentContext',
-                          staticmethod(lambda: self._current)):
-            with redirect_stdout(buffer):
+        def _inner() -> None:
+            with patch.object(helpers_module.QOpenGLContext, 'currentContext',
+                              staticmethod(lambda: self._current)):
                 fn()
-        self.output = buffer.getvalue()
+
+        self.output = _capture_teardown_log(_inner)
 
 
 class TestTheTeardownHelper(unittest.TestCase):
@@ -104,14 +120,15 @@ class _TeardownCase(unittest.TestCase):
     module = helpers_module
 
     def _run_del(self, obj, fake_gl, module, context_current: bool) -> str:
-        buffer = io.StringIO()
         current = object() if context_current else None
-        with patch.object(module, 'gl', fake_gl), \
-                patch.object(helpers_module.QOpenGLContext, 'currentContext',
-                             staticmethod(lambda: current)):
-            with redirect_stdout(buffer):
+
+        def _inner() -> None:
+            with patch.object(module, 'gl', fake_gl), \
+                    patch.object(helpers_module.QOpenGLContext, 'currentContext',
+                                 staticmethod(lambda: current)):
                 type(obj).__del__(obj)
-        return buffer.getvalue()
+
+        return _capture_teardown_log(_inner)
 
 
 class TestBufferTeardown(_TeardownCase):
@@ -194,13 +211,14 @@ class TestFramebufferTeardown(unittest.TestCase):
         obj._fbo_texture = 10
         freed = []
         obj.free_fbo = lambda: freed.append('called')  # type: ignore[method-assign]
-        buffer = io.StringIO()
-        with patch.object(helpers_module.QOpenGLContext, 'currentContext',
-                          staticmethod(lambda: None)):
-            with redirect_stdout(buffer):
+        def _inner() -> None:
+            with patch.object(helpers_module.QOpenGLContext, 'currentContext',
+                              staticmethod(lambda: None)):
                 type(obj).__del__(obj)
+
+        out = _capture_teardown_log(_inner)
         self.assertEqual([], freed, 'free_fbo raises through check_for_error without a context')
-        self.assertIn('framebuffer 9', buffer.getvalue())
+        self.assertIn('framebuffer 9', out)
 
     def test_free_runs_when_a_context_is_current(self) -> None:
         obj = framebuffer_module.FrameBuffer.__new__(framebuffer_module.FrameBuffer)
@@ -222,12 +240,14 @@ class TestFramebufferTeardown(unittest.TestCase):
             raise RuntimeError('OpenGL error after glDeleteTextures')
 
         obj.free_fbo = boom  # type: ignore[method-assign]
-        buffer = io.StringIO()
-        with patch.object(helpers_module.QOpenGLContext, 'currentContext',
-                          staticmethod(lambda: object())):
-            with redirect_stdout(buffer):
+
+        def _inner() -> None:
+            with patch.object(helpers_module.QOpenGLContext, 'currentContext',
+                              staticmethod(lambda: object())):
                 type(obj).__del__(obj)
-        self.assertIn('framebuffer 9', buffer.getvalue())
+
+        out = _capture_teardown_log(_inner)
+        self.assertIn('framebuffer 9', out)
 
 
 class TestTheOldShapesAreGone(unittest.TestCase):

@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+from PyQt6.QtWidgets import QApplication
 
 from pyre.commands.stos.actionmaphelpers import (
     drag_translate_interactions,
@@ -31,6 +32,12 @@ def _mesh() -> MeshWithRBFFallback:
     return MeshWithRBFFallback(points)
 
 
+def _flush_coalesced_change() -> None:
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+
+
 class TestControlPointPick(unittest.TestCase):
   """Nearest-point pick and drag selection retention."""
 
@@ -42,7 +49,7 @@ class TestControlPointPick(unittest.TestCase):
   def test_pick_radius_matches_glyph_half_extent(self) -> None:
       cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
       inside = np.array([100.0, 204.0])
-      outside = np.array([100.0, 206.0])
+      outside = np.array([100.0, 211.0])
       self.assertEqual(find_control_point_interactions(cmap, inside, 10.0, 1.0), {0})
       self.assertEqual(find_control_point_interactions(cmap, outside, 10.0, 1.0), set())
 
@@ -58,6 +65,7 @@ class TestControlPointPick(unittest.TestCase):
       original = np.array(controller.TargetPoints[0], copy=True)
       self.assertEqual(cmap.find_nearest_within(original, 1.0), {0})
       controller.MovePoint(0, ImageDX=50.0, ImageDY=40.0, space=Space.Target)
+      _flush_coalesced_change()
       self.assertEqual(cmap.find_nearest_within(original, 1.0), set())
       moved = np.array(controller.TargetPoints[0], copy=True)
       self.assertEqual(cmap.find_nearest_within(moved, 1.0), {0})
@@ -82,7 +90,7 @@ class TestControlPointPick(unittest.TestCase):
               controller.end_interactive_edit()
 
   def test_kdtree_rebuilds_on_pick_after_interactive_drag(self) -> None:
-      """After mouse-up, the next pick rebuilds the tree without waiting for remesh/RBF."""
+      """After mouse-up, OnChange rebuilds the tree so the next pick uses live points."""
       controller = TransformController(_mesh())
       cmap = ControlPointMap(controller, Space.Target)
       original = np.array(controller.TargetPoints[0], copy=True)
@@ -93,7 +101,6 @@ class TestControlPointPick(unittest.TestCase):
       finally:
           if controller.interactive_edit_in_progress:
               controller.end_interactive_edit()
-      self.assertTrue(cmap._kdtree_stale)
       moved = np.array(controller.TargetPoints[0], copy=True)
       self.assertEqual(cmap.find_nearest_within(moved, 1.0), {0})
       self.assertFalse(cmap._kdtree_stale)

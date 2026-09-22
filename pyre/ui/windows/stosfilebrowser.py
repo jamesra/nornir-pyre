@@ -7,6 +7,8 @@
   (any table column) or Enter.
 - Manual-only rows (manual present, automatic missing) use a darker yellow list color.
 - **File Source** selector (Auto / Original / Input / Manual) controls which variant loads on open and navigation.
+- Selecting a row re-stats output / Automatic / Manual files so File Source items match disk.
+- Double-click (or Enter) re-checks those paths again, then loads; a missing chosen file shows the path that was looked for.
 - When the selected source cannot resolve a path, load falls back to Auto (manual preferred).
 - Right-click offers Open Input Transform (``Automatic/``) vs Open Manual Override, and copy the resolved
   file path to the clipboard.
@@ -23,6 +25,8 @@
   stale scores are computed in the background. A histogram under the table marks the
   selected score. ZNCC text is tinted by empirical percentile in the folder (magenta low,
   soft white mid, green high); Manual gold styling is unchanged.
+- The Modified column uses ISO ``yy-mm-dd`` for older files, or 24-hour ``HH:MM`` when
+  the File Source STOS was last written today.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 
 from dependency_injector.wiring import inject, Provide
 from PyQt6.QtWidgets import (
@@ -54,8 +59,10 @@ from pyre.stos_manual_paths import (
     BrowseMode,
     StosBrowserRow,
     StosFileSource,
+    expected_stos_path_for_source,
     is_manual_input_directory,
     parent_stos_group_folder,
+    refresh_browser_row,
     scan_stos_browser_rows,
 )
 from pyre.stos_quality_browser import (
@@ -128,6 +135,20 @@ class StosBrowserListDeleteFilter(QObject):
 
 _BROWSER_MIN_LAYOUT_WIDTH = 180
 _BROWSER_LAYOUT_PADDING = 44  # list margins + scrollbar reserve
+_COL_NAME = 0
+_COL_QUALITY = 1
+_COL_MODIFIED = 2
+
+
+def format_stos_browser_mtime(mtime: float | None, *, now: datetime | None = None) -> str:
+    """Format a filesystem mtime: 24-hour ``HH:MM`` if today, else ISO ``yy-mm-dd``."""
+    if mtime is None:
+        return "\u2014"
+    when = datetime.fromtimestamp(mtime)
+    current = now if now is not None else datetime.now()
+    if when.date() == current.date():
+        return when.strftime("%H:%M")
+    return when.strftime("%y-%m-%d")
 
 
 class StosFileBrowserWindow(QMainWindow):
@@ -177,7 +198,7 @@ class StosFileBrowserWindow(QMainWindow):
         super().__init__(parent)
         self._settings = settings
         self.setWindowTitle("Stos Directory")
-        self.resize(380, 700)
+        self.resize(460, 700)
         self._rows = []
         self._current_index = -1
         self._browse_mode = BrowseMode.stos_group
@@ -246,15 +267,16 @@ class StosFileBrowserWindow(QMainWindow):
         self._file_source_selector.source_changed.connect(self._on_file_source_changed)
         layout.addWidget(self._file_source_selector)
 
-        self._list_widget = QTableWidget(0, 2)
-        self._list_widget.setHorizontalHeaderLabels(['Transform', 'Quality'])
+        self._list_widget = QTableWidget(0, 3)
+        self._list_widget.setHorizontalHeaderLabels(['Transform', 'Quality', 'Modified'])
         self._list_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._list_widget.verticalHeader().setVisible(False)
         header = self._list_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_COL_MODIFIED, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_COL_QUALITY, QHeaderView.ResizeMode.ResizeToContents)
         # Enter / platform "activate" (itemActivated) plus explicit double-click.
         # itemActivated alone is not reliable for QTableWidget double-click on Windows
         # when SH_ItemView_ActivateItemOnSingleClick is false.
@@ -473,7 +495,7 @@ class StosFileBrowserWindow(QMainWindow):
             if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
                 label = f"{row.basename} [Manual]"
             max_text = max(max_text, metrics.horizontalAdvance(label))
-        return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING + 64)
+        return max(_BROWSER_MIN_LAYOUT_WIDTH, max_text + _BROWSER_LAYOUT_PADDING + 140)
 
     def _set_current_row(self, index: int) -> None:
         """Select table row *index* without moving it if it is already visible."""
@@ -513,6 +535,8 @@ class StosFileBrowserWindow(QMainWindow):
             if color is not None:
                 name_item.setForeground(color)
             display_score = row.quality_score if scores_ready else None
+            mtime_item = self._modified_item_for_row(
+                row, color=color, tip=self._row_tooltip(row, scored_values if scores_ready else None))
             score_item = QTableWidgetItem(format_quality_score(display_score))
             score_item.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -524,8 +548,9 @@ class StosFileBrowserWindow(QMainWindow):
                 rgb = quality_score_rgb(float(display_score), scored_values)
                 if rgb is not None:
                     score_item.setForeground(QColor.fromRgbF(rgb[0], rgb[1], rgb[2]))
-            self._list_widget.setItem(index, 0, name_item)
-            self._list_widget.setItem(index, 1, score_item)
+            self._list_widget.setItem(index, _COL_NAME, name_item)
+            self._list_widget.setItem(index, _COL_MODIFIED, mtime_item)
+            self._list_widget.setItem(index, _COL_QUALITY, score_item)
 
         if 0 <= self._current_index < len(rows):
             self._set_current_row(self._current_index)
@@ -537,16 +562,19 @@ class StosFileBrowserWindow(QMainWindow):
         """Update ZNCC cells and histogram from ``_rows`` without rebuilding names."""
         scored_values = scores_from_rows(self._rows)
         for index, row in enumerate(self._rows):
-            score_item = self._list_widget.item(index, 1)
-            name_item = self._list_widget.item(index, 0)
+            score_item = self._list_widget.item(index, _COL_QUALITY)
+            name_item = self._list_widget.item(index, _COL_NAME)
+            mtime_item = self._list_widget.item(index, _COL_MODIFIED)
             if score_item is None:
                 continue
             score_item.setText(format_quality_score(row.quality_score))
             tip = self._row_tooltip(row, scored_values)
+            color = self._row_list_color(row)
             score_item.setToolTip(tip)
             if name_item is not None:
                 name_item.setToolTip(tip)
-            color = self._row_list_color(row)
+            if mtime_item is not None:
+                self._apply_modified_item(mtime_item, row, color=color, tip=tip)
             if color is not None:
                 score_item.setForeground(color)
             elif row.quality_score is not None:
@@ -785,9 +813,9 @@ class StosFileBrowserWindow(QMainWindow):
             has_auto=has_auto, has_manual=has_manual, has_input=has_input)
         current = self._file_source_selector.source()
         if row.load_path_for_source(current) is None:
-            fallback = StosFileSource.auto
-            self._file_source_selector.set_source(fallback)
-            self._settings.stos.stos_file_source = fallback.value
+            current = StosFileSource.auto
+            self._file_source_selector.set_source(current)
+        self._settings.stos.stos_file_source = current.value
 
     def _on_table_selection_changed(self) -> None:
         if not self._list_widget.selectedIndexes():
@@ -795,6 +823,8 @@ class StosFileBrowserWindow(QMainWindow):
         else:
             index = self._list_widget.currentRow()
             self._current_index = index if index >= 0 else -1
+            if self._current_index >= 0:
+                self._refresh_row_from_disk(self._current_index)
         self._update_source_selector_for_current_row()
         self._refresh_quality_histogram()
 
@@ -803,6 +833,7 @@ class StosFileBrowserWindow(QMainWindow):
         if self._folder:
             # Re-attach scores for the newly preferred Auto/Manual path off-thread.
             self._queue_quality_attach_only()
+        self._refresh_mtime_column()
         if self._current_index >= 0:
             self._load_stos_at_index(self._current_index)
 
@@ -815,7 +846,12 @@ class StosFileBrowserWindow(QMainWindow):
             StosFileSource.input: "Input (Automatic folder)",
             StosFileSource.manual: "Manual",
         }.get(source, source.value)
-        return f"No {label} STOS file exists for {row.basename}."
+        message = f"No {label} STOS file exists for {row.basename}."
+        if self._folder:
+            expected = expected_stos_path_for_source(
+                self._folder, row.basename, source, mode=self._browse_mode)
+            message += f"\n\nLooked for:\n{os.path.normpath(expected)}"
+        return message
 
     def _resolve_load_path_for_row(
             self, row: StosBrowserRow, source: StosFileSource) -> tuple[str | None, StosFileSource]:
@@ -828,6 +864,60 @@ class StosFileBrowserWindow(QMainWindow):
             if auto_path is not None:
                 return auto_path, StosFileSource.auto
         return None, source
+
+    def _row_mtime(self, row: StosBrowserRow) -> float | None:
+        """Return mtime of the STOS that File Source would load for *row*, if it exists."""
+        load_path, _ = self._resolve_load_path_for_row(row, self._source_for_load())
+        if load_path is None:
+            return None
+        try:
+            return os.path.getmtime(load_path)
+        except OSError:
+            return None
+
+    def _modified_tooltip(self, mtime: float | None, base_tip: str) -> str:
+        if mtime is None:
+            return base_tip
+        when = datetime.fromtimestamp(mtime)
+        return f"Modified: {when.strftime('%Y-%m-%d %H:%M')}\n{base_tip}"
+
+    def _apply_modified_item(
+            self,
+            item: QTableWidgetItem,
+            row: StosBrowserRow,
+            *,
+            color: QColor | None,
+            tip: str,
+    ) -> None:
+        mtime = self._row_mtime(row)
+        item.setText(format_stos_browser_mtime(mtime))
+        item.setToolTip(self._modified_tooltip(mtime, tip))
+        if color is not None:
+            item.setForeground(color)
+
+    def _modified_item_for_row(
+            self,
+            row: StosBrowserRow,
+            *,
+            color: QColor | None,
+            tip: str,
+    ) -> QTableWidgetItem:
+        item = QTableWidgetItem()
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self._apply_modified_item(item, row, color=color, tip=tip)
+        return item
+
+    def _refresh_mtime_column(self) -> None:
+        """Update Modified cells for the current File Source without rebuilding names."""
+        scored_values = scores_from_rows(self._rows)
+        for index, row in enumerate(self._rows):
+            item = self._list_widget.item(index, _COL_MODIFIED)
+            if item is None:
+                continue
+            tip = self._row_tooltip(row, scored_values)
+            self._apply_modified_item(
+                item, row, color=self._row_list_color(row), tip=tip)
 
     @staticmethod
     def _row_tooltip(row: StosBrowserRow, scored_values: list[float] | None = None) -> str:
@@ -853,6 +943,42 @@ class StosFileBrowserWindow(QMainWindow):
         del column
         self._load_stos_at_index(row)
 
+    def _refresh_row_from_disk(self, index: int) -> StosBrowserRow | None:
+        """Re-stat output / Automatic / Manual files for list row *index*."""
+        if index < 0 or index >= len(self._rows):
+            return None
+        refreshed = refresh_browser_row(self._folder, self._rows[index], self._browse_mode)
+        self._rows[index] = refreshed
+        self._sync_row_display(index)
+        return refreshed
+
+    def _sync_row_display(self, index: int) -> None:
+        """Refresh list-row labels/tooltips and File Source items from the current snapshot."""
+        if index < 0 or index >= len(self._rows):
+            return
+        row = self._rows[index]
+        name_item = self._list_widget.item(index, _COL_NAME)
+        mtime_item = self._list_widget.item(index, _COL_MODIFIED)
+        score_item = self._list_widget.item(index, _COL_QUALITY)
+        label = row.basename
+        if self._browse_mode == BrowseMode.stos_group and row.has_manual_override:
+            label = f"{row.basename} [Manual]"
+        scored_values = scores_from_rows(self._rows)
+        tip = self._row_tooltip(row, scored_values)
+        color = self._row_list_color(row)
+        if name_item is not None:
+            name_item.setToolTip(tip)
+            if name_item.text() != label:
+                name_item.setText(label)
+                if color is not None:
+                    name_item.setForeground(QColor(color.name()))
+        if score_item is not None:
+            score_item.setToolTip(tip)
+        if mtime_item is not None:
+            self._apply_modified_item(mtime_item, row, color=color, tip=tip)
+        if index == self._current_index:
+            self._update_source_selector_for_current_row()
+
     def _on_context_menu(self, position) -> None:
         item = self._list_widget.itemAt(position)
         if item is None:
@@ -860,7 +986,9 @@ class StosFileBrowserWindow(QMainWindow):
         index = item.row()
         if index < 0 or index >= len(self._rows):
             return
-        row = self._rows[index]
+        row = self._refresh_row_from_disk(index)
+        if row is None:
+            return
         menu = QMenu(self)
         open_action = menu.addAction("Open")
         open_action.triggered.connect(lambda: self._load_stos_at_index(index))
@@ -899,7 +1027,9 @@ class StosFileBrowserWindow(QMainWindow):
     def _load_stos_at_index(self, index: int) -> None:
         if index < 0 or index >= len(self._rows):
             return
-        row = self._rows[index]
+        row = self._refresh_row_from_disk(index)
+        if row is None:
+            return
         source = self._source_for_load()
         load_path, used_source = self._resolve_load_path_for_row(row, source)
         if load_path is None:
@@ -910,6 +1040,16 @@ class StosFileBrowserWindow(QMainWindow):
             self._settings.stos.stos_file_source = used_source.value
         self._load_stos_path(load_path, index, browser_basename=row.basename)
 
+    def _cancel_in_flight_registrations(self) -> None:
+        """Stop Spacebar/refine work as soon as the user opens a different STOS."""
+        import pyre.state
+        config = pyre.state.get_current_stos_config()
+        if config is None:
+            return
+        controller = getattr(config, "TransformController", None)
+        if controller is not None:
+            controller.cancel_in_flight_registrations()
+
     def _load_stos_path(
             self,
             filepath: str | None,
@@ -919,6 +1059,7 @@ class StosFileBrowserWindow(QMainWindow):
     ) -> None:
         if not filepath:
             return
+        self._cancel_in_flight_registrations()
         self._load_generation += 1
         generation = self._load_generation
         self._current_index = index

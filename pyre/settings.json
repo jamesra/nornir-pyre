@@ -7,94 +7,102 @@
             "min": 0.00390625
         },
         "control_point_search_radius": 10.0,
+        "show_control_point_ids": false,
+        "show_mesh_lines": true,
         "image_search_paths": [],
         "replacement_paths": {},
         "stos_browser_folder": "Y:/Volumes/RC2/TEM/Grid16",
         "window_geometry": {
             "Source": {
-                "x": -1,
-                "y": 2,
-                "width": 1284,
-                "height": 726,
+                "x": 542,
+                "y": 0,
+                "width": 1020,
+                "height": 696,
                 "visible": true
             },
             "Target": {
-                "x": 317,
-                "y": 2,
-                "width": 1284,
-                "height": 726,
+                "x": 1540,
+                "y": 0,
+                "width": 1020,
+                "height": 696,
                 "visible": true
             },
             "Composite": {
-                "x": 1,
-                "y": 291,
-                "width": 1597,
-                "height": 726,
+                "x": 544,
+                "y": 696,
+                "width": 2016,
+                "height": 696,
                 "visible": true
             },
             "StosBrowser": {
-                "x": 77,
+                "x": 0,
                 "y": 0,
-                "width": 503,
-                "height": 1017,
+                "width": 542,
+                "height": 1392,
                 "visible": false
             }
         },
         "source_contrast": {
-            "min": 80.3,
-            "max": 184.1,
+            "min": 34.7,
+            "max": 189.0,
             "gamma": 1.0
         },
         "target_contrast": {
-            "min": 59.4,
-            "max": 202.0,
+            "min": 48.7,
+            "max": 194.1,
             "gamma": 1.0
         }
     },
     "stos": {
         "stos_dirname": null,
-        "stos_filename": "Y:/Volumes/RC2/TEM/Grid16\\Manual\\784-782_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
+        "stos_filename": "Y:/Volumes/RC2/TEM/Grid16\\Manual\\66-67_ctrl-TEM_Leveled_map-TEM_Leveled.stos",
         "grid_registration": {
             "alignment_area": 256,
             "angle_search_range": {
                 "max_angle": 7.5,
                 "angle_step_size": 2.5
-            }
+            },
+            "estimate_angle": false
         },
         "brute_registration": {
             "angles": null,
-            "min_overlap": 0.35,
+            "min_overlap": 0.75,
             "source_image_scale_factors": null,
-            "larget_dimension": 818,
+            "larget_dimension": 1024,
             "try_flipped": true,
             "estimated_scale_hint": null,
-            "initial_scale_hint": null
+            "initial_scale_hint": null,
+            "search_scale": true
         },
         "point_registration": {
-            "alignment_area": 512,
+            "alignment_area": 256,
             "angle_search_range": {
                 "max_angle": 0.0,
-                "angle_step_size": 2.5
-            }
+                "angle_step_size": 1.0
+            },
+            "estimate_angle": false
         },
         "grid_refine": {
-            "cell_size": 512,
-            "grid_spacing": 384,
-            "num_iterations": 5,
+            "cell_size": 256,
+            "grid_spacing": 128,
+            "num_iterations": 3,
             "max_angle": 0.0,
-            "angle_step_size": 2.5
+            "angle_step_size": 3.0,
+            "preview_pass_transforms": false,
+            "gpu_preview_grid_convert": true,
+            "masked_relax_min_unmasked": 0.25
         },
         "source_image": {
-            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0784\\TEM\\Leveled\\Images\\016\\0784_TEM_Leveled.png",
-            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0784\\TEM\\Mask\\Images\\016\\0784_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0066\\TEM\\Leveled\\Images\\016\\0066_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0066\\TEM\\Mask\\Images\\016\\0066_TEM_Mask.png"
         },
         "target_image": {
-            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0782\\TEM\\Leveled\\Images\\016\\0782_TEM_Leveled.png",
-            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0782\\TEM\\Mask\\Images\\016\\0782_TEM_Mask.png"
+            "image_fullpath": "Y:\\Volumes\\RC2\\TEM\\0067\\TEM\\Leveled\\Images\\016\\0067_TEM_Leveled.png",
+            "mask_fullpath": "Y:\\Volumes\\RC2\\TEM\\0067\\TEM\\Mask\\Images\\016\\0067_TEM_Mask.png"
         },
         "stos_opened_from_browser_folder": "Y:/Volumes/RC2/TEM/Grid16",
         "stos_browser_flat_manual": false,
         "stos_file_source": "auto",
-        "stos_browser_basename": "784-782_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
+        "stos_browser_basename": "66-67_ctrl-TEM_Leveled_map-TEM_Leveled.stos"
     }
 }

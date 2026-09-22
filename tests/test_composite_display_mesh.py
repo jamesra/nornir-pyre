@@ -58,6 +58,8 @@ class TestCompositeDisplayMesh(unittest.TestCase):
 
     def setUp(self) -> None:
         self.controller = TransformController(_mesh())
+        # Tests exercise the mapped lookat, not the prewarm-freeze fallback.
+        self.controller._rbf_prewarm_ready = True
         self.camera = MagicMock()
         self.camera.lookat = np.array([20.0, 30.0], dtype=np.float64)
 
@@ -264,6 +266,7 @@ class TestCompositeRegistrationCameraRebase(unittest.TestCase):
 
     def test_clear_cache_stashes_display_for_panel_rebase(self) -> None:
         controller = TransformController(_mesh())
+        controller._rbf_prewarm_ready = True
         camera = _TestCamera(np.array([20.0, 30.0], dtype=np.float64))
         display_before = display_lookat_for_composite(camera, controller)
         self.assertIsNotNone(controller._cached_composite_display_lookat)

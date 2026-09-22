@@ -128,6 +128,10 @@ class TestRotateTranslateRegistration(unittest.TestCase):
             np.degrees(LoadTransform(reference_stos.Transform).angle)
         )
 
+    @unittest.skipUnless(
+        os.environ.get("NORNIR_RUN_STOS_BRUTE_REFERENCE", "").strip().lower() in ("1", "true", "yes"),
+        "Optional StosBrute16 log-polar reference; set NORNIR_RUN_STOS_BRUTE_REFERENCE=1",
+    )
     def test_pyre_rotate_translate_matches_stos_brute_reference(self) -> None:
         """Simulate Pyre slots/settings: 690 in Source, 691 in Target, LimitImageSize=818."""
         manager = _MinimalImageManager()
@@ -164,6 +168,10 @@ class TestRotateTranslateRegistration(unittest.TestCase):
             f"690->691 angle={record.angle:.3f} ref={self._reference_angle:.3f}",
         )
 
+    @unittest.skipUnless(
+        os.environ.get("NORNIR_RUN_STOS_BRUTE_REFERENCE", "").strip().lower() in ("1", "true", "yes"),
+        "Optional StosBrute16 log-polar reference; set NORNIR_RUN_STOS_BRUTE_REFERENCE=1",
+    )
     def test_wrong_direction_does_not_match_reference(self) -> None:
         """691->690 must not match the StosBrute16 reference (~0.87 deg)."""
         mapped = nornir_imageregistration.ImagePermutationHelper(

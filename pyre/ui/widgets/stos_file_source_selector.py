@@ -70,21 +70,32 @@ class StosFileSourceSelector(QWidget):
 
     def set_row_availability(
             self, *, has_auto: bool, has_manual: bool, has_input: bool = False) -> None:
-        """Enable or disable Original/Input/Manual based on the current list row."""
-        auto_index = self._combo.findData(StosFileSource.auto.value)
-        original_index = self._combo.findData(StosFileSource.original.value)
-        input_index = self._combo.findData(StosFileSource.input.value)
-        manual_index = self._combo.findData(StosFileSource.manual.value)
-        if auto_index >= 0:
-            self._combo.model().item(auto_index).setEnabled(True)
-        if original_index >= 0:
-            enabled = has_auto and not self._flat_manual_mode
-            self._combo.model().item(original_index).setEnabled(enabled)
-        if input_index >= 0:
-            enabled = has_input and not self._flat_manual_mode
-            self._combo.model().item(input_index).setEnabled(enabled)
-        if manual_index >= 0:
-            self._combo.model().item(manual_index).setEnabled(has_manual)
+        """Enable or disable Original/Input/Manual based on the current list row.
+
+        Signals are suppressed so Qt changing the current index when the selected
+        source is disabled does not load a STOS file.
+        """
+        self._suppress_signal = True
+        try:
+            auto_index = self._combo.findData(StosFileSource.auto.value)
+            original_index = self._combo.findData(StosFileSource.original.value)
+            input_index = self._combo.findData(StosFileSource.input.value)
+            manual_index = self._combo.findData(StosFileSource.manual.value)
+            if auto_index >= 0:
+                self._combo.model().item(auto_index).setEnabled(True)
+            if original_index >= 0:
+                enabled = has_auto and not self._flat_manual_mode
+                self._combo.model().item(original_index).setEnabled(enabled)
+            if input_index >= 0:
+                enabled = has_input and not self._flat_manual_mode
+                self._combo.model().item(input_index).setEnabled(enabled)
+            if manual_index >= 0:
+                self._combo.model().item(manual_index).setEnabled(has_manual)
+            current_item = self._combo.model().item(self._combo.currentIndex())
+            if current_item is not None and not current_item.isEnabled() and auto_index >= 0:
+                self._combo.setCurrentIndex(auto_index)
+        finally:
+            self._suppress_signal = False
 
     def _on_combo_changed(self, _index: int) -> None:
         if self._suppress_signal:

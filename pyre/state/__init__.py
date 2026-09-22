@@ -23,6 +23,7 @@ from pyre.stos_registration import (
     sync_stos_registration_roles,
     apply_stos_transform_to_controller,
     wire_stos_state_after_load,
+    ensure_mask_viewmodels_from_load,
 )
 from pyre.stos_manual_paths import resolve_stos_restore_path
 
@@ -194,7 +195,12 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                                                       mask_fullpath=load_result.target.mask_fullpath)
         stos_config = get_current_stos_config()
         if stos_config is not None:
-            wire_stos_state_after_load(stos_config, image_loader._image_viewmodel_manager)  # type: ignore[attr-defined]
+            wire_stos_state_after_load(
+                stos_config,
+                image_loader._image_viewmodel_manager,  # type: ignore[attr-defined]
+                image_manager=image_manager,
+            )
+            ensure_mask_viewmodels_from_load(stos_config, load_result)
             _sync_registration_roles_from_manager(
                 stos_config,
                 image_manager,

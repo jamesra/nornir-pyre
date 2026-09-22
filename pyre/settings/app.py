@@ -71,6 +71,13 @@ class GridRefineDefaults(BaseModel):
     num_iterations: int = 5
     max_angle: float = 0.0
     angle_step_size: float = 3.0
+    # Off: skip per-pass UI updates (ConvertTransformToGridTransform is expensive).
+    preview_pass_transforms: bool = False
+    # Off: CPU convert when pass previews are on. Final result is still converted.
+    gpu_preview_grid_convert: bool = False
+    # Min unmasked fraction (source AND target cell) to pin a grid point during
+    # masked-neighbor spring relaxation. Default 25%.
+    masked_relax_min_unmasked: float = 0.25
 
     def to_angle_search_range(self) -> AngleSearchRange:
         """Build an AngleSearchRange from the stored angle fields."""
@@ -129,6 +136,7 @@ class UISettings(BaseModel):
     # Draws each control point's session ID next to its glyph in the Source/Target image
     # windows. A debug aid for confirming which point is which without hover-guessing.
     show_control_point_ids: bool = False
+    show_mesh_lines: bool = False
     image_search_paths: list[str] = []  # field(default_factory=list)  # Paths to search for images
     replacement_paths: dict[
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files

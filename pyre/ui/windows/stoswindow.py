@@ -518,8 +518,13 @@ class StosWindow(PyreWindowBase):
         window.setVisible(not window.isVisible())
 
     def _set_layout_position(self, position, desired_displays: int = 1):
-        """Position all rendering windows then, if the folder browser is visible,
-        tuck it to the left of the composite window at its current width."""
+        """Position all rendering windows; on a 1-display layout, leave a left strip
+        for the Stos Browser when it is already visible."""
+        if desired_displays == 1:
+            display_index = position if isinstance(position, int) else 0
+            StosWindow.apply_single_monitor_all_windows_layout(
+                self._window_manager, display_index)
+            return
         super()._set_layout_position(position, desired_displays)
         if StosWindow._folder_browser is not None and StosWindow._folder_browser.isVisible():
             self._layout_browser_left_of_composite()
@@ -529,16 +534,22 @@ class StosWindow(PyreWindowBase):
         self._layout_browser_left_of_composite()
 
     @classmethod
-    def _primary_work_area(cls):
-        """Return the leftmost screen work area (x, y, width, height)."""
+    def _work_area_for_display(cls, display_index: int = 0) -> tuple[int, int, int, int]:
+        """Return the work area (x, y, width, height) for display *display_index* (left-to-right)."""
         from PyQt6.QtGui import QGuiApplication
 
         screens = QGuiApplication.screens()
         if not screens:
             return 0, 0, 1920, 1080
         ordered = sorted(screens, key=lambda s: s.availableGeometry().x())
-        geom = ordered[0].availableGeometry()
+        index = max(0, min(int(display_index), len(ordered) - 1))
+        geom = ordered[index].availableGeometry()
         return geom.x(), geom.y(), geom.width(), geom.height()
+
+    @classmethod
+    def _primary_work_area(cls) -> tuple[int, int, int, int]:
+        """Return the leftmost screen work area (x, y, width, height)."""
+        return cls._work_area_for_display(0)
 
     @classmethod
     def _browser_layout_width(cls) -> int:
@@ -556,12 +567,15 @@ class StosWindow(PyreWindowBase):
     @classmethod
     def _layout_browser_in_work_area(
             cls,
-            window_manager: IWindowManager | None = None) -> int:
+            window_manager: IWindowManager | None = None,
+            work_area: tuple[int, int, int, int] | None = None) -> int:
         """Place the visible folder browser in the left strip; return reserved width (0 if none)."""
+        del window_manager
         browser = cls._folder_browser
         if browser is None or not browser.isVisible():
             return 0
-        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        work_x, work_y, work_w, work_h = (
+            work_area if work_area is not None else cls._primary_work_area())
         browser_w = min(cls._browser_layout_width(), max(work_w // 2, 1))
         apply_frame_geometry_to_widget(browser, work_x, work_y, browser_w, work_h)
         return browser_w
@@ -592,15 +606,19 @@ class StosWindow(PyreWindowBase):
         cls.sync_window_visibility_menus(window_manager)
 
     @classmethod
-    def apply_single_monitor_all_windows_layout(cls, window_manager: IWindowManager) -> None:
+    def apply_single_monitor_all_windows_layout(
+            cls,
+            window_manager: IWindowManager,
+            display_index: int = 0) -> None:
         """Tile Source/Target on top and Composite below, leaving a left browser strip when open."""
         for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite):
             if view_type not in window_manager:
                 return
-        work_x, work_y, work_w, work_h = cls._primary_work_area()
+        work_x, work_y, work_w, work_h = cls._work_area_for_display(display_index)
         browser_w = 0
         if cls._folder_browser is not None and cls._folder_browser.isVisible():
-            browser_w = cls._layout_browser_in_work_area(window_manager)
+            browser_w = cls._layout_browser_in_work_area(
+                window_manager, work_area=(work_x, work_y, work_w, work_h))
 
         rest_x = work_x + browser_w
         rest_w = max(work_w - browser_w, 1)
@@ -1311,6 +1329,7 @@ class StosWindow(PyreWindowBase):
             browser_flat_manual: bool = False,
             browser_basename: str | None = None) -> LoadStosResult:
         """Commit a decoded STOS load on the main thread (managers, transform, titles)."""
+        stos_transform_controller.cancel_in_flight_registrations()
         image_loader.commit_load_results_to_image_manager(load_result)  # type: ignore[attr-defined]
         image_loader.create_image_viewmodel(load_result=load_result.source)
         image_loader.create_image_viewmodel(load_result=load_result.target)
@@ -1330,7 +1349,18 @@ class StosWindow(PyreWindowBase):
                                                       mask_fullpath=load_result.target.mask_fullpath)
         stos_config = pyre.state.get_current_stos_config()
         if stos_config is not None:
-            from pyre.stos_registration import resolve_source_and_target_image_data, sync_stos_registration_roles
+            from pyre.stos_registration import (
+                resolve_source_and_target_image_data,
+                sync_stos_registration_roles,
+                wire_stos_state_after_load,
+                ensure_mask_viewmodels_from_load,
+            )
+            wire_stos_state_after_load(
+                stos_config,
+                image_loader._image_viewmodel_manager,  # type: ignore[attr-defined]
+                image_manager=image_loader._image_manager,  # type: ignore[attr-defined]
+            )
+            ensure_mask_viewmodels_from_load(stos_config, load_result)
             warped, fixed = resolve_source_and_target_image_data(
                 image_loader._image_manager,  # type: ignore[attr-defined]
                 ViewType.Source.value,
@@ -1358,6 +1388,7 @@ class StosWindow(PyreWindowBase):
                  browser_flat_manual: bool = False,
                  browser_basename: str | None = None) -> LoadStosResult | None:
         try:
+            stos_transform_controller.cancel_in_flight_registrations()
             load_result = StosWindow.load_stos_data(filename, image_loader=image_loader)
             return StosWindow.apply_stos_load_result(
                 filename,

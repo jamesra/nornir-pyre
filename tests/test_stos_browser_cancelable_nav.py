@@ -41,9 +41,19 @@ class TestStosBrowserCancelableNavigation(unittest.TestCase):
 
     def test_rapid_nav_keeps_only_final_pending_load(self) -> None:
         browser = self._browser(current_index=2)
-        browser._load_stos_at_index(3)
-        browser._load_stos_at_index(1)
-        browser._load_stos_at_index(0)
+
+        def _row_from_memory(index: int) -> StosBrowserRow:
+            return browser._rows[index]
+
+        def _fake_resolve(row: StosBrowserRow, source: object) -> tuple[str, object]:
+            return row.auto_path, source
+
+        with patch.object(browser, "_refresh_row_from_disk", side_effect=_row_from_memory), \
+                patch.object(browser, "_resolve_load_path_for_row", side_effect=_fake_resolve), \
+                patch("pyre.ui.windows.stosfilebrowser.QMessageBox.information"):
+            browser._load_stos_at_index(3)
+            browser._load_stos_at_index(1)
+            browser._load_stos_at_index(0)
         pending = browser._pending_load
         self.assertIsNotNone(pending)
         assert pending is not None
@@ -104,6 +114,12 @@ class TestStosBrowserCancelableNavigation(unittest.TestCase):
 
         self.assertIsNone(browser._pending_load)
         self.assertEqual(submitted, ["submitted"])
+
+    def test_choosing_a_stos_cancels_in_flight_registrations(self) -> None:
+        browser = self._browser()
+        with patch.object(browser, "_cancel_in_flight_registrations") as cancel:
+            browser._load_stos_path("/tmp/section_0.stos", 0)
+            cancel.assert_called_once()
 
 
 if __name__ == "__main__":

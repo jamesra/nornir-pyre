@@ -12,6 +12,7 @@ import math
 import os
 import threading
 from collections.abc import Callable, Iterable, Sequence
+from typing import AbstractSet
 
 import numpy
 import numpy as np
@@ -34,7 +35,7 @@ from pyre.controllers.control_point_registration_queue import (
     ControlPointRegistrationQueue,
     REGISTER_BUSY_REASON,
 )
-from pyre.observable import ObservableSet
+from pyre.observable import ObservedAction, ObservableSet
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache
 from pyre.controllers.transform_display import (
     TransformDisplayStrategy,
@@ -49,6 +50,7 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.selection_event_data import PointPair
 from pyre.qt_eventmanager import qt_post_to_main
+from . import masked_grid_relax
 from pyre.array_host import yx_host as _mapped_yx_host
 from pyre.controllers.alignment_payload import (
     HostImagePayload,
@@ -112,6 +114,7 @@ def _align_control_point_from_arrays(
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
         estimate_angle: bool = False,
+        source_controlpoint: NDArray[np.floating] | None = None,
 ) -> object | None:
     """Align one control point from host arrays. Shared by both pool paths.
 
@@ -126,7 +129,8 @@ def _align_control_point_from_arrays(
             target_mask,
             source_mask,
             target_controlpoint,
-            area):
+            area,
+            source_controlpoint=source_controlpoint):
         _logger.info("Skipping point alignment: masked ROI at %s", target_controlpoint)
         return None
     return nornir_imageregistration.local_distortion_correction.AttemptAlignPoint(
@@ -155,6 +159,7 @@ def run_control_point_alignment(
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
         estimate_angle: bool = False,
+        source_controlpoint: NDArray[np.floating] | None = None,
 ) -> object | None:
     """Align one control point in this process from ``ImagePermutationHelper`` pairs."""
     return _align_control_point_from_arrays(
@@ -169,6 +174,7 @@ def run_control_point_alignment(
         angles_to_search,
         target_controlpoint,
         estimate_angle,
+        source_controlpoint,
     )
 
 
@@ -179,6 +185,7 @@ def run_shared_control_point_alignment(
         angles_to_search: NDArray[np.floating] | None,
         target_controlpoint: NDArray[np.floating],
         estimate_angle: bool = False,
+        source_controlpoint: NDArray[np.floating] | None = None,
 ) -> object | None:
     """Align one control point in a pool worker from a staged image pair.
 
@@ -199,6 +206,7 @@ def run_shared_control_point_alignment(
             angles_to_search,
             target_controlpoint,
             estimate_angle,
+            source_controlpoint,
         )
 
 
@@ -437,6 +445,9 @@ class TransformController:
     __OnAlignmentResultListeners: IEventManager[AlignmentResultCallback]
     __OnAlignmentAppliedListeners: IEventManager[AlignmentAppliedCallback]
     _ui_selected_points: ObservableSet[int] | None
+    _registration_reselect_ids: set[int]
+    _suppress_registration_reselect: bool
+    _point_in_view_fn: Callable[[int], bool] | None
     _registration_apply_in_progress: bool = False
     _registration_align_fn: Callable[..., object] | None = None
     _registration_source_image: ImagePermutationHelper | None = None
@@ -447,9 +458,19 @@ class TransformController:
     _registration_staged_pair: StagedImagePair | None = None
     _registration_image_store: RegistrationImageStore
     _registration_published_helpers: dict[Space, ImagePermutationHelper]
-    _registration_leases: dict[int, PublishedPairLease]
-    _registration_job_generations: dict[int, tuple[int | None, int | None]]
+    _registration_epoch: int
+    _registration_leases: dict[tuple[int, int], PublishedPairLease]
+    _registration_job_generations: dict[tuple[int, int], tuple[int | None, int | None]]
     _virtual_boundary_indices: list[int] | None
+    _interactive_moved_indices: set[int]
+    _interactive_edit_points_snapshot: NDArray[np.floating] | None
+    _masked_relax_generation: int
+    _masked_relax_in_flight: bool
+    _masked_relax_applying: bool
+    _masked_relax_pending_seeds: set[int]
+    _masked_relax_pending_undo: NDArray[np.floating] | None
+    _masked_relax_undo_saved: bool
+    _masked_relax_source_pin_cache: masked_grid_relax.SourcePinCache | None
 
     @property
     def interactive_edit_in_progress(self) -> bool:
@@ -659,6 +680,12 @@ class TransformController:
                 space, view_type, self.type)
             self._interactive_gesture = resolved
             self.begin_gesture(resolved, space, view_type)
+            self._interactive_moved_indices.clear()
+            self._interactive_edit_points_snapshot = self.copy_points()
+            # Discard in-flight masked relax while the user is editing.
+            self._masked_relax_generation += 1
+            self._masked_relax_pending_seeds.clear()
+            self._masked_relax_pending_undo = None
         self._interactive_edit_depth += 1
         nornir_imageregistration.interactive_edit.begin()
         self._pending_moved_indices.clear()
@@ -673,6 +700,10 @@ class TransformController:
         if self._interactive_edit_depth == 0:
             self._remove_virtual_boundary_points()
             was_cp_drag = self._interactive_gesture == TransformGesture.CONTROL_POINT_DRAG
+            moved_indices = sorted(self._interactive_moved_indices)
+            undo_snapshot = self._interactive_edit_points_snapshot
+            self._interactive_moved_indices.clear()
+            self._interactive_edit_points_snapshot = None
             self._interactive_edit_space = None
             self._interactive_gesture = TransformGesture.NONE
             defer_lookat = (
@@ -690,6 +721,48 @@ class TransformController:
                 self._run_post_interactive_refresh()
             elif isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
                 self.FireOnChangeEvent()
+            if was_cp_drag and moved_indices:
+                # #region agent log
+                try:
+                    import json, time
+                    _gm = masked_grid_relax.grid_model_or_none(self)
+                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                        _f.write(json.dumps({
+                            "sessionId": "79a4da", "hypothesisId": "A",
+                            "location": "transformcontroller.py:end_interactive_edit",
+                            "message": "enqueue after CP drag",
+                            "data": {
+                                "was_cp_drag": was_cp_drag,
+                                "moved_indices": moved_indices[:20],
+                                "n_moved": len(moved_indices),
+                                "is_grid": _gm is not None,
+                                "transform_type": str(getattr(self._TransformModel, "type", None)),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+                self.enqueue_masked_grid_relax(
+                    moved_indices, undo_points=undo_snapshot)
+            else:
+                # #region agent log
+                try:
+                    import json, time
+                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                        _f.write(json.dumps({
+                            "sessionId": "79a4da", "hypothesisId": "A",
+                            "location": "transformcontroller.py:end_interactive_edit",
+                            "message": "skip enqueue",
+                            "data": {
+                                "was_cp_drag": was_cp_drag,
+                                "n_moved": len(moved_indices),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
 
     def _run_post_interactive_refresh(self) -> None:
         if self._model_needs_rbf_prewarm(self._TransformModel):
@@ -824,6 +897,10 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        self._masked_relax_generation += 1
+        self._masked_relax_pending_seeds.clear()
+        self._masked_relax_pending_undo = None
+        self._masked_relax_source_pin_cache = None
 
         if self._TransformModel is not None:
             assert (isinstance(value, nornir_imageregistration.ITransformChangeEvents))
@@ -866,6 +943,10 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        self._masked_relax_generation += 1
+        self._masked_relax_pending_seeds.clear()
+        self._masked_relax_pending_undo = None
+        self._masked_relax_source_pin_cache = None
 
         assert isinstance(value, nornir_imageregistration.ITransformChangeEvents)
         value.AddOnChangeEventListener(self.OnTransformChanged)  # type: ignore[arg-type]
@@ -981,8 +1062,13 @@ class TransformController:
         """Track moved control point indices during interactive edit."""
         if isinstance(index, (int, np.integer)):
             self._pending_moved_indices.add(int(index))
+            if self.interactive_edit_in_progress:
+                self._interactive_moved_indices.add(int(index))
         else:
-            self._pending_moved_indices.update(int(i) for i in np.atleast_1d(index).tolist())
+            ids = [int(i) for i in np.atleast_1d(index).tolist()]
+            self._pending_moved_indices.update(ids)
+            if self.interactive_edit_in_progress:
+                self._interactive_moved_indices.update(ids)
         if self.patch_live_tile_vertices and not self._display_strategy.uses_static_tile_quads():
             # Vertex buffers are patched during drag; remesh 8x8 samples on mouse-up.
             self._full_refresh_needed = True
@@ -1124,6 +1210,11 @@ class TransformController:
         self._registration_queue = ControlPointRegistrationQueue()
         self._busy_points = ControlPointBusySet()
         self._ui_selected_points = selected_points
+        self._registration_reselect_ids = set()
+        self._suppress_registration_reselect = False
+        self._point_in_view_fn = None
+        if isinstance(selected_points, ObservableSet):
+            selected_points.add_observer(self._on_ui_selection_changed_during_register)
         self._registration_apply_in_progress = False
         self._registration_align_fn = None
         self._registration_source_image = None
@@ -1133,9 +1224,19 @@ class TransformController:
         self._registration_estimate_angle = False
         self._registration_image_store = RegistrationImageStore()
         self._registration_published_helpers = {}
+        self._registration_epoch = 0
         self._registration_leases = {}
         self._registration_job_generations = {}
         self._virtual_boundary_indices = None
+        self._interactive_moved_indices = set()
+        self._interactive_edit_points_snapshot = None
+        self._masked_relax_generation = 0
+        self._masked_relax_in_flight = False
+        self._masked_relax_applying = False
+        self._masked_relax_pending_seeds = set()
+        self._masked_relax_pending_undo = None
+        self._masked_relax_undo_saved = False
+        self._masked_relax_source_pin_cache = None
 
         self.TransformModel = TransformModel
 
@@ -1422,8 +1523,19 @@ class TransformController:
         if self._busy_points.clear(reason):
             self._fire_busy_points_changed()
 
+    def cancel_in_flight_registrations(self) -> None:
+        """Abandon control-point alignments and any refine/rotate job.
+
+        Call when the user opens a different ``.stos``. Worker processes may
+        still finish; their results are discarded and busy glyphs clear now.
+        """
+        self._cancel_all_registrations()
+        from pyre.registration_job import get_registration_job_runner
+        get_registration_job_runner().abandon()
+
     def _cancel_all_registrations(self) -> None:
         """Drop pending/in-flight registration work and sync the busy set."""
+        self._registration_epoch += 1
         self._registration_queue.cancel_all()
         self._sync_register_busy()
 
@@ -1446,6 +1558,97 @@ class TransformController:
         if ui is not None:
             for index in busy_indices:
                 ui.discard(index)
+
+    def _remember_registration_reselect_ids(
+            self,
+            indices: Sequence[int],
+            added_ids: Sequence[int],
+    ) -> None:
+        """Keep session IDs that Space should re-select after the queue goes idle.
+
+        Shift+Space queues every point; restoring that set would re-select the
+        whole mesh. Skip remembering in that case.
+        """
+        n_points = self.NumPoints
+        if n_points > 1 and len(indices) >= n_points:
+            return
+        ui = self._ui_selected_points
+        if ui is None:
+            return
+        added = set(int(point_id) for point_id in added_ids)
+        remembered: set[int] = set()
+        for index in indices:
+            if int(index) not in ui:
+                continue
+            point_id = self.point_id_for_index(int(index))
+            if point_id is not None and int(point_id) in added:
+                remembered.add(int(point_id))
+        if remembered:
+            self._suppress_registration_reselect = False
+            self._registration_reselect_ids.update(remembered)
+
+    def _on_ui_selection_changed_during_register(
+            self,
+            _selection: ObservableSet[int],
+            action: ObservedAction,
+            items: AbstractSet[int] | None,
+    ) -> None:
+        """Drop auto-reselect if the user picks a point that was not queued."""
+        if not self._registration_reselect_ids:
+            return
+        if action != ObservedAction.ADD:
+            return
+        busy_ids = self.busy_point_ids
+        for index in items or ():
+            point_id = self.point_id_for_index(int(index))
+            if point_id is None:
+                continue
+            if int(point_id) in self._registration_reselect_ids:
+                continue
+            if int(point_id) in busy_ids:
+                continue
+            self._suppress_registration_reselect = True
+            return
+
+    def _control_point_is_in_view(self, index: int) -> bool:
+        """True when *index* is still visible in a STOS panel (or no cameras exist)."""
+        if self._point_in_view_fn is not None:
+            return bool(self._point_in_view_fn(index))
+        from pyre.ui.control_point_visibility import control_point_visible_in_stos_views
+        return control_point_visible_in_stos_views(self, index)
+
+    def _maybe_restore_selection_after_registration(self) -> None:
+        """Re-select queued points after Space registration if the user did not pick another."""
+        if not self._registration_reselect_ids:
+            return
+        if self._suppress_registration_reselect:
+            self._registration_reselect_ids.clear()
+            self._suppress_registration_reselect = False
+            return
+        ui = self._ui_selected_points
+        if ui is None:
+            self._registration_reselect_ids.clear()
+            return
+        current_ids: set[int] = set()
+        for index in ui:
+            point_id = self.point_id_for_index(int(index))
+            if point_id is not None:
+                current_ids.add(int(point_id))
+        if current_ids and not current_ids.issubset(self._registration_reselect_ids):
+            self._registration_reselect_ids.clear()
+            return
+        to_restore: list[int] = []
+        for point_id in self._registration_reselect_ids:
+            index = self.index_for_point_id(point_id)
+            if index is None:
+                continue
+            if self._control_point_is_in_view(index):
+                to_restore.append(index)
+        self._registration_reselect_ids.clear()
+        if not to_restore:
+            return
+        self._selected_points.update(to_restore)
+        ui.update(to_restore)
 
     def _fire_busy_points_changed(self) -> None:
         """Notify busy-set listeners without rebuilding meshes."""
@@ -1476,9 +1679,27 @@ class TransformController:
             estimate_angle: bool | None = None,
             align_fn: Callable[..., object] | None = None,
     ) -> list[int]:
-        """Queue unique control-point alignments by session ID. Returns newly queued IDs."""
+        """Queue unique control-point alignments by session ID. Returns newly queued IDs.
+
+        Control points on a source or target mask pixel, or whose alignment
+        window has too little unmasked tissue, are not aligned. When the
+        request is only those masked points and the transform is a grid, Spacebar
+        instead relaxes them from neighboring unmasked nodes.
+        """
+        area = alignment_area if alignment_area is not None else self._registration_alignment_area
+        register_indices, masked_indices = self._split_masked_registration_indices(
+            indices, alignment_area=area)
+        if masked_indices:
+            _logger.info(
+                "Skipping alignment for %s masked control point(s): %s",
+                len(masked_indices),
+                masked_indices,
+            )
+            if not register_indices:
+                self._enqueue_relax_for_masked_selection(masked_indices)
+
         point_ids: list[int] = []
-        for index in indices:
+        for index in register_indices:
             point_id = self.point_id_for_index(int(index))
             if point_id is not None:
                 point_ids.append(point_id)
@@ -1497,6 +1718,7 @@ class TransformController:
         added = self._registration_queue.enqueue(point_ids)
         if added:
             _logger.info("Queued control-point alignments ids=%s", added)
+            self._remember_registration_reselect_ids(register_indices, added)
             self._sync_register_busy()
             self._pump_registration_queue()
         elif point_ids:
@@ -1505,6 +1727,48 @@ class TransformController:
                 list(point_ids),
             )
         return added
+
+    def _split_masked_registration_indices(
+            self,
+            indices: Sequence[int],
+            alignment_area: NDArray[np.integer] | None = None,
+    ) -> tuple[list[int], list[int]]:
+        """Partition *indices* into (unmasked-to-register, masked-to-skip)."""
+        source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
+        if source_mask is None and target_mask is None:
+            return [int(i) for i in indices], []
+        masked_set = masked_grid_relax.control_point_indices_on_mask(
+            self.SourcePoints, self.TargetPoints, source_mask, target_mask)
+        if alignment_area is not None:
+            masked_set.update(
+                masked_grid_relax.control_point_indices_with_insufficient_alignment_roi(
+                    self.SourcePoints,
+                    self.TargetPoints,
+                    source_mask,
+                    target_mask,
+                    alignment_area,
+                    masked_grid_relax.resolve_min_unmasked(),
+                ))
+        register_indices: list[int] = []
+        masked_indices: list[int] = []
+        for index in indices:
+            idx = int(index)
+            if idx in masked_set:
+                masked_indices.append(idx)
+            else:
+                register_indices.append(idx)
+        return register_indices, masked_indices
+
+    def _enqueue_relax_for_masked_selection(self, masked_indices: Sequence[int]) -> None:
+        """Relax selected masked grid points from neighboring seeds (no-op off grid)."""
+        grid_model = masked_grid_relax.grid_model_or_none(self)
+        if grid_model is None:
+            return
+        seeds = masked_grid_relax.neighbor_seeds_for_free_points(
+            masked_indices, grid_model.grid_dims)
+        if not seeds:
+            return
+        self.enqueue_masked_grid_relax(seeds, undo_points=self.copy_points())
 
     def _pump_registration_queue(self) -> None:
         """Start pending alignments until the concurrency limit is reached."""
@@ -1653,15 +1917,15 @@ class TransformController:
         store = self._registration_image_store
         return store.generation(Space.Source), store.generation(Space.Target)
 
-    def _release_registration_lease(self, point_id: int) -> None:
+    def _release_registration_lease(self, point_id: int, epoch: int) -> None:
         """Drop a finished job's hold so a retired generation can unlink."""
-        lease = self._registration_leases.pop(point_id, None)
+        lease = self._registration_leases.pop((point_id, epoch), None)
         if lease is not None:
             lease.release()
 
-    def _job_images_are_stale(self, point_id: int) -> bool:
+    def _job_images_are_stale(self, point_id: int, epoch: int) -> bool:
         """True when the images this job scored have since been replaced."""
-        recorded = self._registration_job_generations.pop(point_id, None)
+        recorded = self._registration_job_generations.pop((point_id, epoch), None)
         if recorded is None:
             return False
         return recorded != self._current_publish_generations()
@@ -1678,6 +1942,7 @@ class TransformController:
     def _dispatch_point_alignment(self, point_id: int, index: int) -> None:
         """Submit one already-in-flight alignment to the process or thread pool."""
         snapshot_target = _mapped_yx_host(self.GetFixedPoint(index)).copy()
+        snapshot_source = _mapped_yx_host(self.GetWarpedPoint(index)).copy()
         source_image = (self._registration_source_image
                         or self.published_registration_helper(Space.Source))
         target_image = (self._registration_target_image
@@ -1687,13 +1952,15 @@ class TransformController:
         estimate_angle = self._registration_estimate_angle
         align_fn = self._registration_align_fn
         transform = self.TransformModel
+        epoch = self._registration_epoch
 
         def _finish(record: object | None) -> None:
             if QApplication.instance() is None:
-                self._on_registration_finished(point_id, snapshot_target, record)
+                self._on_registration_finished(point_id, snapshot_target, record, epoch)
             else:
                 qt_post_to_main(
-                    lambda: self._on_registration_finished(point_id, snapshot_target, record))
+                    lambda: self._on_registration_finished(
+                        point_id, snapshot_target, record, epoch))
 
         def _thread_worker() -> None:
             record: object | None = None
@@ -1707,6 +1974,7 @@ class TransformController:
                     angles_to_search=angles,
                     estimate_angle=estimate_angle,
                     target_controlpoint=snapshot_target,
+                    source_controlpoint=snapshot_source,
                     align_fn=align_fn,
                 )
             except Exception:
@@ -1743,8 +2011,8 @@ class TransformController:
         assert pair_ref is not None
         _logger.info("Aligning control point id=%s on process pool", point_id)
         if lease is not None:
-            self._registration_leases[point_id] = lease
-        self._registration_job_generations[point_id] = self._current_publish_generations()
+            self._registration_leases[(point_id, epoch)] = lease
+        self._registration_job_generations[(point_id, epoch)] = self._current_publish_generations()
         try:
             task = pools.GetGlobalLocalMachinePool().add_task(
                 f"Align Pyre Point id={point_id}",
@@ -1755,13 +2023,14 @@ class TransformController:
                 angles,
                 snapshot_target,
                 estimate_angle,
+                snapshot_source,
             )
         except Exception:
             _logger.exception(
                 "Process-pool submit failed for point id %s; using thread pool",
                 point_id,
             )
-            self._release_registration_lease(point_id)
+            self._release_registration_lease(point_id, epoch)
             pools.GetGlobalThreadPool().add_task(
                 f"Align Pyre Point id={point_id}",
                 _thread_worker,
@@ -1791,6 +2060,7 @@ class TransformController:
             angles_to_search: NDArray[np.floating] | None,
             estimate_angle: bool = False,
             target_controlpoint: NDArray[np.floating],
+            source_controlpoint: NDArray[np.floating] | None = None,
             align_fn: Callable[..., object] | None,
     ) -> object | None:
         """Run one control-point alignment off the UI thread."""
@@ -1812,6 +2082,7 @@ class TransformController:
             angles_to_search,
             target_controlpoint,
             estimate_angle=estimate_angle,
+            source_controlpoint=source_controlpoint,
         )
 
     def _on_registration_finished(
@@ -1819,11 +2090,19 @@ class TransformController:
             point_id: int,
             snapshot_target: NDArray[np.floating],
             record: object | None,
+            epoch: int | None = None,
     ) -> None:
         """Apply a finished alignment on the UI thread, then start the next job."""
+        job_epoch = self._registration_epoch if epoch is None else int(epoch)
+        if job_epoch != self._registration_epoch:
+            _logger.info(
+                "Alignment for point id %s discarded: transform or STOS changed", point_id)
+            self._release_registration_lease(point_id, job_epoch)
+            self._registration_job_generations.pop((point_id, job_epoch), None)
+            return
         cancelled = self._registration_queue.is_cancelled(point_id)
-        stale_images = self._job_images_are_stale(point_id)
-        self._release_registration_lease(point_id)
+        stale_images = self._job_images_are_stale(point_id, job_epoch)
+        self._release_registration_lease(point_id, job_epoch)
         self._registration_queue.finish(point_id)
         self._sync_register_busy()
         if stale_images:
@@ -1870,6 +2149,7 @@ class TransformController:
 
         self._registration_apply_in_progress = True
         try:
+            undo_snapshot = self.copy_points()
             self.MovePoint(index, dx, dy, space=Space.Target)
             if self.NumPoints != int(self._point_ids.shape[0]):
                 self._mint_point_ids()
@@ -1884,6 +2164,449 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._clear_composite_display_cache()
         self.notify_views_now()
+        applied_index = self.index_for_point_id(point_id)
+        if applied_index is not None:
+            self.enqueue_masked_grid_relax(
+                [int(applied_index)], undo_points=undo_snapshot)
+
+    def enqueue_masked_grid_relax(
+            self,
+            seed_indices: Sequence[int],
+            undo_points: NDArray[np.floating] | None = None,
+    ) -> None:
+        """Queue a background BFS relax of masked grid neighbors after a seed move.
+
+        No-op when not in grid mode, during interactive drag, or while applying a
+        prior relax result. Only one wave runs at a time: a new request cancels
+        the in-flight effort (partial TargetPoints already committed stay) and
+        coalesces seeds for a restart on the latest points.
+        """
+        if self._masked_relax_applying:
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "A",
+                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
+                        "message": "bail applying",
+                        "data": {"seeds": list(seed_indices)[:20]},
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            return
+        if self.interactive_edit_in_progress:
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "A",
+                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
+                        "message": "bail still editing",
+                        "data": {"seeds": list(seed_indices)[:20]},
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            return
+        grid_model = masked_grid_relax.grid_model_or_none(self)
+        if grid_model is None:
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "A",
+                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
+                        "message": "bail not grid",
+                        "data": {"type": str(getattr(self._TransformModel, "type", None))},
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            return
+        seeds = [int(i) for i in seed_indices]
+        if not seeds:
+            return
+
+        if undo_points is not None and self._masked_relax_pending_undo is None:
+            self._masked_relax_pending_undo = np.asarray(
+                nornir_imageregistration.EnsureNumpyArray(undo_points),
+                dtype=np.float64).copy()
+
+        if self._masked_relax_in_flight:
+            self._masked_relax_pending_seeds.update(seeds)
+            # Cancel the active wave; its finish handler restarts with pending seeds.
+            self._masked_relax_generation += 1
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "J",
+                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
+                        "message": "cancel in-flight for new seeds",
+                        "data": {
+                            "seeds": seeds[:20],
+                            "pending": sorted(self._masked_relax_pending_seeds)[:20],
+                            "generation": self._masked_relax_generation,
+                            "runId": "post-fix",
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            return
+
+        self._start_masked_grid_relax_wave(seeds, grid_model)
+
+    def _start_masked_grid_relax_wave(
+            self,
+            seed_indices: list[int],
+            grid_model: nornir_imageregistration.IGridTransform,
+    ) -> None:
+        """Copy current TargetPoints/masks and run the BFS wave off the UI thread."""
+        grid = grid_model.grid
+        target_points = np.asarray(
+            nornir_imageregistration.EnsureNumpyArray(grid_model.TargetPoints),
+            dtype=np.float64).copy()
+        source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
+        min_unmasked = masked_grid_relax.resolve_min_unmasked()
+        # Build / reuse the source pin cache against the live mask identity first,
+        # then copy arrays for the worker so we do not read live transform state off-UI.
+        source_ok, self._masked_relax_source_pin_cache = (
+            masked_grid_relax.get_or_build_source_ok(
+                self._masked_relax_source_pin_cache,
+                grid,
+                min_unmasked,
+                source_mask,
+            ))
+        if source_mask is not None:
+            source_mask = np.asarray(source_mask, dtype=bool).copy()
+        if target_mask is not None:
+            target_mask = np.asarray(target_mask, dtype=bool).copy()
+        source_ok_copy = np.asarray(source_ok, dtype=bool).copy()
+        grid_dims = (int(grid.grid_dims[0]), int(grid.grid_dims[1]))
+        grid_spacing = (float(grid.grid_spacing[0]), float(grid.grid_spacing[1]))
+        cell_size = (float(grid.cell_size[0]), float(grid.cell_size[1]))
+        source_points = np.asarray(
+            nornir_imageregistration.EnsureNumpyArray(grid.SourcePoints),
+            dtype=np.float64).copy()
+
+        generation = self._masked_relax_generation
+        undo_points = self._masked_relax_pending_undo
+        seeds = list(seed_indices)
+        self._masked_relax_in_flight = True
+        self._masked_relax_undo_saved = False
+
+        def _should_cancel() -> bool:
+            return generation != self._masked_relax_generation
+
+        def _post_progress(partial: NDArray[np.floating]) -> None:
+            if _should_cancel():
+                return
+            if QApplication.instance() is None:
+                self._on_masked_grid_relax_progress(generation, partial, undo_points)
+            else:
+                qt_post_to_main(
+                    self._on_masked_grid_relax_progress, generation, partial, undo_points)
+
+        def _worker() -> None:
+            updated: NDArray[np.floating] | None = None
+            try:
+                from nornir_imageregistration.grid_subdivision import (
+                    classify_fixed_grid_points,
+                )
+                fixed_mask = classify_fixed_grid_points(
+                    source_points=source_points,
+                    target_points=target_points,
+                    cell_size=cell_size,
+                    min_unmasked=min_unmasked,
+                    source_mask=source_mask,
+                    target_mask=target_mask,
+                    source_ok=source_ok_copy,
+                )
+                free_count = int(np.count_nonzero(~fixed_mask))
+                # #region agent log
+                try:
+                    import json, time
+                    from nornir_imageregistration.grid_layout_relax import (
+                        four_adjacent_indices,
+                    )
+                    seed_free_neighbors = []
+                    for s in seeds:
+                        for n in four_adjacent_indices(
+                                int(s), grid_dims[0], grid_dims[1]):
+                            if not fixed_mask[n]:
+                                seed_free_neighbors.append(n)
+                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                        _f.write(json.dumps({
+                            "sessionId": "79a4da", "hypothesisId": "B,C,J",
+                            "location": "transformcontroller.py:_worker",
+                            "message": "pin mask built off-ui",
+                            "data": {
+                                "seeds": list(seeds)[:20],
+                                "n_points": int(fixed_mask.shape[0]),
+                                "free_count": free_count,
+                                "fixed_count": int(fixed_mask.shape[0]) - free_count,
+                                "seed_free_neighbor_count": len(seed_free_neighbors),
+                                "has_source_mask": source_mask is not None,
+                                "has_target_mask": target_mask is not None,
+                                "min_unmasked": float(min_unmasked),
+                                "generation": generation,
+                                "runId": "post-fix",
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+                if not np.any(~fixed_mask):
+                    updated = None
+                elif _should_cancel():
+                    updated = None
+                else:
+                    progress_count = {"n": 0}
+
+                    def _on_progress(partial: NDArray[np.floating]) -> None:
+                        progress_count["n"] += 1
+                        _post_progress(partial)
+
+                    updated = masked_grid_relax.run_masked_grid_relax_wave(
+                        target_points=target_points,
+                        fixed_mask=fixed_mask,
+                        seed_indices=seeds,
+                        grid_dims=grid_dims,
+                        grid_spacing=grid_spacing,
+                        should_cancel=_should_cancel,
+                        on_progress=_on_progress,
+                    )
+                    # #region agent log
+                    try:
+                        import json, time
+                        n_moved = 0
+                        max_delta = 0.0
+                        if updated is not None:
+                            d = np.linalg.norm(updated - target_points, axis=1)
+                            free = ~fixed_mask
+                            n_moved = int(np.count_nonzero(d[free] > 1e-3))
+                            max_delta = float(np.max(d[free])) if np.any(free) else 0.0
+                        with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                            _f.write(json.dumps({
+                                "sessionId": "79a4da", "hypothesisId": "C,D,E,J",
+                                "location": "transformcontroller.py:_worker",
+                                "message": "wave finished",
+                                "data": {
+                                    "updated_is_none": updated is None,
+                                    "free_moved_count": n_moved,
+                                    "max_free_delta": max_delta,
+                                    "generation": generation,
+                                    "cancelled": _should_cancel(),
+                                    "progress_posts": progress_count["n"],
+                                    "runId": "post-fix",
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            }) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
+            except Exception as _exc:
+                # #region agent log
+                try:
+                    import json, time
+                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                        _f.write(json.dumps({
+                            "sessionId": "79a4da", "hypothesisId": "E",
+                            "location": "transformcontroller.py:_worker",
+                            "message": "wave exception",
+                            "data": {"error": str(_exc)},
+                            "timestamp": int(time.time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
+                _logger.exception("Masked grid relax wave failed")
+                updated = None
+            if QApplication.instance() is None:
+                self._on_masked_grid_relax_finished(generation, updated, undo_points)
+            else:
+                qt_post_to_main(
+                    self._on_masked_grid_relax_finished, generation, updated, undo_points)
+
+        if QApplication.instance() is None:
+            # Headless tests: run synchronously.
+            _worker()
+            return
+
+        pools.GetGlobalThreadPool().add_task(
+            f"Masked grid relax seeds={seeds[:8]}",
+            _worker,
+        )
+
+    def _on_masked_grid_relax_progress(
+            self,
+            generation: int,
+            partial_targets: NDArray[np.floating],
+            undo_points: NDArray[np.floating] | None,
+    ) -> None:
+        """Commit an in-progress wave snapshot so cancels keep partial motion."""
+        if generation != self._masked_relax_generation:
+            return
+        undo = None if self._masked_relax_undo_saved else undo_points
+        self._apply_masked_grid_relax_result(partial_targets, undo)
+        if undo is not None:
+            self._masked_relax_undo_saved = True
+            self._masked_relax_pending_undo = None
+
+    def _on_masked_grid_relax_finished(
+            self,
+            generation: int,
+            updated_targets: NDArray[np.floating] | None,
+            undo_points: NDArray[np.floating] | None,
+    ) -> None:
+        """Apply relaxed TargetPoints on the UI thread, or discard if superseded."""
+        self._masked_relax_in_flight = False
+        pending = sorted(self._masked_relax_pending_seeds)
+        self._masked_relax_pending_seeds.clear()
+
+        if generation != self._masked_relax_generation:
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "D,J",
+                        "location": "transformcontroller.py:_on_masked_grid_relax_finished",
+                        "message": "discard stale generation",
+                        "data": {
+                            "generation": generation,
+                            "live": self._masked_relax_generation,
+                            "pending_count": len(pending),
+                            "runId": "post-fix",
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            # Preserve undo for the restart when no progress commit consumed it.
+            if (
+                undo_points is not None
+                and not self._masked_relax_undo_saved
+                and self._masked_relax_pending_undo is None
+            ):
+                self._masked_relax_pending_undo = undo_points
+            if pending:
+                grid_model = masked_grid_relax.grid_model_or_none(self)
+                if grid_model is not None:
+                    self._start_masked_grid_relax_wave(pending, grid_model)
+            return
+
+        if updated_targets is not None:
+            undo = None if self._masked_relax_undo_saved else undo_points
+            self._apply_masked_grid_relax_result(updated_targets, undo)
+            if undo is not None:
+                self._masked_relax_undo_saved = True
+                self._masked_relax_pending_undo = None
+        elif not self._masked_relax_undo_saved:
+            # No free neighbors moved; drop unused undo snapshot for this wave.
+            self._masked_relax_pending_undo = None
+
+        if pending:
+            grid_model = masked_grid_relax.grid_model_or_none(self)
+            if grid_model is not None:
+                self._start_masked_grid_relax_wave(pending, grid_model)
+
+    def _apply_masked_grid_relax_result(
+            self,
+            updated_targets: NDArray[np.floating],
+            undo_points: NDArray[np.floating] | None,
+    ) -> None:
+        """Batch-write relaxed TargetPoints and optionally push one undo snapshot."""
+        grid_model = masked_grid_relax.grid_model_or_none(self)
+        if grid_model is None:
+            return
+        current = np.asarray(
+            nornir_imageregistration.EnsureNumpyArray(grid_model.TargetPoints),
+            dtype=np.float64)
+        updated = np.asarray(updated_targets, dtype=np.float64)
+        if updated.shape != current.shape:
+            _logger.warning(
+                "Masked grid relax result shape %s != live %s; discarding",
+                updated.shape, current.shape)
+            return
+        if np.allclose(updated, current, rtol=1e-5, atol=1e-3):
+            # #region agent log
+            try:
+                import json, time
+                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({
+                        "sessionId": "79a4da", "hypothesisId": "C,D",
+                        "location": "transformcontroller.py:_apply_masked_grid_relax_result",
+                        "message": "apply no-op allclose",
+                        "data": {},
+                        "timestamp": int(time.time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            return
+
+        if undo_points is not None:
+            try:
+                from dependency_injector.wiring import Provide, inject
+                from pyre.container import IContainer
+                from pyre.interfaces.managers.command_history import ICommandHistory
+
+                @inject
+                def _save(
+                        history: ICommandHistory = Provide[IContainer.command_history],
+                ) -> None:
+                    history.SaveState(self.SetPoints, undo_points)
+
+                _save()
+            except Exception:
+                _logger.debug("Could not save undo state for masked grid relax", exc_info=True)
+
+        changed = np.flatnonzero(
+            np.any(~np.isclose(updated, current, rtol=1e-5, atol=1e-3), axis=1))
+        if changed.size == 0:
+            return
+
+        # #region agent log
+        try:
+            import json, time
+            with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+                _f.write(json.dumps({
+                    "sessionId": "79a4da", "hypothesisId": "D",
+                    "location": "transformcontroller.py:_apply_masked_grid_relax_result",
+                    "message": "applying changes",
+                    "data": {
+                        "n_changed": int(changed.size),
+                        "changed_sample": changed[:20].tolist(),
+                    },
+                    "timestamp": int(time.time() * 1000),
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
+        self._masked_relax_applying = True
+        try:
+            grid_model.UpdateTargetPointsByIndex(
+                changed, updated[changed], remove_duplicates=False)
+        finally:
+            self._masked_relax_applying = False
+
+        self._tile_mesh_cache.clear()
+        self._clear_composite_display_cache()
+        self.notify_views_now()
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""
@@ -1894,9 +2617,9 @@ class TransformController:
         if self._full_refresh_needed:
             self._full_refresh_needed = False
             self._run_post_interactive_refresh()
-            return
-        if self._model_needs_rbf_prewarm(self._TransformModel):
+        elif self._model_needs_rbf_prewarm(self._TransformModel):
             self._queue_rbf_prewarm()
+        self._maybe_restore_selection_after_registration()
 
     def SetPoints(self, points: NDArray | nornir_imageregistration.IControlPoints):
         """Set transform points to the passed array"""

@@ -44,6 +44,9 @@ resolve_default_load_path = _smp.resolve_default_load_path
 resolve_load_path = _smp.resolve_load_path
 resolve_stos_path_in_group = _smp.resolve_stos_path_in_group
 resolve_stos_restore_path = _smp.resolve_stos_restore_path
+refresh_browser_row = _smp.refresh_browser_row
+expected_stos_path_for_source = _smp.expected_stos_path_for_source
+StosBrowserRow = _smp.StosBrowserRow
 StosFileSource = _smp.StosFileSource
 scan_stos_browser_rows = _smp.scan_stos_browser_rows
 
@@ -307,6 +310,48 @@ class TestScanStosBrowserRows(unittest.TestCase):
             self._touch(os.path.join(tmp, "02-03.stos"))
             rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
             self.assertEqual([row.basename for row in rows], ["02-03.stos", "100-101.stos"])
+
+
+class TestRefreshBrowserRow(unittest.TestCase):
+    def _touch(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("stub")
+
+    def test_picks_up_output_created_after_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            basename = "1133-1130.stos"
+            input_stos = os.path.join(tmp, "Automatic", basename)
+            output = os.path.join(tmp, basename)
+            self._touch(input_stos)
+            stale = StosBrowserRow(
+                basename=basename, auto_path=None, manual_path=None, input_path=input_stos)
+            self.assertIsNone(stale.load_path_for_source(StosFileSource.original))
+            self._touch(output)
+            refreshed = refresh_browser_row(tmp, stale, BrowseMode.stos_group)
+            self.assertEqual(refreshed.auto_path, output)
+            self.assertEqual(refreshed.input_path, input_stos)
+            self.assertEqual(
+                refreshed.load_path_for_source(StosFileSource.original), output)
+
+    def test_keeps_cached_path_when_folder_does_not_contain_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cached = os.path.join(tmp, "elsewhere.stos")
+            self._touch(cached)
+            row = StosBrowserRow(
+                basename="elsewhere.stos", auto_path=cached, manual_path=None)
+            refreshed = refresh_browser_row("/no/such/group", row, BrowseMode.stos_group)
+            self.assertEqual(refreshed.auto_path, cached)
+
+    def test_expected_original_path(self) -> None:
+        expected = expected_stos_path_for_source(
+            r"Y:\Volumes\RC2\TEM\Grid16",
+            "1133-1130.stos",
+            StosFileSource.original,
+        )
+        self.assertEqual(
+            expected,
+            os.path.join(r"Y:\Volumes\RC2\TEM\Grid16", "1133-1130.stos"))
 
 
 if __name__ == "__main__":

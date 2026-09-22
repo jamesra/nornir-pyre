@@ -6,6 +6,7 @@ import unittest
 
 import numpy as np
 from nornir_imageregistration.transforms import MeshWithRBFFallback
+from PyQt6.QtWidgets import QApplication
 
 from pyre.controllers.transformcontroller import TransformController
 
@@ -20,6 +21,13 @@ def _mesh() -> MeshWithRBFFallback:
     return MeshWithRBFFallback(points)
 
 
+def _flush_coalesced_change() -> None:
+    """Deliver QTimer-coalesced OnChange when a QApplication already exists."""
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+
+
 class TestTransformModelReplace(unittest.TestCase):
     def test_new_model_fires_replaced_and_change(self) -> None:
         controller = TransformController(_mesh())
@@ -31,6 +39,7 @@ class TestTransformModelReplace(unittest.TestCase):
 
         new_model = _mesh()
         controller.TransformModel = new_model
+        _flush_coalesced_change()
 
         self.assertEqual(len(replaced), 1)
         self.assertIs(replaced[0][1], new_model)
@@ -52,6 +61,7 @@ class TestTransformModelReplace(unittest.TestCase):
         model.points = points
 
         controller.TransformModel = model
+        _flush_coalesced_change()
 
         self.assertEqual(replaced, [], "same identity should not look like a replace")
         self.assertGreaterEqual(len(changed), 1)

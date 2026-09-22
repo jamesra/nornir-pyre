@@ -77,6 +77,21 @@ class RegistrationJobRunner:
         for bar in bars:
             bar.set_cancel_enabled(False)
 
+    def abandon(self) -> None:
+        """Cancel the running job and ignore its result (e.g. a new STOS opened).
+
+        Cooperative cancel is signaled, then this runner is marked idle so a
+        later success/error callback from the abandoned generation is dropped.
+        """
+        event = self._cancel_event
+        if event is not None:
+            event.set()
+        with self._lock:
+            if not self._busy:
+                return
+            self._generation += 1
+        self._finish_job()
+
     def submit(
             self,
             worker: WorkerFn[T],

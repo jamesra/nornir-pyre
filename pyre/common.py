@@ -561,33 +561,31 @@ def either_roi_is_masked(transform: ITransform,
                          source_mask: NDArray | None,
                          target_controlpoint: PointLike,
                          alignmentArea: AreaLike,
+                         source_controlpoint: PointLike | None = None,
+                         min_unmasked: float = 0.25,
                          ):
-    """Returns True if either mask is all False"""
+    """Return True when the alignment window has too little unmasked tissue.
 
-    if target_mask is not None and source_mask is not None:
-        # Warp the masks through the same local rigid approximation AttemptAlignPoint uses
-        # for the image ROIs. Warping through the full mesh/RBF transform here cost ~18s
-        # per point versus ~2s, and sampled a different mapping than the ROIs being checked.
-        rigid_transform = nornir_imageregistration.local_distortion_correction.ApproximateRigidTransformByTargetPoints(
-            input_transform=transform,
-            target_points=target_controlpoint,  # type: ignore[arg-type]
-            cell_size=alignmentArea)  # type: ignore[arg-type]
+    Crops axis-aligned windows at the control-point coordinates (the same size
+    AttemptAlignPoint extracts). Does not warp through mesh/RBF: that path
+    costs seconds per point and can hit GPU RBF on mosaic-edge cells.
+    """
+    del transform
+    from nornir_imageregistration.grid_subdivision import cell_unmasked_fractions
 
-        target_mask_roi, source_mask_roi = nornir_imageregistration.local_distortion_correction.BuildAlignmentROIs(
-            transform=rigid_transform[0],
-            targetImage_param=target_mask,
-            sourceImage_param=source_mask,
-            target_image_stats=None,
-            source_image_stats=None,
-            target_controlpoint=target_controlpoint,  # type: ignore[arg-type]
-            alignmentArea=alignmentArea)  # type: ignore[arg-type]
-
-        if not numpy.any(target_mask_roi):
+    area = numpy.asarray(alignmentArea, dtype=numpy.int64).reshape(-1)
+    if area.size < 2 or int(area[0]) <= 0 or int(area[1]) <= 0:
+        return False
+    cell = (int(area[0]), int(area[1]))
+    threshold = float(min_unmasked)
+    if target_mask is not None:
+        target_yx = numpy.asarray(target_controlpoint, dtype=numpy.float64).reshape(1, 2)
+        if float(cell_unmasked_fractions(target_mask, target_yx, cell)[0]) < threshold:
             return True
-
-        if not numpy.any(source_mask_roi):
+    if source_mask is not None and source_controlpoint is not None:
+        source_yx = numpy.asarray(source_controlpoint, dtype=numpy.float64).reshape(1, 2)
+        if float(cell_unmasked_fractions(source_mask, source_yx, cell)[0]) < threshold:
             return True
-
     return False
 
 

@@ -116,6 +116,9 @@ class TestControlPointRegistrationQueue(unittest.TestCase):
         self.assertTrue(queue.is_cancelled(1))
         self.assertTrue(queue.is_cancelled(2))
         self.assertEqual(queue.pending_count, 0)
+        self.assertEqual(queue.in_flight_count, 0)
+        self.assertEqual(queue.queued_ids, frozenset())
+        self.assertTrue(queue.is_idle)
         self.assertIsNone(queue.take_next())
 
 
@@ -178,6 +181,101 @@ class TestBusyPointsOnController(unittest.TestCase):
         self.assertEqual(set(selection), {0, 2})
         self.assertEqual(controller.busy_point_indices, frozenset({1}))
         self.assertTrue(controller.freeze_composite_display_during_point_drag())
+
+    def test_replace_transform_clears_busy_and_ignores_late_peak(self) -> None:
+        """Opening a new model must drop blue glyphs and not move reminted IDs."""
+        controller = TransformController(_mesh(4))
+        added = self._enqueue_with_mock_pool(controller, [0, 1, 2])
+        self.assertTrue(added)
+        self.assertTrue(controller.busy_point_ids)
+        epoch = controller._registration_epoch
+        point_id = controller.point_id_for_index(0)
+        assert point_id is not None
+        snapshot = _mapped_yx_host(controller.GetFixedPoint(0)).copy()
+        controller.TransformModel = _mesh(4)
+        self.assertEqual(controller.busy_point_ids, frozenset())
+        self.assertTrue(controller._registration_queue.is_idle)
+        self.assertGreater(controller._registration_epoch, epoch)
+        expected = np.asarray(controller.points, dtype=np.float64).copy()
+        controller._on_registration_finished(point_id, snapshot, _record(), epoch)
+        np.testing.assert_allclose(controller.points, expected)
+
+    def test_cancel_in_flight_registrations_abandons_job_runner(self) -> None:
+        controller = TransformController(_mesh(4))
+        self._enqueue_with_mock_pool(controller, [0, 1])
+        with patch("pyre.registration_job.get_registration_job_runner") as get_runner:
+            runner = MagicMock()
+            get_runner.return_value = runner
+            controller.cancel_in_flight_registrations()
+            runner.abandon.assert_called_once()
+        self.assertEqual(controller.busy_point_ids, frozenset())
+        self.assertTrue(controller._registration_queue.is_idle)
+
+    def _enqueue_with_mock_pool(self, controller: TransformController, indices: list[int]) -> list[int]:
+        pool = MagicMock()
+        pool.add_task = MagicMock()
+        with patch("pyre.controllers.transformcontroller.QApplication") as qapp:
+            qapp.instance.return_value = _fake_qapp()
+            with patch(
+                    "pyre.controllers.transformcontroller.pools.GetGlobalThreadPool",
+                    return_value=pool,
+            ):
+                return controller.enqueue_point_registrations(
+                    indices, align_fn=lambda **_: _record())
+
+    def _finish_registration(self, controller: TransformController, index: int) -> None:
+        point_id = controller.point_id_for_index(index)
+        assert point_id is not None
+        snapshot = _mapped_yx_host(controller.GetFixedPoint(index))
+        controller._on_registration_finished(point_id, snapshot, None)
+
+    def test_space_reregisters_restore_selection_when_still_in_view(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        controller._point_in_view_fn = lambda index: index == 0
+        added = self._enqueue_with_mock_pool(controller, [0])
+        self.assertTrue(added)
+        self.assertEqual(set(selection), set())
+        self._finish_registration(controller, 0)
+        self.assertEqual(set(selection), {0})
+
+    def test_space_does_not_restore_selection_if_user_picked_another_point(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        controller._point_in_view_fn = lambda _index: True
+        self._enqueue_with_mock_pool(controller, [0])
+        self.assertEqual(set(selection), set())
+        selection.add(2)
+        self._finish_registration(controller, 0)
+        self.assertEqual(set(selection), {2})
+
+    def test_space_does_not_restore_selection_if_point_left_the_view(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        controller._point_in_view_fn = lambda _index: False
+        self._enqueue_with_mock_pool(controller, [0])
+        self._finish_registration(controller, 0)
+        self.assertEqual(set(selection), set())
+
+    def test_register_all_does_not_restore_every_point(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        controller._point_in_view_fn = lambda _index: True
+        self._enqueue_with_mock_pool(controller, [0, 1, 2, 3])
+        for index in range(4):
+            self._finish_registration(controller, index)
+        self.assertEqual(set(selection), set())
+
+    def test_space_restores_all_queued_selected_points_still_in_view(self) -> None:
+        selection = ObservableSet(initial_set={0, 1})
+        controller = TransformController(_mesh(4), selected_points=selection)
+        controller._point_in_view_fn = lambda index: index in (0, 1)
+        self._enqueue_with_mock_pool(controller, [0, 1])
+        self.assertEqual(set(selection), set())
+        self._finish_registration(controller, 0)
+        self.assertEqual(set(selection), set())
+        self._finish_registration(controller, 1)
+        self.assertEqual(set(selection), {0, 1})
 
     def test_listener_fires_only_when_union_changes(self) -> None:
         controller = TransformController(_mesh(4))

@@ -61,3 +61,27 @@ def pytest_ignore_collect(collection_path: Path, config) -> bool | None:  # noqa
         if importlib.util.find_spec("PyQt6") is None:
             return True
     return None
+
+
+def pytest_runtest_setup(item) -> None:  # noqa: ARG001
+    """Keep the Qt main-thread dispatcher on the GUI thread.
+
+    Earlier tests may construct it from a pool worker via ``qt_post_to_main``.
+    Posts then never run under ``processEvents`` on the test thread.
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+    except ImportError:
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    try:
+        from pyre import qt_eventmanager as qem
+    except Exception:
+        return
+    dispatcher = qem._main_thread_dispatcher
+    if dispatcher is not None and dispatcher.thread() == app.thread():
+        return
+    qem._main_thread_dispatcher = None
+    qem.init_main_thread_dispatcher()

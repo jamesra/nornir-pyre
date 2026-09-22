@@ -124,6 +124,62 @@ def resolve_load_path(
     return None
 
 
+def _existing_file(path: str | None) -> str | None:
+    """Return *path* when it is an existing file, else None."""
+    return path if path and os.path.isfile(path) else None
+
+
+def expected_stos_path_for_source(
+        folder: str,
+        basename: str,
+        source: StosFileSource,
+        *,
+        mode: BrowseMode = BrowseMode.stos_group,
+) -> str:
+    """Return the canonical path for *source* under *folder*, whether or not it exists."""
+    if mode == BrowseMode.flat_manual:
+        return os.path.join(folder, basename)
+    if source == StosFileSource.input:
+        return os.path.join(automatic_directory(folder), basename)
+    if source == StosFileSource.manual:
+        return os.path.join(manual_directory(folder), basename)
+    return os.path.join(folder, basename)
+
+
+def refresh_browser_row(
+        folder: str | None,
+        row: StosBrowserRow,
+        mode: BrowseMode = BrowseMode.stos_group,
+) -> StosBrowserRow:
+    """Re-stat output / Automatic / Manual files for *row*.
+
+    Keeps a cached path that still exists so injected test rows remain valid, and
+    picks up files created under *folder* after the last directory scan.
+    """
+    if mode == BrowseMode.flat_manual:
+        expected_manual = os.path.join(folder, row.basename) if folder else None
+        return StosBrowserRow(
+            basename=row.basename,
+            auto_path=None,
+            manual_path=_existing_file(row.manual_path) or _existing_file(expected_manual),
+            input_path=None,
+            quality_score=row.quality_score,
+        )
+
+    expected_auto = os.path.join(folder, row.basename) if folder else None
+    expected_input = (
+        os.path.join(automatic_directory(folder), row.basename) if folder else None)
+    expected_manual = (
+        os.path.join(manual_directory(folder), row.basename) if folder else None)
+    return StosBrowserRow(
+        basename=row.basename,
+        auto_path=_existing_file(row.auto_path) or _existing_file(expected_auto),
+        manual_path=_existing_file(row.manual_path) or _existing_file(expected_manual),
+        input_path=_existing_file(row.input_path) or _existing_file(expected_input),
+        quality_score=row.quality_score,
+    )
+
+
 def resolve_stos_path_in_group(
         stos_group_folder: str,
         basename: str,

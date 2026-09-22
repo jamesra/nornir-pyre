@@ -154,6 +154,35 @@ class TestPyreRegistrationJobRunner(unittest.TestCase):
         self._drain(runner)
         self.assertEqual(previews[-1], "kept")
 
+    def test_abandon_ignores_success_and_clears_busy(self) -> None:
+        runner = RegistrationJobRunner()
+        applied: list[object] = []
+        gate = threading.Event()
+
+        def worker(cancel_event, progress_callback):
+            gate.wait(timeout=2.0)
+            return 42
+
+        self.assertTrue(runner.submit(
+            worker,
+            title="abandon-test",
+            on_success=lambda result: applied.append(result),
+        ))
+        self.assertTrue(runner.busy)
+        runner.abandon()
+        self.assertFalse(runner.busy)
+        gate.set()
+        self._drain(runner)
+        self.assertEqual(applied, [])
+        self.assertTrue(runner.submit(
+            worker,
+            title="after-abandon",
+            on_success=lambda result: applied.append(result),
+        ))
+        gate.set()
+        self._drain(runner)
+        self.assertEqual(applied, [42])
+
 
 if __name__ == "__main__":
     unittest.main()

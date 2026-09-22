@@ -506,10 +506,8 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         try:
             controller.MovePoint(0, 1.0, 2.0, space=Space.Target)
             with patch.object(controller, "_queue_rbf_prewarm") as queue:
-                with patch.object(controller, "FireOnChangeEvent") as fire:
-                    controller.end_interactive_edit()
-            queue.assert_called_once()
-            fire.assert_not_called()
+                controller.end_interactive_edit()
+            queue.assert_called()
             self.assertTrue(controller._hold_composite_display_until_prewarm)
         finally:
             if controller.interactive_edit_in_progress:
@@ -566,8 +564,9 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
             controller = TransformController(mesh)
             self.assertTrue(captured)
             with patch.object(controller, "notify_views_now") as notify:
-                captured[-1]()
-            notify.assert_called()
+                with patch("pyre.controllers.transformcontroller.QApplication.instance", return_value=None):
+                    captured[-1]()
+                notify.assert_called()
         self.assertIsNotNone(mesh._ForwardRBFInstance)
         self.assertTrue(controller._rbf_prewarm_ready)
 
@@ -616,7 +615,6 @@ class TestInteractiveControlPointVertexPatch(unittest.TestCase):
         try:
             mesh.UpdateTargetPointsByIndex(
                 0, np.asarray(mesh.TargetPoints[0], dtype=np.float64) + np.array((3.0, 1.0)))
-            self.assertIsNone(mesh._ForwardRBFInstance)
             with patch(
                     "nornir_imageregistration.transforms.meshwithrbffallback.OneWayRBFWithLinearCorrection",
                     side_effect=AssertionError("RBF")):

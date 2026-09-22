@@ -48,6 +48,7 @@ class TestStosFileBrowserAsyncScan(unittest.TestCase):
 
             self.assertEqual(browser._list_widget.rowCount(), 2)
             self.assertEqual(browser._list_widget.item(0, 0).text(), "a.stos")
+            self.assertRegex(browser._list_widget.item(0, 2).text(), r"^\d{2}:\d{2}$")
             self.assertEqual(
                 browser._list_widget.item(0, 1).text(),
                 format_quality_score(None),

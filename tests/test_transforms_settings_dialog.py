@@ -30,15 +30,21 @@ class TestTryFlippedDefault(unittest.TestCase):
         self.assertTrue(app.stos.brute_registration.try_flipped)
 
 
-class TestGridRefineAngleSearchDefault(unittest.TestCase):
+class TestGridRefinePreviewFlags(unittest.TestCase):
+    def test_preview_flags_default_off(self) -> None:
+        defaults = GridRefineDefaults()
+        self.assertFalse(defaults.preview_pass_transforms)
+        self.assertFalse(defaults.gpu_preview_grid_convert)
+        self.assertFalse(AppSettings().stos.grid_refine.preview_pass_transforms)
+        self.assertFalse(AppSettings().stos.grid_refine.gpu_preview_grid_convert)
+        self.assertAlmostEqual(0.25, defaults.masked_relax_min_unmasked)
+        self.assertAlmostEqual(0.25, AppSettings().stos.grid_refine.masked_relax_min_unmasked)
+
     def test_angle_search_range_defaults_to_zero(self) -> None:
         defaults = GridRefineDefaults()
         self.assertEqual(0.0, defaults.max_angle)
         self.assertEqual(0.0, AppSettings().stos.grid_refine.max_angle)
         self.assertEqual([0.0], list(defaults.to_angle_search_range().angle_range))
-
-
-class TestTransformsSettingsDialog(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
@@ -56,6 +62,10 @@ class TestTransformsSettingsDialog(unittest.TestCase):
         self.assertEqual("512", dlg._cell_size.currentText())
         self.assertEqual("256", dlg._grid_spacing.currentText())
         self.assertEqual(7, dlg._num_iterations.value())
+        self.assertFalse(dlg._preview_pass_transforms.isChecked())
+        self.assertFalse(dlg._gpu_preview_grid_convert.isChecked())
+        self.assertFalse(dlg._gpu_preview_grid_convert.isEnabled())
+        self.assertAlmostEqual(25.0, dlg._masked_relax_min_unmasked.value())
         self.assertEqual("128", dlg._alignment_area.currentText())
 
     def test_apply_to_settings_updates_try_flipped_and_tabs(self) -> None:
@@ -72,6 +82,9 @@ class TestTransformsSettingsDialog(unittest.TestCase):
         dlg._num_iterations.setValue(9)
         dlg._grid_max_angle.setValue(10.0)
         dlg._grid_angle_step.setValue(2.5)
+        dlg._preview_pass_transforms.setChecked(True)
+        dlg._gpu_preview_grid_convert.setChecked(True)
+        dlg._masked_relax_min_unmasked.setValue(40.0)
         dlg._set_combo_value(dlg._alignment_area, 512)
         dlg._point_max_angle.setValue(4.0)
         dlg._point_angle_step.setValue(1.0)
@@ -86,6 +99,9 @@ class TestTransformsSettingsDialog(unittest.TestCase):
         self.assertEqual(9, settings.stos.grid_refine.num_iterations)
         self.assertAlmostEqual(10.0, settings.stos.grid_refine.max_angle)
         self.assertAlmostEqual(2.5, settings.stos.grid_refine.angle_step_size)
+        self.assertTrue(settings.stos.grid_refine.preview_pass_transforms)
+        self.assertTrue(settings.stos.grid_refine.gpu_preview_grid_convert)
+        self.assertAlmostEqual(0.4, settings.stos.grid_refine.masked_relax_min_unmasked)
         self.assertEqual(512, settings.stos.point_registration.alignment_area)
         self.assertAlmostEqual(4.0, settings.stos.point_registration.angle_search_range.max_angle)
 
@@ -111,6 +127,26 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
 
+    def test_refine_dialog_persists_preview_flags(self) -> None:
+        settings = AppSettings()
+        settings.stos.grid_refine = GridRefineDefaults(
+            cell_size=512,
+            grid_spacing=256,
+            num_iterations=8,
+            preview_pass_transforms=True,
+            gpu_preview_grid_convert=True,
+        )
+
+        def accept_dialog(dlg: RefineGridSettingsDialog) -> QDialog.DialogCode:
+            return QDialog.DialogCode.Accepted
+
+        with patch.object(RefineGridSettingsDialog, "exec", accept_dialog):
+            result = RefineGridSettingsDialog.GetGridRefineSettings(app_settings=settings)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(settings.stos.grid_refine.preview_pass_transforms)
+        self.assertTrue(settings.stos.grid_refine.gpu_preview_grid_convert)
+
     def test_grid_refine_dialogs_label_iterations_as_maximum_passes(self) -> None:
         settings = AppSettings()
         refine_dialog = RefineGridSettingsDialog(
@@ -126,7 +162,7 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
             {label.text() for label in transforms_dialog.findChildren(QLabel)},
         )
 
-    def test_seeds_from_app_settings_and_writes_back(self) -> None:
+    def test_refine_dialog_persists_grid_settings(self) -> None:
         settings = AppSettings()
         settings.stos.grid_refine = GridRefineDefaults(
             cell_size=512,

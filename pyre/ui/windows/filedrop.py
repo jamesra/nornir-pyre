@@ -60,7 +60,8 @@ class FileDrop:
                 if extension == ".stos":
                     config.stosdirname = dirname
                     config.stosfilename = filename
-                    config.LoadStos(fullpath)  # type: ignore[attr-defined]
+                    from pyre.ui.windows.stoswindow import StosWindow
+                    StosWindow.loadStos(fullpath, browser_folder=None, browser_flat_manual=False)
                 elif extension == ".mosaic":
                     config.stosdirname = dirname
                     config.stosfilename = filename

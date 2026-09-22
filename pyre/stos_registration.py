@@ -136,8 +136,14 @@ def _publish_alignment_images(stos_state: object) -> None:
 def wire_stos_state_after_load(
         stos_state: object,
         image_viewmodel_manager: object,
+        image_manager: object | None = None,
 ) -> None:
-    """Point StosState viewmodels at the slots populated by ``ImageLoader.load_stos``."""
+    """Point StosState viewmodels at the slots populated by ``ImageLoader.load_stos``.
+
+    When mask view-models are unset (typical after STOS open), keep Mask arrays
+    already present on the ImageManager slots instead of rebuilding permutations
+    with ``mask=None`` and dropping the STOS masks.
+    """
     from pyre.interfaces.viewtype import ViewType
 
     if not hasattr(stos_state, "SourceImageViewModel") and not hasattr(stos_state, "FixedImageViewModel"):
@@ -157,13 +163,103 @@ def wire_stos_state_after_load(
     stos_state.SourceImageViewModel = source_vm  # type: ignore[attr-defined]
     stos_state.TargetImageViewModel = target_vm  # type: ignore[attr-defined]
 
+    source_mask_vm = getattr(stos_state, "FixedImageMaskViewModel", None)
+    target_mask_vm = getattr(stos_state, "WarpedImageMaskViewModel", None)
+
+    source_slot = None
+    target_slot = None
+    if image_manager is not None:
+        try:
+            source_slot = image_manager[ViewType.Source.value]  # type: ignore[index]
+        except (KeyError, TypeError):
+            pass
+        try:
+            target_slot = image_manager[ViewType.Target.value]  # type: ignore[index]
+        except (KeyError, TypeError):
+            pass
+
     update_permutations = getattr(stos_state, "_update_image_permutations", None)
     if callable(update_permutations):
-        source_mask = getattr(stos_state, "FixedImageMaskViewModel", None)
-        target_mask = getattr(stos_state, "WarpedImageMaskViewModel", None)
-        stos_state._fixed_image_permutations = update_permutations(source_vm, source_mask)  # type: ignore[attr-defined]
-        stos_state._warped_image_permutations = update_permutations(target_vm, target_mask)  # type: ignore[attr-defined]
+        if source_mask_vm is not None:
+            stos_state._fixed_image_permutations = update_permutations(source_vm, source_mask_vm)  # type: ignore[attr-defined]
+        elif source_slot is not None:
+            # Preserve STOS-loaded Mask from the image manager.
+            stos_state._fixed_image_permutations = source_slot  # type: ignore[attr-defined]
+        else:
+            stos_state._fixed_image_permutations = update_permutations(source_vm, None)  # type: ignore[attr-defined]
+
+        if target_mask_vm is not None:
+            stos_state._warped_image_permutations = update_permutations(target_vm, target_mask_vm)  # type: ignore[attr-defined]
+        elif target_slot is not None:
+            stos_state._warped_image_permutations = target_slot  # type: ignore[attr-defined]
+        else:
+            stos_state._warped_image_permutations = update_permutations(target_vm, None)  # type: ignore[attr-defined]
+
         _publish_alignment_images(stos_state)
+
+    # #region agent log
+    try:
+        import json
+        import time
+        fixed_perm = getattr(stos_state, "_fixed_image_permutations", None)
+        warped_perm = getattr(stos_state, "_warped_image_permutations", None)
+        with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
+            _f.write(json.dumps({
+                "sessionId": "79a4da",
+                "hypothesisId": "G,I",
+                "location": "stos_registration.py:wire_stos_state_after_load",
+                "message": "wired stos masks after load",
+                "data": {
+                    "mask_vm_fixed_is_none": source_mask_vm is None,
+                    "mask_vm_warped_is_none": target_mask_vm is None,
+                    "fixed_perm_mask_is_none": fixed_perm is None or getattr(fixed_perm, "Mask", None) is None,
+                    "warped_perm_mask_is_none": warped_perm is None or getattr(warped_perm, "Mask", None) is None,
+                    "used_image_manager": image_manager is not None,
+                    "runId": "post-fix",
+                },
+                "timestamp": int(time.time() * 1000),
+            }) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
+def ensure_mask_viewmodels_from_load(
+        stos_state: object,
+        load_result: object,
+) -> None:
+    """Populate Fixed/Warped mask view-models from a STOS load when unset.
+
+    STOS open loads masks into ImagePermutationHelper but historically left
+    MaskViewModels None, so Clear-masked-points and other VM-only paths looked
+    like masks were missing.
+    """
+    from pyre.viewmodels import ImageViewModel
+
+    source = getattr(load_result, "source", None)
+    target = getattr(load_result, "target", None)
+
+    if (
+        getattr(stos_state, "FixedImageMaskViewModel", None) is None
+        and source is not None
+        and getattr(source, "permutations", None) is not None
+        and source.permutations.Mask is not None
+    ):
+        stos_state.FixedImageMaskViewModel = ImageViewModel(  # type: ignore[attr-defined]
+            source.permutations.Mask,
+            image_filename=getattr(source, "mask_fullpath", None),
+        )
+
+    if (
+        getattr(stos_state, "WarpedImageMaskViewModel", None) is None
+        and target is not None
+        and getattr(target, "permutations", None) is not None
+        and target.permutations.Mask is not None
+    ):
+        stos_state.WarpedImageMaskViewModel = ImageViewModel(  # type: ignore[attr-defined]
+            target.permutations.Mask,
+            image_filename=getattr(target, "mask_fullpath", None),
+        )
 
 
 def apply_stos_transform_to_controller(

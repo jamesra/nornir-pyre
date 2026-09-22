@@ -136,6 +136,18 @@ class TransformsSettingsDialog(QDialog):
         self._preview_pass_transforms.toggled.connect(
             self._gpu_preview_grid_convert.setEnabled)
 
+        self._masked_relax_min_unmasked = QDoubleSpinBox(page)
+        self._masked_relax_min_unmasked.setRange(0.0, 100.0)
+        self._masked_relax_min_unmasked.setSingleStep(5.0)
+        self._masked_relax_min_unmasked.setDecimals(0)
+        self._masked_relax_min_unmasked.setSuffix("%")
+        self._masked_relax_min_unmasked.setValue(
+            float(defaults.masked_relax_min_unmasked) * 100.0)
+        self._masked_relax_min_unmasked.setToolTip(
+            "Grid control points with at least this much unmasked tissue in both "
+            "source and target cells stay fixed. Masked neighbors relax toward them "
+            "after a point is moved or registered.")
+
         form.addRow("Cell size", self._cell_size)
         form.addRow("Grid spacing", self._grid_spacing)
         form.addRow("Maximum passes", self._num_iterations)
@@ -143,6 +155,7 @@ class TransformsSettingsDialog(QDialog):
         form.addRow("Angle step (degrees)", self._grid_angle_step)
         form.addRow("Preview pass transforms", self._preview_pass_transforms)
         form.addRow("GPU preview grid convert", self._gpu_preview_grid_convert)
+        form.addRow("Min unmasked to pin", self._masked_relax_min_unmasked)
         return page
 
     def _build_point_tab(self, point: PointRegistrationSettings) -> QWidget:
@@ -223,6 +236,7 @@ class TransformsSettingsDialog(QDialog):
             angle_step_size=float(self._grid_angle_step.value()),
             preview_pass_transforms=self._preview_pass_transforms.isChecked(),
             gpu_preview_grid_convert=self._gpu_preview_grid_convert.isChecked(),
+            masked_relax_min_unmasked=float(self._masked_relax_min_unmasked.value()) / 100.0,
         )
 
         self._settings.stos.point_registration = PointRegistrationSettings(

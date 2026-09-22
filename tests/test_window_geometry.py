@@ -83,7 +83,10 @@ class TestCaptureWindowGeometry(unittest.TestCase):
             capture_window_geometry(settings, window_manager)
 
         self.assertEqual(set(settings.ui.window_geometry.keys()), set(STOS_WINDOW_KEYS))
-        self.assertEqual(settings.ui.window_geometry["Source"].width, 400)
+        self.assertEqual(
+            settings.ui.window_geometry["Source"].width,
+            windows["Source"].frameGeometry().width(),
+        )
 
 
 class TestApplySavedWindowGeometry(unittest.TestCase):
@@ -361,6 +364,88 @@ class TestSingleMonitorAllWindowsLayout(unittest.TestCase):
         self.assertEqual(by_widget[source], (320, 0, 800, 540))
         self.assertEqual(by_widget[target], (1120, 0, 800, 540))
         self.assertEqual(by_widget[composite], (320, 540, 1600, 540))
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.sync_window_visibility_menus")
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_uses_full_display_when_browser_hidden(
+            self, mock_qgui: MagicMock, _sync: MagicMock) -> None:
+        from pyre.interfaces.viewtype import ViewType
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
+
+        source = MagicMock(spec=QMainWindow)
+        target = MagicMock(spec=QMainWindow)
+        composite = MagicMock(spec=QMainWindow)
+        windows = {
+            ViewType.Source: source,
+            ViewType.Target: target,
+            ViewType.Composite: composite,
+        }
+        window_manager = MagicMock()
+        window_manager.__contains__ = lambda _self, key: key in windows
+        window_manager.__getitem__ = lambda _self, key: windows[key]
+
+        browser = MagicMock()
+        browser.isVisible.return_value = False
+
+        old_browser = StosWindow._folder_browser
+        StosWindow._folder_browser = browser
+        try:
+            with patch("pyre.ui.windows.stoswindow.apply_frame_geometry_to_widget") as mock_apply:
+                StosWindow.apply_single_monitor_all_windows_layout(window_manager)
+        finally:
+            StosWindow._folder_browser = old_browser
+
+        self.assertEqual(mock_apply.call_count, 3)
+        by_widget = {call.args[0]: call.args[1:] for call in mock_apply.call_args_list}
+        self.assertNotIn(browser, by_widget)
+        self.assertEqual(by_widget[source], (0, 0, 960, 540))
+        self.assertEqual(by_widget[target], (960, 0, 960, 540))
+        self.assertEqual(by_widget[composite], (0, 540, 1920, 540))
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.sync_window_visibility_menus")
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_one_display_layout_docks_browser_on_selected_screen(
+            self, mock_qgui: MagicMock, _sync: MagicMock) -> None:
+        from pyre.interfaces.viewtype import ViewType
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [
+            _screen(QRect(0, 0, 1920, 1080)),
+            _screen(QRect(1920, 0, 1920, 1080)),
+        ]
+
+        source = MagicMock(spec=QMainWindow)
+        target = MagicMock(spec=QMainWindow)
+        composite = MagicMock(spec=QMainWindow)
+        windows = {
+            ViewType.Source: source,
+            ViewType.Target: target,
+            ViewType.Composite: composite,
+        }
+        window_manager = MagicMock()
+        window_manager.__contains__ = lambda _self, key: key in windows
+        window_manager.__getitem__ = lambda _self, key: windows[key]
+
+        browser = MagicMock()
+        browser.isVisible.return_value = True
+        browser.width.return_value = 320
+        browser.minimum_layout_width.return_value = 200
+
+        old_browser = StosWindow._folder_browser
+        StosWindow._folder_browser = browser
+        try:
+            with patch("pyre.ui.windows.stoswindow.apply_frame_geometry_to_widget") as mock_apply:
+                StosWindow.apply_single_monitor_all_windows_layout(window_manager, 1)
+        finally:
+            StosWindow._folder_browser = old_browser
+
+        by_widget = {call.args[0]: call.args[1:] for call in mock_apply.call_args_list}
+        self.assertEqual(by_widget[browser], (1920, 0, 320, 1080))
+        self.assertEqual(by_widget[source], (2240, 0, 800, 540))
+        self.assertEqual(by_widget[target], (3040, 0, 800, 540))
+        self.assertEqual(by_widget[composite], (2240, 540, 1600, 540))
 
 
 if __name__ == "__main__":

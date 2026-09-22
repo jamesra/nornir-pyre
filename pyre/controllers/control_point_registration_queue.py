@@ -132,10 +132,17 @@ class ControlPointRegistrationQueue:
             self._cancelled.add(point_id)
 
     def cancel_all(self) -> None:
-        """Clear pending work and discard in-flight results when they arrive."""
+        """Drop pending work and free in-flight slots immediately.
+
+        IDs that were running stay in ``_cancelled`` so a late callback can
+        still be recognized, but they no longer occupy capacity or the busy
+        glyph set. Point IDs may be reminted on a new ``.stos``; callers must
+        also use a dispatch epoch so a late peak cannot land on a reused ID.
+        """
         self._cancelled.update(self._in_flight)
         self._pending.clear()
         self._pending_set.clear()
+        self._in_flight.clear()
 
     def is_cancelled(self, point_id: int) -> bool:
         """True when the in-flight job for *point_id* must discard its result."""
