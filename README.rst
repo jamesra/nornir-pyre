@@ -9,6 +9,8 @@ Documentation
 * **Full manual (umbrella):** https://nornir.github.io/
 * **Windows install (end users):** https://nornir.github.io/packages/pyre_install.html
 * **Development and packaging:** https://nornir.github.io/development/pyre_development.html
+* **Using Pyre (controls):** https://nornir.github.io/guides/pyre_use.html
+* **Build a volume:** https://nornir.github.io/guides/build_volume.html
 * **Related overview:** https://nornir.github.io/packages/other_packages.html
 
 Overview
@@ -75,130 +77,6 @@ Software OpenGL fallback (development troubleshooting)::
     set PYOPENGL_PLATFORM=software
     pyre
 
+Mouse, keyboard, and alignment controls are in the manual:
 
-Common Workflows
-~~~~~~~~~~~~~~~
-
-Image Registration
------------------
-
-1. Load a pair of images for registration:
-
-   * Use File > Open STOS to load an existing transformation
-   * Or use File > New STOS to create a new transformation between two images
-
-2. Add control points (triangulation / standard STOS transforms with movable control points):
-
-   * Use Shift+Click to add corresponding points in both images
-   * Use Alt+Shift+Click to add a point and auto-align it
-
-   Refined grid transforms do not support adding or removing control points via the UI (use triangulation or convert workflow if you need to edit the mesh).
-
-3. Align the images:
-
-   * Rigid transforms: Space runs a local BruteForce refine (±5° at 1° steps) keeping scale; Shift+Space also refines scale
-   * Mesh / RBF: Space auto-aligns the selected control point; Shift+Space auto-aligns all points
-   * Grid: Space auto-aligns the selected control point; Shift+Space runs one Refine w/ Grid pass (settings dialog, then live preview). Menu Refine w/ Grid runs the chosen number of iterations in one job and updates the view after each pass. Do not treat N Shift+Space presses as N-pass refine.
-   * Manually adjust points by dragging them
-
-4. Save the transformation:
-
-   * Use File > Save STOS to save the transformation
-
-Mosaic Viewing
--------------
-
-1. Load a mosaic:
-
-   * Use File > Open Mosaic to load an existing mosaic file
-
-2. Navigate the mosaic:
-
-   * Use WASD keys or right-click drag to pan
-   * Use mouse wheel to zoom; Shift+scroll scales the transform about the cursor when supported; Ctrl+scroll (and Ctrl+Shift+scroll for finer steps) rotates the transform when supported
-   * Use Page Up / Page Down to change magnification
-
-Usage
-~~~~~
-
-Mouse Controls
---------------
-
-The bindings below apply to STOS registration views. Triangulation transforms support adding points; refined grid transforms do not (see workflows above).
-
-Left Button:
-    * Click to select an existing point
-    * Shift+Click to add a new point
-    * Alt+Shift+Click to add a new point and auto-align
-    * Click+drag to move an existing point
-    * Ctrl+Click+drag to translate the mapped (source) image
-    * Alt+Click to move currently selected point to mouse position
-
-Right Button:
-    * Shift+Click to delete a point (triangulation transforms; not available on refined grid transforms)
-    * Click+drag to move the view
-
-Scroll wheel:
-    * Zoom
-    * Shift+scroll to scale the source image about the cursor (rigid / similarity transforms)
-    * Ctrl+scroll to rotate the mapped section (Composite view for rigid)
-    * Ctrl+Shift+scroll to slowly rotate the mapped section
-
-Keyboard Controls
------------------
-
-Navigation:
-    * A, W, S, D: Move the view
-    * Page Up/Down: Change the magnification
-
-View Controls:
-    * M: Match Source, Target, and Composite to the focused window's view center and magnification
-    * L: Show transform mesh lines
-    * F: Flip the source (mapped) image
-    * Tab: Toggle how the source image is drawn (registered vs alternate display) on the shared transform. Applies to Source, Target, and Composite STOS windows.
-
-Alignment:
-    * Rigid: Space refines angle (±5° at 1° steps); Shift+Space also refines scale
-    * Mesh / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
-    * Grid: Space auto-aligns the selected point; Shift+Space is one refine pass; Refine w/ Grid is the multi-pass job with per-pass preview
-
-Undo/Redo:
-    * Ctrl+Z: Undo a step
-    * Ctrl+X: Redo a step
-
-Troubleshooting
-~~~~~~~~~~~~~~
-
-OpenGL Issues
-------------
-If you encounter OpenGL-related errors:
-
-1. Ensure your graphics drivers are up to date
-2. Try running with software rendering::
-
-    set PYOPENGL_PLATFORM=software
-    pyre
-3. Check the console output for specific OpenGL context errors
-
-Image Loading Issues
-------------------
-If images fail to load:
-
-1. Verify the file paths are correct and accessible
-2. Check that the image format is supported (TIFF, PNG, JPEG, etc.)
-3. For large images, ensure you have sufficient RAM available
-
-Performance Issues
-----------------
-If the application is running slowly:
-
-1. Close other memory-intensive applications
-2. For large images, consider using lower-resolution versions for alignment
-3. Disable mesh line display (L key) when not needed
-
-About
-~~~~~
-
-Pyre was developed by James Anderson and Drew Ferrell as part of the Nornir project, a suite of tools for scientific image processing and analysis. The project is particularly focused on neuroscience applications but is applicable to any domain requiring precise image registration and analysis.
-
-For more information about the QT migration, see the QT_MIGRATION_README.md file.
+https://nornir.github.io/guides/pyre_use.html
