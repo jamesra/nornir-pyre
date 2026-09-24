@@ -38,6 +38,14 @@ Optional override: `.\build-installer.ps1 -Version 1.7.5`
 
 Output: `dist/installer/Pyre-<version>-Setup.exe`
 
+Publish to GitHub (from monorepo root; also VS Code **pyre: publish Windows release**):
+
+```powershell
+..\..\..\release\publish_pyre_windows_release.ps1
+```
+
+Add user-facing notes under `nornir-pyre/CHANGELOG.user.md` (`## <version>`) before publishing.
+
 ## Files
 
 | File | Purpose |
