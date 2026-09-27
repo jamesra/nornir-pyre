@@ -86,10 +86,11 @@ class TestControlsHelpSection(unittest.TestCase):
 
 
 class TestBundledReadmeSnippet(unittest.TestCase):
-    def test_repository_readme_contains_anchor(self) -> None:
-        rst_path = _PYRE_ROOT / "README.rst"
-        if not rst_path.is_file():
-            self.skipTest("README.rst not present in development tree")
+    def test_packaged_help_contains_anchor(self) -> None:
+        """In-app Help uses pyre/README.txt; the short root README.rst only links to monodoc."""
+        txt_path = _PYRE_PACKAGE / "README.txt"
+        if not txt_path.is_file():
+            self.skipTest("pyre/README.txt not present in development tree")
         text = readme_text_with_fallback()
         self.assertIn(CONTROLS_HELP_ANCHOR, text)
         self.assertGreater(controls_help_anchor_index(text), 0)

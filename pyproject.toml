@@ -41,7 +41,7 @@ classifiers = [
 
 
 [tool.setuptools.package-data]
-"pyre" = ["resources/*.png"]
+"pyre" = ["resources/*.png", "README.txt", "settings.json"]
 
 
 [project.optional-dependencies]

@@ -45,7 +45,7 @@ setup(
         "gl": ["pyopengl-accelerate"],
     },
     package_data={
-        "pyre": ["resources/*.png"],
+        "pyre": ["resources/*.png", "README.txt", "settings.json"],
     },
     include_package_data=True,
     entry_points={

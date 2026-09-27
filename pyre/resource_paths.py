@@ -71,21 +71,24 @@ def controls_help_section(text: str) -> str | None:
 
 def readme_text_with_fallback(relative_to_pyre_package: str = "README.txt") -> str:
     """
-    Prefer the repository README.rst next to the installed ``pyre`` package (nornir-pyre/README.rst),
-    then fall back to a file under the pyre package (e.g. README.txt).
+    Prefer the packaged in-app help file (``pyre/README.txt``, mouse/keyboard controls),
+    then the repository landing ``README.rst`` next to the ``pyre`` package.
     """
+    readme_path = os.path.join(pyre.__path__[0], relative_to_pyre_package)
+    if os.path.isfile(readme_path):
+        with open(readme_path, encoding='utf-8') as h_readme:
+            return h_readme.read()
+
     pkg_root = os.path.dirname(pyre.__path__[0])
     rst_path = os.path.join(pkg_root, 'README.rst')
     if os.path.isfile(rst_path):
         with open(rst_path, encoding='utf-8') as h_rst:
             return _strip_rst_for_plain_text(h_rst.read())
 
-    readme_path = os.path.join(pyre.__path__[0], relative_to_pyre_package)
-    if not os.path.exists(readme_path):
-        return "No readme was found at " + readme_path + " (and no README.rst at " + rst_path + ")"
-
-    with open(readme_path, encoding='utf-8') as h_readme:
-        return h_readme.read()
+    return (
+        "No readme was found at " + readme_path
+        + " (and no README.rst at " + rst_path + ")"
+    )
 
 
 def README() -> str:
