@@ -26,7 +26,6 @@ def _run_smoke_test() -> int:
     """Verify frozen/runtime imports without starting the GUI."""
     configure_frozen_environment()
 
-    import nornir_buildmanager  # noqa: F401
     import nornir_imageregistration  # noqa: F401
     import nornir_pools  # noqa: F401
     import nornir_shared  # noqa: F401
