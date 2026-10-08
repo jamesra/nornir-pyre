@@ -9,22 +9,11 @@ scratch scripts under ``tests/`` must not be imported during collection (see
 
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
 
+from nornir_imageregistration.headless import is_headless
+
 __all__ = ["is_headless"]
-
-
-def is_headless() -> bool:
-    """Match ``nornir_imageregistration.headless.is_headless`` (env + Linux DISPLAY)."""
-    flag = os.environ.get("NORNIR_HEADLESS", "").strip().lower()
-    if flag in ("1", "true", "yes", "on"):
-        return True
-    if sys.platform != "win32" and not os.environ.get("DISPLAY"):
-        return True
-    return False
-
 
 _PYRE_ROOT = Path(__file__).resolve().parent
 _TEST_DIR = _PYRE_ROOT / "tests"
