@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nornir_imageregistration.headless import is_headless
+from nornir_shared.headless import is_headless
 
 __all__ = ["is_headless"]
 
