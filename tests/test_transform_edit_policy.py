@@ -67,6 +67,20 @@ class TestTransformEditPolicy(unittest.TestCase):
             target_panel_manipulation_locked(
                 TransformType.RIGID, Space.Source, ViewType.Composite))
 
+    def test_target_panel_manipulation_locked_truth_table(self) -> None:
+        """Only rigid/grid layers on a non-Composite target panel are locked."""
+        for transform_type in TransformType:
+            for space in (Space.Source, Space.Target):
+                for view_type in (*ViewType, None):
+                    expected = (
+                        view_type != ViewType.Composite
+                        and space == Space.Target
+                        and transform_type in (TransformType.RIGID, TransformType.GRID))
+                    with self.subTest(transform_type=transform_type, space=space, view_type=view_type):
+                        self.assertEqual(
+                            expected,
+                            target_panel_manipulation_locked(transform_type, space, view_type))
+
     def test_blocks_rigid_translate_on_target_panel(self) -> None:
         self.assertTrue(
             blocks_layer_translate_action(

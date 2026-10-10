@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
+from PyQt6.QtCore import Qt
 
 from nornir_imageregistration.transforms import Rigid
 
 from pyre.commands.stos.translaterigidcommand import ManipulateRigidTransformCommand
+from pyre.commands.uicommandbase import UICommandBase
 from pyre.controllers.transformcontroller import TransformController
 from pyre.interfaces.viewtype import ViewType
 from pyre.selection_event_data import PointPair
@@ -106,6 +108,53 @@ class TestScaleWarpedPivot(unittest.TestCase):
         target_at_pivot_after = np.squeeze(controller.Transform(pivot.reshape(1, 2)))
         np.testing.assert_allclose(
             target_at_pivot_after, target_at_pivot_before, rtol=1e-4, atol=1e-3)
+
+
+class TestRigidTargetPanelLock(unittest.TestCase):
+    """Rigid layer edits are ignored on the standalone target panel, allowed elsewhere."""
+
+    def _command(self, space: Space, view_type: ViewType) -> ManipulateRigidTransformCommand:
+        """Build the command without Qt/DI, reporting ``view_type`` as its host panel."""
+        cmd = object.__new__(ManipulateRigidTransformCommand)
+        cmd._transform_controller = TransformController(
+            Rigid(target_offset=(10.0, 20.0), source_rotation_center=(0.0, 0.0), angle=0.0))
+        cmd._space = space
+        cmd._view_type = lambda: view_type  # type: ignore[method-assign]
+        return cmd
+
+    def _arrow_key_translates(self, space: Space, view_type: ViewType) -> bool:
+        """Press Left on the command and report whether the layer was translated."""
+        cmd = self._command(space, view_type)
+        event = MagicMock()
+        event.key.return_value = Qt.Key.Key_Left
+        event.modifiers.return_value = Qt.KeyboardModifier.NoModifier
+        with patch.object(cmd._transform_controller, "Translate") as translate:
+            cmd.on_key_down(event)
+        return translate.called
+
+    def _activate_begins_edit(self, space: Space, view_type: ViewType) -> bool:
+        """Activate the command and report whether an interactive edit began (else it cancelled)."""
+        cmd = self._command(space, view_type)
+        with patch.object(UICommandBase, "activate"), \
+                patch.object(cmd, "cancel") as cancel, \
+                patch.object(cmd._transform_controller, "begin_interactive_edit") as begin:
+            cmd.activate()
+        self.assertNotEqual(begin.called, cancel.called)
+        return begin.called
+
+    def test_arrow_key_ignored_on_target_panel(self) -> None:
+        self.assertFalse(self._arrow_key_translates(Space.Target, ViewType.Target))
+
+    def test_arrow_key_translates_on_source_and_composite(self) -> None:
+        self.assertTrue(self._arrow_key_translates(Space.Source, ViewType.Source))
+        self.assertTrue(self._arrow_key_translates(Space.Target, ViewType.Composite))
+
+    def test_activate_cancels_on_target_panel(self) -> None:
+        self.assertFalse(self._activate_begins_edit(Space.Target, ViewType.Target))
+
+    def test_activate_begins_edit_on_source_and_composite(self) -> None:
+        self.assertTrue(self._activate_begins_edit(Space.Source, ViewType.Source))
+        self.assertTrue(self._activate_begins_edit(Space.Target, ViewType.Composite))
 
 
 if __name__ == "__main__":
