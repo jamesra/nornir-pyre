@@ -26,7 +26,6 @@ from pyre.space import Space
 
 from pyre.container import IContainer
 from pyre.transform_edit_policy import (
-    fixed_image_manipulation_locked,
     rigid_rotation_locked,
     wheel_rotate_locked,
 )

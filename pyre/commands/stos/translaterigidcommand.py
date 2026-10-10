@@ -19,7 +19,7 @@ from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.container import IContainer
-from pyre.transform_edit_policy import fixed_image_manipulation_locked
+from pyre.transform_edit_policy import target_panel_manipulation_locked
 from pyre.interfaces.viewtype import ViewType
 from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
@@ -142,7 +142,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def on_key_down(self, event: QKeyEvent):
         """Called when a key is pressed"""
-        if fixed_image_manipulation_locked(
+        if target_panel_manipulation_locked(
                 self._transform_controller.type, self.space, self._view_type()):
             return
 
@@ -188,7 +188,7 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
-        if fixed_image_manipulation_locked(
+        if target_panel_manipulation_locked(
                 self._transform_controller.type, self.space, self._view_type()):
             self.cancel()
             return

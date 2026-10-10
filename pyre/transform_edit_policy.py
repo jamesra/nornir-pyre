@@ -20,14 +20,6 @@ def target_panel_manipulation_locked(
     return space == Space.Target and transform_type in (TransformType.RIGID, TransformType.GRID)
 
 
-def fixed_image_manipulation_locked(
-        transform_type: TransformType,
-        space: Space,
-        view_type: ViewType | None = None) -> bool:
-    """Deprecated alias for :func:`target_panel_manipulation_locked`."""
-    return target_panel_manipulation_locked(transform_type, space, view_type)
-
-
 def rigid_rotation_locked(
         transform_type: TransformType,
         view_type: ViewType | None = None) -> bool:
@@ -68,22 +60,6 @@ def source_panel_control_points_locked(
     )
 
 
-def target_panel_control_points_locked(
-        transform_model: Any,
-        space: Space,
-        view_type: ViewType | None = None) -> bool:
-    """Deprecated alias for :func:`source_panel_control_points_locked`."""
-    return source_panel_control_points_locked(transform_model, space, view_type)
-
-
-def fixed_panel_control_points_locked(
-        transform_model: Any,
-        space: Space,
-        view_type: ViewType | None = None) -> bool:
-    """Deprecated alias for :func:`source_panel_control_points_locked`."""
-    return source_panel_control_points_locked(transform_model, space, view_type)
-
-
 def source_panel_hint_message(
         transform_model: Any,
         transform_type: TransformType,
@@ -103,15 +79,6 @@ def source_panel_hint_message(
                 "rotate in Composite view")
         return "Source image — translate mapped layer in Source or Composite view"
     return None
-
-
-def fixed_panel_hint_message(
-        transform_model: Any,
-        transform_type: TransformType,
-        space: Space,
-        view_type: ViewType | None = None) -> str | None:
-    """Deprecated alias for :func:`source_panel_hint_message`."""
-    return source_panel_hint_message(transform_model, transform_type, space, view_type)
 
 
 def blocks_control_point_translate_action(

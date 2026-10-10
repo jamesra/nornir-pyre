@@ -36,7 +36,7 @@ from pyre.commands.navigationcommandbase import NavigationCommandBase
 from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
 import pyre.ui
-from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action, fixed_image_manipulation_locked
+from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action
 from pyre.views.composite_display import (
     apply_composite_display_pan_delta,
     world_point_pair_for_composite_mouse,
