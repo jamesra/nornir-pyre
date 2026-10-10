@@ -124,21 +124,9 @@ class PyreWindowBase(QMainWindow):
         
         screens = QGuiApplication.screens()
         sizes = [screen.availableGeometry() for screen in screens]
-        
-        orderedSizeList = []
-        sizes_copy = sizes.copy()
-        
-        while len(sizes_copy) > 0:
-            smallestX = None
-            for i in range(len(sizes_copy)):
-                if smallestX is None:
-                    smallestX = sizes_copy[i].x(), i
-                if sizes_copy[i].x() < smallestX[0]:
-                    smallestX = sizes_copy[i].x(), i
-            assert smallestX is not None
-            orderedSizeList.append(sizes_copy.pop(smallestX[1]))
-        
-        return orderedSizeList
+
+        # sorted() is stable, so displays with equal x keep their screen order.
+        return sorted(sizes, key=lambda size: size.x())
     
     def setPosition(self, desiredDisplays: int | None = None, count: int | None = None,
                     position: int | tuple[int, int] | tuple[int, int, int] | None = None,
