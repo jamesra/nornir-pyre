@@ -72,6 +72,12 @@ def format_stos_window_title(base: str, path: str | None) -> str:
     return f"{base} — {os.path.basename(path)}"
 
 
+def _with_new_image(current: ImageAndMaskPath | None, filename: str) -> ImageAndMaskPath:
+    """Return ``current`` with its image replaced by ``filename``, keeping its mask (or None)."""
+    mask_path = None if current is None else current.mask_fullpath
+    return ImageAndMaskPath(image_fullpath=filename, mask_fullpath=mask_path)
+
+
 class ConvertTransformTypeMenuHost(Protocol):
     """Object that owns Convert Transform Type QActions."""
 
@@ -1144,12 +1150,8 @@ class StosWindow(PyreWindowBase):
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
                     config.LoadSourceImage(filename)
-                    mask_path = (
-                        None if self._settings.stos.source_image is None
-                        else self._settings.stos.source_image.mask_fullpath)
-                    self._settings.stos.source_image = ImageAndMaskPath(
-                        image_fullpath=filename,
-                        mask_fullpath=mask_path)
+                    self._settings.stos.source_image = _with_new_image(
+                        self._settings.stos.source_image, filename)
                     StosWindow.update_window_titles(self._settings, self._window_manager)
 
     onOpenFixedImage = onOpenSourceImage
@@ -1170,12 +1172,8 @@ class StosWindow(PyreWindowBase):
                     filename = selected_files[0]
                     StosWindow.imagedirname = os.path.dirname(filename)
                     config.LoadTargetImage(filename)
-                    mask_path = (
-                        None if self._settings.stos.target_image is None
-                        else self._settings.stos.target_image.mask_fullpath)
-                    self._settings.stos.target_image = ImageAndMaskPath(
-                        image_fullpath=filename,
-                        mask_fullpath=mask_path)
+                    self._settings.stos.target_image = _with_new_image(
+                        self._settings.stos.target_image, filename)
                     StosWindow.update_window_titles(self._settings, self._window_manager)
 
     onOpenWarpedImage = onOpenTargetImage
