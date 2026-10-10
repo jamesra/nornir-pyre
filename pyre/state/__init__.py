@@ -1,6 +1,7 @@
 import nornir_imageregistration.transforms
 from nornir_imageregistration.files.stosfile import StosFile
 import pyre.settings
+import logging
 import os
 
 from dependency_injector.wiring import Provide, inject
@@ -97,6 +98,34 @@ def _sync_registration_roles_from_manager(
     if resolved is not None:
         warped, fixed = resolved
         sync_stos_registration_roles(stos_config, warped, fixed)
+
+
+def _saved_image_fullpath(saved: ImageAndMaskPath | None) -> str | None:
+    """Return the persisted image path of a settings image slot, or None if the slot is empty."""
+    return saved.image_fullpath if saved is not None else None
+
+
+def _restore_saved_image(image_loader: ImageLoader,
+                         view_type: ViewType,
+                         saved: ImageAndMaskPath | None,
+                         label: str) -> None:
+    """Load a saved image (and mask) into its view slot and create its viewmodel.
+
+    A missing slot or image path is skipped. FileNotFoundError and ValueError are logged
+    as a warning so startup continues without that image; other errors propagate.
+    """
+    if saved is None or saved.image_fullpath is None:
+        return
+    try:
+        result = image_loader.load_image_into_manager(
+            key=view_type.value,
+            image_fullpath=saved.image_fullpath,
+            mask_fullpath=saved.mask_fullpath,
+        )
+        image_loader.create_image_viewmodel(load_result=result)
+    except (FileNotFoundError, ValueError) as e:
+        logging.getLogger(__name__).warning(
+            "Saved %s image not found — starting without it: %s", label, e)
 
 
 @inject
@@ -210,38 +239,14 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
                 settings_target_image_path=settings.stos.target_image.image_fullpath,
             )
     else:
-        if settings.stos.target_image is not None and settings.stos.target_image.image_fullpath is not None:
-            try:
-                result = image_loader.load_image_into_manager(
-                    key=ViewType.Target.value,
-                    image_fullpath=settings.stos.target_image.image_fullpath,
-                    mask_fullpath=settings.stos.target_image.mask_fullpath,
-                )
-                image_loader.create_image_viewmodel(load_result=result)
-            except (FileNotFoundError, ValueError) as e:
-                _log.warning("Saved target image not found — starting without it: %s", e)
-        if settings.stos.source_image is not None and settings.stos.source_image.image_fullpath is not None:
-            try:
-                result = image_loader.load_image_into_manager(
-                    key=ViewType.Source.value,
-                    image_fullpath=settings.stos.source_image.image_fullpath,
-                    mask_fullpath=settings.stos.source_image.mask_fullpath,
-                )
-                image_loader.create_image_viewmodel(load_result=result)
-            except (FileNotFoundError, ValueError) as e:
-                _log.warning("Saved source image not found — starting without it: %s", e)
+        _restore_saved_image(image_loader, ViewType.Target, settings.stos.target_image, "target")
+        _restore_saved_image(image_loader, ViewType.Source, settings.stos.source_image, "source")
         stos_config = get_current_stos_config()
         if stos_config is not None:
             _sync_registration_roles_from_manager(
                 stos_config,
                 image_manager,
                 stos_filename=settings.stos.stos_filename,
-                settings_source_image_path=(
-                    settings.stos.source_image.image_fullpath
-                    if settings.stos.source_image is not None else None
-                ),
-                settings_target_image_path=(
-                    settings.stos.target_image.image_fullpath
-                    if settings.stos.target_image is not None else None
-                ),
+                settings_source_image_path=_saved_image_fullpath(settings.stos.source_image),
+                settings_target_image_path=_saved_image_fullpath(settings.stos.target_image),
             )
