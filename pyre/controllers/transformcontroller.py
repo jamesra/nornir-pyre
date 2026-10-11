@@ -1503,8 +1503,8 @@ class TransformController:
             self._sync_register_busy()
         if not drop:
             return
-        keep = np.array([int(point_id) not in drop for point_id in self._point_ids.tolist()], dtype=bool)
-        self._point_ids = self._point_ids[keep]
+        drop_ids = np.fromiter(drop, dtype=self._point_ids.dtype, count=len(drop))
+        self._point_ids = self._point_ids[np.isin(self._point_ids, drop_ids, invert=True)]
         self._rebuild_id_to_index()
 
     def mark_busy_points(self, reason: str, point_ids: Iterable[int]) -> None:
