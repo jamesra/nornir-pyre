@@ -261,9 +261,7 @@ class StosFileBrowserWindow(QMainWindow):
         layout.addWidget(self._folder_label)
 
         self._file_source_selector = StosFileSourceSelector(self)
-        self._file_source_selector.set_source(
-            StosFileSource.from_settings_value(self._settings.stos.stos_file_source),
-        )
+        self._file_source_selector.set_source(self._source_for_load())
         self._file_source_selector.source_changed.connect(self._on_file_source_changed)
         layout.addWidget(self._file_source_selector)
 
@@ -815,7 +813,7 @@ class StosFileBrowserWindow(QMainWindow):
         if row.load_path_for_source(current) is None:
             current = StosFileSource.auto
             self._file_source_selector.set_source(current)
-        self._settings.stos.stos_file_source = current.value
+        self._store_source(current)
 
     def _on_table_selection_changed(self) -> None:
         if not self._list_widget.selectedIndexes():
@@ -829,7 +827,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._refresh_quality_histogram()
 
     def _on_file_source_changed(self, source: StosFileSource) -> None:
-        self._settings.stos.stos_file_source = source.value
+        self._store_source(source)
         if self._folder:
             # Re-attach scores for the newly preferred Auto/Manual path off-thread.
             self._queue_quality_attach_only()
@@ -838,7 +836,18 @@ class StosFileBrowserWindow(QMainWindow):
             self._load_stos_at_index(self._current_index)
 
     def _source_for_load(self) -> StosFileSource:
+        """Return the persisted File Source preference, defaulting to Auto."""
         return StosFileSource.from_settings_value(self._settings.stos.stos_file_source)
+
+    def _store_source(self, source: StosFileSource) -> None:
+        """Persist *source* as the File Source preference (settings hold the enum value)."""
+        self._settings.stos.stos_file_source = source.value
+
+    def _adopt_fallback_source(self, requested: StosFileSource, used: StosFileSource) -> None:
+        """Show and persist *used* in the selector when resolution fell back from *requested*."""
+        if used != requested:
+            self._file_source_selector.set_source(used)
+            self._store_source(used)
 
     def _missing_source_message(self, source: StosFileSource, row: StosBrowserRow) -> str:
         label = {
@@ -1019,9 +1028,7 @@ class StosFileBrowserWindow(QMainWindow):
         if load_path is None:
             QMessageBox.information(self, "STOS not found", self._missing_source_message(source, row))
             return
-        if used_source != source:
-            self._file_source_selector.set_source(used_source)
-            self._settings.stos.stos_file_source = used_source.value
+        self._adopt_fallback_source(source, used_source)
         QGuiApplication.clipboard().setText(os.path.normpath(load_path))
 
     def _load_stos_at_index(self, index: int) -> None:
@@ -1035,9 +1042,7 @@ class StosFileBrowserWindow(QMainWindow):
         if load_path is None:
             QMessageBox.information(self, "STOS not found", self._missing_source_message(source, row))
             return
-        if used_source != source:
-            self._file_source_selector.set_source(used_source)
-            self._settings.stos.stos_file_source = used_source.value
+        self._adopt_fallback_source(source, used_source)
         self._load_stos_path(load_path, index, browser_basename=row.basename)
 
     def _cancel_in_flight_registrations(self) -> None:

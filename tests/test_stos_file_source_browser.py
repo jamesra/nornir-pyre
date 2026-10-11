@@ -395,6 +395,68 @@ class TestStosBrowserFileSource(unittest.TestCase):
             browser._pending_load = None
             self.assertRegex(browser._list_widget.item(0, 2).text(), r"^\d{2}-\d{2}-\d{2}$")
 
+    def test_store_source_round_trips_through_settings_value(self) -> None:
+        """Each File Source persists as its enum value and reads back unchanged."""
+        browser = self._browser_with_row(
+            auto_path=None, manual_path=None, source=StosFileSource.auto)
+        for source in StosFileSource:
+            browser._store_source(source)
+            self.assertEqual(browser._settings.stos.stos_file_source, source.value)
+            self.assertIs(browser._source_for_load(), source)
+
+    def test_unknown_persisted_source_loads_as_auto_on_startup(self) -> None:
+        """A stale or unknown persisted value selects Auto in the browser selector."""
+        settings = AppSettings(stos=StosSettings(stos_file_source="no-such-source"))
+        browser = StosFileBrowserWindow(parent=None, settings=settings)
+        self.addCleanup(self._shutdown_browser, browser)
+        self.assertIs(browser._source_for_load(), StosFileSource.auto)
+        self.assertIs(browser._file_source_selector.source(), StosFileSource.auto)
+        self.assertEqual(settings.stos.stos_file_source, "no-such-source")
+
+    def test_persisted_source_selected_on_startup(self) -> None:
+        """The selector starts on the persisted File Source."""
+        settings = AppSettings(stos=StosSettings(stos_file_source=StosFileSource.manual.value))
+        browser = StosFileBrowserWindow(parent=None, settings=settings)
+        self.addCleanup(self._shutdown_browser, browser)
+        self.assertIs(browser._file_source_selector.source(), StosFileSource.manual)
+
+    def test_row_selection_persists_selector_source(self) -> None:
+        """Selecting a row persists the selector's source, or Auto when the row lacks it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "10-11.stos")
+            manual = os.path.join(tmp, "Manual", "10-11.stos")
+            os.makedirs(os.path.dirname(manual), exist_ok=True)
+            open(auto, "w", encoding="utf-8").close()
+            open(manual, "w", encoding="utf-8").close()
+            browser = self._browser_with_row(
+                auto_path=auto, manual_path=manual, source=StosFileSource.manual, folder=tmp)
+            browser._settings.stos.stos_file_source = "sentinel"
+            browser._update_source_selector_for_current_row()
+            self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.manual.value)
+
+            browser._rows[0] = StosBrowserRow(
+                basename="10-11.stos", auto_path=auto, manual_path=None)
+            browser._update_source_selector_for_current_row()
+            self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
+            self.assertIs(browser._file_source_selector.source(), StosFileSource.auto)
+
+    def test_adopt_fallback_source_noop_when_source_was_used(self) -> None:
+        """No fallback leaves both the selector and the persisted value alone."""
+        browser = self._browser_with_row(
+            auto_path=None, manual_path=None, source=StosFileSource.manual)
+        browser._settings.stos.stos_file_source = "sentinel"
+        browser._adopt_fallback_source(StosFileSource.manual, StosFileSource.manual)
+        self.assertEqual(browser._settings.stos.stos_file_source, "sentinel")
+        self.assertIs(browser._file_source_selector.source(), StosFileSource.manual)
+
+    def test_adopt_fallback_source_shows_and_persists_used_source(self) -> None:
+        """A fallback switches the selector and the persisted value to the used source."""
+        browser = self._browser_with_row(
+            auto_path=None, manual_path=None, source=StosFileSource.manual)
+        browser._adopt_fallback_source(StosFileSource.manual, StosFileSource.auto)
+        self.assertEqual(browser._settings.stos.stos_file_source, StosFileSource.auto.value)
+        self.assertIs(browser._file_source_selector.source(), StosFileSource.auto)
+
 
 if __name__ == "__main__":
     unittest.main()
