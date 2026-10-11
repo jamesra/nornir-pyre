@@ -722,47 +722,8 @@ class TransformController:
             elif isinstance(self._TransformModel, nornir_imageregistration.IRigidTransform):
                 self.FireOnChangeEvent()
             if was_cp_drag and moved_indices:
-                # #region agent log
-                try:
-                    import json, time
-                    _gm = masked_grid_relax.grid_model_or_none(self)
-                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                        _f.write(json.dumps({
-                            "sessionId": "79a4da", "hypothesisId": "A",
-                            "location": "transformcontroller.py:end_interactive_edit",
-                            "message": "enqueue after CP drag",
-                            "data": {
-                                "was_cp_drag": was_cp_drag,
-                                "moved_indices": moved_indices[:20],
-                                "n_moved": len(moved_indices),
-                                "is_grid": _gm is not None,
-                                "transform_type": str(getattr(self._TransformModel, "type", None)),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 self.enqueue_masked_grid_relax(
                     moved_indices, undo_points=undo_snapshot)
-            else:
-                # #region agent log
-                try:
-                    import json, time
-                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                        _f.write(json.dumps({
-                            "sessionId": "79a4da", "hypothesisId": "A",
-                            "location": "transformcontroller.py:end_interactive_edit",
-                            "message": "skip enqueue",
-                            "data": {
-                                "was_cp_drag": was_cp_drag,
-                                "n_moved": len(moved_indices),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }) + "\n")
-                except Exception:
-                    pass
-                # #endregion
 
     def _run_post_interactive_refresh(self) -> None:
         if self._model_needs_rbf_prewarm(self._TransformModel):
@@ -2182,53 +2143,11 @@ class TransformController:
         coalesces seeds for a restart on the latest points.
         """
         if self._masked_relax_applying:
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "A",
-                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
-                        "message": "bail applying",
-                        "data": {"seeds": list(seed_indices)[:20]},
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return
         if self.interactive_edit_in_progress:
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "A",
-                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
-                        "message": "bail still editing",
-                        "data": {"seeds": list(seed_indices)[:20]},
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return
         grid_model = masked_grid_relax.grid_model_or_none(self)
         if grid_model is None:
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "A",
-                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
-                        "message": "bail not grid",
-                        "data": {"type": str(getattr(self._TransformModel, "type", None))},
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return
         seeds = [int(i) for i in seed_indices]
         if not seeds:
@@ -2243,25 +2162,6 @@ class TransformController:
             self._masked_relax_pending_seeds.update(seeds)
             # Cancel the active wave; its finish handler restarts with pending seeds.
             self._masked_relax_generation += 1
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "J",
-                        "location": "transformcontroller.py:enqueue_masked_grid_relax",
-                        "message": "cancel in-flight for new seeds",
-                        "data": {
-                            "seeds": seeds[:20],
-                            "pending": sorted(self._masked_relax_pending_seeds)[:20],
-                            "generation": self._masked_relax_generation,
-                            "runId": "post-fix",
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return
 
         self._start_masked_grid_relax_wave(seeds, grid_model)
@@ -2332,52 +2232,11 @@ class TransformController:
                     target_mask=target_mask,
                     source_ok=source_ok_copy,
                 )
-                free_count = int(np.count_nonzero(~fixed_mask))
-                # #region agent log
-                try:
-                    import json, time
-                    from nornir_imageregistration.grid_layout_relax import (
-                        four_adjacent_indices,
-                    )
-                    seed_free_neighbors = []
-                    for s in seeds:
-                        for n in four_adjacent_indices(
-                                int(s), grid_dims[0], grid_dims[1]):
-                            if not fixed_mask[n]:
-                                seed_free_neighbors.append(n)
-                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                        _f.write(json.dumps({
-                            "sessionId": "79a4da", "hypothesisId": "B,C,J",
-                            "location": "transformcontroller.py:_worker",
-                            "message": "pin mask built off-ui",
-                            "data": {
-                                "seeds": list(seeds)[:20],
-                                "n_points": int(fixed_mask.shape[0]),
-                                "free_count": free_count,
-                                "fixed_count": int(fixed_mask.shape[0]) - free_count,
-                                "seed_free_neighbor_count": len(seed_free_neighbors),
-                                "has_source_mask": source_mask is not None,
-                                "has_target_mask": target_mask is not None,
-                                "min_unmasked": float(min_unmasked),
-                                "generation": generation,
-                                "runId": "post-fix",
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 if not np.any(~fixed_mask):
                     updated = None
                 elif _should_cancel():
                     updated = None
                 else:
-                    progress_count = {"n": 0}
-
-                    def _on_progress(partial: NDArray[np.floating]) -> None:
-                        progress_count["n"] += 1
-                        _post_progress(partial)
-
                     updated = masked_grid_relax.run_masked_grid_relax_wave(
                         target_points=target_points,
                         fixed_mask=fixed_mask,
@@ -2385,52 +2244,9 @@ class TransformController:
                         grid_dims=grid_dims,
                         grid_spacing=grid_spacing,
                         should_cancel=_should_cancel,
-                        on_progress=_on_progress,
+                        on_progress=_post_progress,
                     )
-                    # #region agent log
-                    try:
-                        import json, time
-                        n_moved = 0
-                        max_delta = 0.0
-                        if updated is not None:
-                            d = np.linalg.norm(updated - target_points, axis=1)
-                            free = ~fixed_mask
-                            n_moved = int(np.count_nonzero(d[free] > 1e-3))
-                            max_delta = float(np.max(d[free])) if np.any(free) else 0.0
-                        with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                            _f.write(json.dumps({
-                                "sessionId": "79a4da", "hypothesisId": "C,D,E,J",
-                                "location": "transformcontroller.py:_worker",
-                                "message": "wave finished",
-                                "data": {
-                                    "updated_is_none": updated is None,
-                                    "free_moved_count": n_moved,
-                                    "max_free_delta": max_delta,
-                                    "generation": generation,
-                                    "cancelled": _should_cancel(),
-                                    "progress_posts": progress_count["n"],
-                                    "runId": "post-fix",
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
             except Exception as _exc:
-                # #region agent log
-                try:
-                    import json, time
-                    with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                        _f.write(json.dumps({
-                            "sessionId": "79a4da", "hypothesisId": "E",
-                            "location": "transformcontroller.py:_worker",
-                            "message": "wave exception",
-                            "data": {"error": str(_exc)},
-                            "timestamp": int(time.time() * 1000),
-                        }) + "\n")
-                except Exception:
-                    pass
-                # #endregion
                 _logger.exception("Masked grid relax wave failed")
                 updated = None
             if QApplication.instance() is None:
@@ -2476,25 +2292,6 @@ class TransformController:
         self._masked_relax_pending_seeds.clear()
 
         if generation != self._masked_relax_generation:
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "D,J",
-                        "location": "transformcontroller.py:_on_masked_grid_relax_finished",
-                        "message": "discard stale generation",
-                        "data": {
-                            "generation": generation,
-                            "live": self._masked_relax_generation,
-                            "pending_count": len(pending),
-                            "runId": "post-fix",
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             # Preserve undo for the restart when no progress commit consumed it.
             if (
                 undo_points is not None
@@ -2542,20 +2339,6 @@ class TransformController:
                 updated.shape, current.shape)
             return
         if np.allclose(updated, current, rtol=1e-5, atol=1e-3):
-            # #region agent log
-            try:
-                import json, time
-                with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                    _f.write(json.dumps({
-                        "sessionId": "79a4da", "hypothesisId": "C,D",
-                        "location": "transformcontroller.py:_apply_masked_grid_relax_result",
-                        "message": "apply no-op allclose",
-                        "data": {},
-                        "timestamp": int(time.time() * 1000),
-                    }) + "\n")
-            except Exception:
-                pass
-            # #endregion
             return
 
         if undo_points is not None:
@@ -2579,23 +2362,6 @@ class TransformController:
         if changed.size == 0:
             return
 
-        # #region agent log
-        try:
-            import json, time
-            with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-                _f.write(json.dumps({
-                    "sessionId": "79a4da", "hypothesisId": "D",
-                    "location": "transformcontroller.py:_apply_masked_grid_relax_result",
-                    "message": "applying changes",
-                    "data": {
-                        "n_changed": int(changed.size),
-                        "changed_sample": changed[:20].tolist(),
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }) + "\n")
-        except Exception:
-            pass
-        # #endregion
 
         self._masked_relax_applying = True
         try:

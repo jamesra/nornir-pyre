@@ -197,31 +197,6 @@ def wire_stos_state_after_load(
 
         _publish_alignment_images(stos_state)
 
-    # #region agent log
-    try:
-        import json
-        import time
-        fixed_perm = getattr(stos_state, "_fixed_image_permutations", None)
-        warped_perm = getattr(stos_state, "_warped_image_permutations", None)
-        with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-            _f.write(json.dumps({
-                "sessionId": "79a4da",
-                "hypothesisId": "G,I",
-                "location": "stos_registration.py:wire_stos_state_after_load",
-                "message": "wired stos masks after load",
-                "data": {
-                    "mask_vm_fixed_is_none": source_mask_vm is None,
-                    "mask_vm_warped_is_none": target_mask_vm is None,
-                    "fixed_perm_mask_is_none": fixed_perm is None or getattr(fixed_perm, "Mask", None) is None,
-                    "warped_perm_mask_is_none": warped_perm is None or getattr(warped_perm, "Mask", None) is None,
-                    "used_image_manager": image_manager is not None,
-                    "runId": "post-fix",
-                },
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
 
 def ensure_mask_viewmodels_from_load(

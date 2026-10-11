@@ -187,74 +187,28 @@ def resolve_stos_masks() -> tuple[NDArray[np.bool_] | None, NDArray[np.bool_] | 
     if config is None:
         return None, None
 
-    source_origin = "none"
-    target_origin = "none"
-
     # Fixed* = Source (mapped); Warped* = Target (control) — LoadSource/LoadTarget.
     source_vm = config.FixedImageMaskViewModel
     target_vm = config.WarpedImageMaskViewModel
     source_mask = _as_bool_mask(None if source_vm is None else source_vm.Image)
     target_mask = _as_bool_mask(None if target_vm is None else target_vm.Image)
-    if source_mask is not None:
-        source_origin = "mask_vm"
-    if target_mask is not None:
-        target_origin = "mask_vm"
 
     if source_mask is None and config.FixedImages is not None:
         source_mask = _as_bool_mask(config.FixedImages.Mask)
-        if source_mask is not None:
-            source_origin = "permutations"
     if target_mask is None and config.WarpedImages is not None:
         target_mask = _as_bool_mask(config.WarpedImages.Mask)
-        if target_mask is not None:
-            target_origin = "permutations"
 
     if source_mask is None:
         source_img = None if config.SourceImageViewModel is None else config.SourceImageViewModel.Image
         if source_img is None and config.FixedImages is not None:
             source_img = config.FixedImages.Image
         source_mask = _tissue_mask_from_image(source_img)
-        if source_mask is not None:
-            source_origin = "image_nonzero"
 
     if target_mask is None:
         target_img = None if config.TargetImageViewModel is None else config.TargetImageViewModel.Image
         if target_img is None and config.WarpedImages is not None:
             target_img = config.WarpedImages.Image
         target_mask = _tissue_mask_from_image(target_img)
-        if target_mask is not None:
-            target_origin = "image_nonzero"
-
-    # #region agent log
-    try:
-        import json
-        import time
-        with open(r"d:\src\git\nornir\debug-79a4da.log", "a", encoding="utf-8") as _f:
-            _f.write(json.dumps({
-                "sessionId": "79a4da",
-                "hypothesisId": "F,G,H,I",
-                "location": "masked_grid_relax.py:resolve_stos_masks",
-                "message": "mask resolve provenance",
-                "data": {
-                    "source_origin": source_origin,
-                    "target_origin": target_origin,
-                    "has_source_mask": source_mask is not None,
-                    "has_target_mask": target_mask is not None,
-                    "source_shape": None if source_mask is None else list(source_mask.shape),
-                    "target_shape": None if target_mask is None else list(target_mask.shape),
-                    "mask_vm_fixed_is_none": source_vm is None,
-                    "mask_vm_warped_is_none": target_vm is None,
-                    "fixed_images_mask_is_none": (
-                        config.FixedImages is None or config.FixedImages.Mask is None),
-                    "warped_images_mask_is_none": (
-                        config.WarpedImages is None or config.WarpedImages.Mask is None),
-                    "runId": "post-fix",
-                },
-                "timestamp": int(time.time() * 1000),
-            }) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
     return source_mask, target_mask
 
