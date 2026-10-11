@@ -157,69 +157,34 @@ class OverlayShader(BaseShader):
 
     @property
     def vertex_position_location(self) -> int:
-        if self._vertex_position_location is None:
-            self._vertex_position_location = gl.glGetAttribLocation(self.program, "vertex_position")
-            if self._vertex_position_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._vertex_position_location is not None
-        return self._vertex_position_location
+        return self._cached_attrib_location("_vertex_position_location", "vertex_position")
 
     @property
     def texture_coord_location(self) -> int:
-        if self._texture_coord_location is None:
-            self._texture_coord_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
-            if self._texture_coord_location == -1:
-                raise ValueError("Could not find texture coordinate attribute")
-        assert self._texture_coord_location is not None
-        return self._texture_coord_location
+        return self._cached_attrib_location("_texture_coord_location", "vertex_texture_coordinate",
+                                            "Could not find texture coordinate attribute")
 
     @property
     def source_texture_location(self) -> int:
-        if self._source_texture_location is None:
-            self._source_texture_location = gl.glGetUniformLocation(self.program, "source_texture")
-            if self._source_texture_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        assert self._source_texture_location is not None
-        return self._source_texture_location
+        return self._cached_uniform_location("_source_texture_location", "source_texture",
+                                             "Could not find texture_sampler attribute")
 
     @property
     def target_texture_location(self) -> int:
-        if self._target_texture_location is None:
-            self._target_texture_location = gl.glGetUniformLocation(self.program, "target_texture")
-            if self._target_texture_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        assert self._target_texture_location is not None
-        return self._target_texture_location
+        return self._cached_uniform_location("_target_texture_location", "target_texture",
+                                             "Could not find texture_sampler attribute")
 
     @property
     def model_view_projection_matrix_location(self) -> int:
-        if self._model_view_projection_matrix_location is None:
-            self._model_view_projection_matrix_location = gl.glGetUniformLocation(self.program,
-                                                                                  "model_view_projection_matrix")
-            if self._model_view_projection_matrix_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._model_view_projection_matrix_location is not None
-        return self._model_view_projection_matrix_location
+        return self._cached_uniform_location("_model_view_projection_matrix_location", "model_view_projection_matrix")
 
     @property
     def source_channel_blend_location(self) -> int:
-        if self._source_channel_blend_location is None:
-            self._source_channel_blend_location = gl.glGetUniformLocation(self.program,
-                                                                          "source_channel_blend")
-            if self._source_channel_blend_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._source_channel_blend_location is not None
-        return self._source_channel_blend_location
+        return self._cached_uniform_location("_source_channel_blend_location", "source_channel_blend")
 
     @property
     def target_channel_blend_location(self) -> int:
-        if self._target_channel_blend_location is None:
-            self._target_channel_blend_location = gl.glGetUniformLocation(self.program,
-                                                                          "target_channel_blend")
-            if self._target_channel_blend_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._target_channel_blend_location is not None
-        return self._target_channel_blend_location
+        return self._cached_uniform_location("_target_channel_blend_location", "target_channel_blend")
 
     def create_vao(self) -> ShaderVAO:
         """

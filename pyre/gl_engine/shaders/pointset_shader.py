@@ -97,66 +97,33 @@ class PointSetShader(BaseShader):
 
     @property
     def vertex_location(self) -> int:
-        if self._vertex_location is None:
-            self._vertex_location = gl.glGetAttribLocation(self.program, "vertex_position")
-            if self._vertex_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._vertex_location is not None
-        return self._vertex_location
+        return self._cached_attrib_location("_vertex_location", "vertex_position")
 
     @property
     def texture_coord_location(self) -> int:
-        if self._vertex_texture_location is None:
-            self._vertex_texture_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
-            if self._vertex_texture_location == -1:
-                raise ValueError("Could not find texture coordinate attribute")
-        assert self._vertex_texture_location is not None
-        return self._vertex_texture_location
+        return self._cached_attrib_location("_vertex_texture_location", "vertex_texture_coordinate",
+                                            "Could not find texture coordinate attribute")
 
     @property
     def point_source_offset_location(self) -> int:
-        if self._point_source_offset_location is None:
-            self._point_source_offset_location = gl.glGetAttribLocation(self.program, "point_source_offset")
-            if self._point_source_offset_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._point_source_offset_location is not None
-        return self._point_source_offset_location
+        return self._cached_attrib_location("_point_source_offset_location", "point_source_offset")
 
     @property
     def point_target_offset_location(self) -> int:
-        if self._point_target_offset_location is None:
-            self._point_target_offset_location = gl.glGetAttribLocation(self.program, "point_target_offset")
-            if self._point_target_offset_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._point_target_offset_location is not None
-        return self._point_target_offset_location
+        return self._cached_attrib_location("_point_target_offset_location", "point_target_offset")
 
     @property
-    def texture_sampler(self):
-        if self._texture_sampler_location is None:
-            self._texture_sampler_location = gl.glGetUniformLocation(self.program, "texture_sampler")
-            if self._texture_sampler_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        return self._texture_sampler_location
+    def texture_sampler(self) -> int:
+        return self._cached_uniform_location("_texture_sampler_location", "texture_sampler",
+                                             "Could not find texture_sampler attribute")
 
     @property
     def tween_location(self) -> int:
-        if self._tween_location is None:
-            self._tween_location = gl.glGetUniformLocation(self.program, "tween")
-            if self._tween_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._tween_location is not None
-        return self._tween_location
+        return self._cached_uniform_location("_tween_location", "tween")
 
     @property
     def model_view_projection_matrix_location(self) -> int:
-        if self._view_projection_matrix_location is None:
-            self._view_projection_matrix_location = gl.glGetUniformLocation(self.program,
-                                                                            "view_projection_matrix")
-            if self._view_projection_matrix_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._view_projection_matrix_location is not None
-        return self._view_projection_matrix_location
+        return self._cached_uniform_location("_view_projection_matrix_location", "view_projection_matrix")
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating],
              texture: int,

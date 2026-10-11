@@ -1,4 +1,5 @@
 from abc import ABC
+from collections.abc import Callable
 
 from OpenGL import GL as gl
 from OpenGL.GL import shaders as glshaders
@@ -123,6 +124,32 @@ class BaseShader(ABC):
             raise ValueError("Shaders have not been initialized")
 
         return self._program
+
+    def _cached_attrib_location(self, cache_attr: str, name: str,
+                                message: str = "Could not find attribute") -> int:
+        """Return the vertex attribute location ``name``, querying GL once and caching it in ``cache_attr``."""
+        return self._cached_location(cache_attr, gl.glGetAttribLocation, name, message)
+
+    def _cached_uniform_location(self, cache_attr: str, name: str,
+                                 message: str = "Could not find attribute") -> int:
+        """Return the uniform location ``name``, querying GL once and caching it in ``cache_attr``."""
+        return self._cached_location(cache_attr, gl.glGetUniformLocation, name, message)
+
+    def _cached_location(self, cache_attr: str, query: Callable[[int, str], int], name: str,
+                         message: str) -> int:
+        """Shared body of the lazy location properties.
+
+        The result is cached before the -1 check, so a missing name raises ValueError(message)
+        on the first access only and later accesses return the cached -1.  ``self.program`` is
+        read only on a cache miss (OverlayShader clears its caches from there on a context switch).
+        """
+        location = getattr(self, cache_attr)
+        if location is None:
+            location = query(self.program, name)
+            setattr(self, cache_attr, location)
+            if location == -1:
+                raise ValueError(message)
+        return location
 
     @property
     def vertex_shader(self) -> VertexShader:

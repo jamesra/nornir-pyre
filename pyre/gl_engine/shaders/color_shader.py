@@ -60,49 +60,23 @@ class ColorShader(BaseShader):
 
     @property
     def source_pos_location(self) -> int:
-        if self._source_pos_location is None:
-            self._source_pos_location = gl.glGetAttribLocation(self.program, "vertex_source_position")
-            if self._source_pos_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._source_pos_location is not None
-        return self._source_pos_location
+        return self._cached_attrib_location("_source_pos_location", "vertex_source_position")
 
     @property
     def target_pos_location(self) -> int:
-        if self._target_pos_location is None:
-            self._target_pos_location = gl.glGetAttribLocation(self.program, "vertex_target_position")
-            if self._target_pos_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._target_pos_location is not None
-        return self._target_pos_location
+        return self._cached_attrib_location("_target_pos_location", "vertex_target_position")
 
     @property
     def tween_location(self) -> int:
-        if self._tween_location is None:
-            self._tween_location = gl.glGetUniformLocation(self.program, "tween")
-            if self._tween_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._tween_location is not None
-        return self._tween_location
+        return self._cached_uniform_location("_tween_location", "tween")
 
     @property
     def color_location(self) -> int:
-        if self._color_location is None:
-            self._color_location = gl.glGetUniformLocation(self.program, "color")
-            if self._color_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._color_location is not None
-        return self._color_location
+        return self._cached_uniform_location("_color_location", "color")
 
     @property
     def model_view_projection_matrix(self) -> int:
-        if self._model_view_projection_matrix_location is None:
-            self._model_view_projection_matrix_location = gl.glGetUniformLocation(self.program,
-                                                                                  "model_view_projection_matrix")
-            if self._model_view_projection_matrix_location == -1:
-                raise ValueError("Could not find attribute")
-        assert self._model_view_projection_matrix_location is not None
-        return self._model_view_projection_matrix_location
+        return self._cached_uniform_location("_model_view_projection_matrix_location", "model_view_projection_matrix")
 
     def draw(self,
              model_view_proj_matrix: NDArray[np.floating],
