@@ -80,3 +80,14 @@ Software OpenGL fallback (development troubleshooting)::
 Mouse, keyboard, and alignment controls are in the manual:
 
 https://nornir.github.io/guides/pyre_use.html
+
+Where user-facing documentation goes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+User-facing documentation lives in the umbrella repository (jamesra/nornir), not in this package:
+
+* Install guide and package page: ``docs/packages/pyre_install.rst``
+* Using Pyre (controls and workflows): ``docs/guides/pyre_use.rst``
+* Development and packaging: ``docs/development/pyre_development.rst``
+
+Keep this README a short landing page. In-app Help reads ``pyre/README.txt``; update that file when mouse or keyboard controls change. Never edit the built site in ``nornir.github.io``; it is CI deploy output.
