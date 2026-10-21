@@ -24,6 +24,7 @@ class RegisterControlPointCommand(InstantCommandBase):
     """Enqueue automatic registration for selected control points."""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
+    _points_to_register: set[int]  # Selection plus the hovered point, captured at construction
     _original_points: NDArray[np.floating]
     _transform_controller: pyre.viewmodels.TransformController  # type: ignore[attr-defined]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
@@ -79,12 +80,16 @@ class RegisterControlPointCommand(InstantCommandBase):
 
         if register_all:
             self._selected_points.update(range(transform_controller.NumPoints))
-            self._original_points = transform_controller.points
+            self._points_to_register = set(self._selected_points)
         else:
-            self._selected_points.update(command_points)
-            self._original_points = transform_controller.points
+            # The hovered point is registered but not added to the shared selection.
+            # Selected points are re-selected once the queue goes idle, so adding the
+            # hovered point there made every later hover-and-Space press register all
+            # earlier presses' points again (press N aligned N points).
+            self._points_to_register = set(self._selected_points) | set(command_points)
+        self._original_points = transform_controller.points
 
-        if len(self._selected_points) == 0:
+        if len(self._points_to_register) == 0:
             raise RequiresSelectionError('No points selected')
 
         self._transform_controller = transform_controller
@@ -100,7 +105,7 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
-        queued = list(self._selected_points)
+        queued = sorted(self._points_to_register)
         # Images published to shared memory at load (and on contrast settle) are
         # already the arrays the pool workers attach to; re-wrapping them here
         # would build a helper the controller cannot match to a publication.
