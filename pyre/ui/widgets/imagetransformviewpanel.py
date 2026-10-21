@@ -35,6 +35,7 @@ from pyre.settings import AppSettings
 from pyre.space import Space
 from pyre.state.managers.command_queue import CommandQueue
 
+from pyre.ui.escape_claim import EscapeClaimFilter
 from pyre.ui.widgets import imagetransformpanelbase
 from pyre.controllers.transformcontroller import TransformController
 from pyre.gl_engine import FrameBuffer
@@ -127,6 +128,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
     _registration_roi_fade: RegistrationRoiFadeTracker
+    _escape_claim_filter: EscapeClaimFilter
 
     @property
     def control_point_scale(self) -> float:
@@ -223,6 +225,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         super().__init__(parent=parent,
                          transform_controller=transform_controller,
                          **kwargs)
+
+        # Commands that use Escape themselves keep it from the window's
+        # "Cancel registration" shortcut while they are active.
+        self._escape_claim_filter = EscapeClaimFilter(lambda: self._command, self)
+        self._glpanel.installEventFilter(self._escape_claim_filter)
+        self.installEventFilter(self._escape_claim_filter)
 
         # Create a timer for periodic updates
         self.timer = QTimer(self)

@@ -144,6 +144,15 @@ class ControlPointRegistrationQueue:
         self._pending_set.clear()
         self._in_flight.clear()
 
+    def forget_cancelled(self, point_id: int) -> None:
+        """Drop the cancelled mark a stale (pre-``cancel_all``) job left behind.
+
+        The mark stays when *point_id* has been queued again since, because it
+        then belongs to the new job (``enqueue`` already cleared the old one).
+        """
+        if not self.contains(point_id):
+            self._cancelled.discard(point_id)
+
     def is_cancelled(self, point_id: int) -> bool:
         """True when the in-flight job for *point_id* must discard its result."""
         return point_id in self._cancelled

@@ -3,7 +3,17 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from dependency_injector.wiring import Provide, inject
-from PyQt6.QtWidgets import QStatusBar, QWidget, QLabel, QProgressBar, QPushButton, QHBoxLayout
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QStatusBar,
+    QStyle,
+    QStyleFactory,
+    QWidget,
+)
 import numpy as np
 
 import nornir_imageregistration
@@ -13,15 +23,16 @@ from pyre.interfaces.managers.mouse_position_history_manager import IMousePositi
 from pyre.container import IContainer
 from pyre.registration_job import get_registration_job_runner
 
+_PROGRESS_MIN_WIDTH = 300  # Fits "Registering control points 1234 / 5678"
+
 
 class CameraStatusBar(QStatusBar):
     _camera_window: QWidget  # Window that the camera is rendering to and we track mouse events on
     _window_height: int
     _window_width: int
     _labels: list[QLabel]  # Labels for each field in the status bar
-    _job_title: QLabel
-    _job_detail: QLabel
-    _job_progress: QProgressBar
+    _job_progress: QProgressBar  # Task text is drawn over the bar
+    _progress_style: QStyle | None  # Kept referenced: setStyle does not take ownership
     _job_cancel: QPushButton
     _job_container: QWidget
     _cancel_handler: Callable[[], None] | None
@@ -61,18 +72,24 @@ class CameraStatusBar(QStatusBar):
         job_layout = QHBoxLayout(self._job_container)
         job_layout.setContentsMargins(0, 0, 0, 0)
         job_layout.setSpacing(6)
-        self._job_title = QLabel("", self._job_container)
-        self._job_detail = QLabel("", self._job_container)
         self._job_progress = QProgressBar(self._job_container)
-        self._job_progress.setMinimum(0)
-        self._job_progress.setMaximum(100)
-        self._job_progress.setFixedWidth(160)
+        self._job_progress.setRange(0, 1)
+        self._job_progress.setValue(0)
+        self._job_progress.setMinimumWidth(_PROGRESS_MIN_WIDTH)
+        # The task description is drawn centred over the bar. Fusion draws that
+        # text inside the groove with palette colours that stay readable on the
+        # filled and empty parts in light and dark themes; some native styles
+        # put it beside the bar or hide it.
+        self._progress_style = QStyleFactory.create("Fusion")
+        if self._progress_style is not None:
+            self._job_progress.setStyle(self._progress_style)
         self._job_progress.setTextVisible(True)
+        self._job_progress.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._job_progress.setFormat("")
         self._job_cancel = QPushButton("Cancel", self._job_container)
+        self._job_cancel.setToolTip("Cancel registration (Esc)")
         self._job_cancel.clicked.connect(self._on_cancel_clicked)
-        job_layout.addWidget(self._job_title)
         job_layout.addWidget(self._job_progress)
-        job_layout.addWidget(self._job_detail)
         job_layout.addWidget(self._job_cancel)
         self._job_container.hide()
         self.addPermanentWidget(self._job_container, 0)
@@ -101,32 +118,55 @@ class CameraStatusBar(QStatusBar):
         """Set the callback invoked when Cancel is pressed."""
         self._cancel_handler = handler
 
-    def show_job(self, title: str) -> None:
-        """Show the registration job progress strip."""
-        self._job_title.setText(title)
-        self._job_detail.setText("")
-        self._job_progress.setRange(0, 0)  # indeterminate until first update
-        self._job_cancel.setEnabled(True)
-        self._job_container.show()
+    @property
+    def activity_text(self) -> str:
+        """Text drawn over the progress bar ("" when hidden)."""
+        return self._job_progress.format()
 
-    def set_progress(self, current: int, total: int, detail: str) -> None:
-        """Update progress values for the active registration job."""
+    @property
+    def progress_value(self) -> int:
+        return self._job_progress.value()
+
+    @property
+    def progress_maximum(self) -> int:
+        return self._job_progress.maximum()
+
+    @property
+    def activity_visible(self) -> bool:
+        """True while the progress strip is shown (not hidden)."""
+        return not self._job_container.isHidden()
+
+    @property
+    def cancel_enabled(self) -> bool:
+        return self._job_cancel.isEnabled()
+
+    def show_activity(self, text: str, current: int, total: int, cancel_enabled: bool = True) -> None:
+        """Show the progress strip with *text* centred over a *current* of *total* bar.
+
+        ``total <= 0`` (no count yet) shows an empty bar rather than Qt's busy
+        indicator, because several styles hide the text in busy mode.
+        """
         if total <= 0:
-            self._job_progress.setRange(0, 0)
+            self._job_progress.setRange(0, 1)
+            self._job_progress.setValue(0)
         else:
             self._job_progress.setRange(0, int(total))
             self._job_progress.setValue(max(0, min(int(current), int(total))))
-        self._job_detail.setText(detail)
+        # QProgressBar expands %p, %v and %m in the format; task text has none.
+        self._job_progress.setFormat(text)
+        self._job_progress.setToolTip(text)
+        self._job_cancel.setEnabled(cancel_enabled)
+        self._job_container.show()
 
     def set_cancel_enabled(self, enabled: bool) -> None:
         self._job_cancel.setEnabled(enabled)
 
-    def hide_job(self) -> None:
-        """Hide the registration job progress strip."""
+    def hide_activity(self) -> None:
+        """Hide the progress strip."""
         self._job_container.hide()
-        self._job_title.setText("")
-        self._job_detail.setText("")
-        self._job_progress.setRange(0, 100)
+        self._job_progress.setFormat("")
+        self._job_progress.setToolTip("")
+        self._job_progress.setRange(0, 1)
         self._job_progress.setValue(0)
         self._job_cancel.setEnabled(True)
 

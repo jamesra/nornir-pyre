@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Callable, TypedDict, TypeVar
 
 from nornir_imageregistration.registration_control import (
@@ -20,6 +22,35 @@ ErrorFn = Callable[[BaseException], None]
 CancelledFn = Callable[[], None]
 BusyChangedFn = Callable[[bool], None]
 PreviewFn = Callable[[object], None]
+CancelListenerFn = Callable[[], None]
+
+POINT_QUEUE_TITLE = "Registering control points"
+
+_logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _Activity:
+    """One long-running task shown in the shared status-bar strip."""
+
+    text: str
+    current: int
+    total: int
+    started: int  # Start order; the most recently started activity is shown
+
+
+def format_job_text(title: str, label: str, current: int, total: int) -> str:
+    """Status text for a job: the title plus its progress label, or plain counts."""
+    if label:
+        return f"{title}: {label}"
+    if total > 0:
+        return f"{title} {current} / {total}"
+    return title
+
+
+def format_point_queue_text(finished: int, total: int) -> str:
+    """Status text for the control-point registration queue."""
+    return f"{POINT_QUEUE_TITLE} {finished} / {total}"
 
 
 class _PreviewState(TypedDict):
@@ -28,7 +59,12 @@ class _PreviewState(TypedDict):
 
 
 class RegistrationJobRunner:
-    """Serialize heavy registration jobs on one worker thread with UI progress."""
+    """Serialize heavy registration jobs on one worker thread with UI progress.
+
+    Also owns the shared status-bar strip: a running job and the control-point
+    registration queue (reported by the transform controller) both show there,
+    with the most recently started one's text, and one Cancel stops both.
+    """
 
     _executor: ThreadPoolExecutor
     _generation: int
@@ -36,7 +72,12 @@ class RegistrationJobRunner:
     _busy: bool
     _status_bars: list  # CameraStatusBar; avoid circular import typing
     _busy_changed_listeners: list[BusyChangedFn]
+    _cancel_listeners: list[CancelListenerFn]
     _lock: threading.Lock
+    _job_activity: _Activity | None
+    _point_activity: _Activity | None
+    _activity_counter: int
+    _job_cancel_requested: bool
 
     def __init__(self) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-reg-job")
@@ -45,18 +86,30 @@ class RegistrationJobRunner:
         self._busy = False
         self._status_bars = []
         self._busy_changed_listeners = []
+        self._cancel_listeners = []
         self._lock = threading.Lock()
+        self._job_activity = None
+        self._point_activity = None
+        self._activity_counter = 0
+        self._job_cancel_requested = False
 
     @property
     def busy(self) -> bool:
         return self._busy
 
+    @property
+    def active_text(self) -> str | None:
+        """Text the status-bar strip shows now, or None when it is hidden."""
+        activity = self._shown_activity()
+        return None if activity is None else activity.text
+
     def register_status_bar(self, status_bar) -> None:
-        """Register a CameraStatusBar that should mirror job progress."""
+        """Register a CameraStatusBar that should mirror job and point-queue progress."""
         with self._lock:
             if status_bar not in self._status_bars:
                 self._status_bars.append(status_bar)
-                status_bar.set_cancel_handler(self.request_cancel)
+                status_bar.set_cancel_handler(self.cancel_all)
+        self._refresh_status_bars()
 
     def unregister_status_bar(self, status_bar) -> None:
         with self._lock:
@@ -67,15 +120,87 @@ class RegistrationJobRunner:
         if listener not in self._busy_changed_listeners:
             self._busy_changed_listeners.append(listener)
 
+    def add_cancel_listener(self, listener: CancelListenerFn) -> None:
+        """Call *listener* when the status-bar Cancel is pressed (e.g. point queues)."""
+        if listener not in self._cancel_listeners:
+            self._cancel_listeners.append(listener)
+
+    def remove_cancel_listener(self, listener: CancelListenerFn) -> None:
+        """Stop calling *listener* on Cancel."""
+        if listener in self._cancel_listeners:
+            self._cancel_listeners.remove(listener)
+
     def request_cancel(self) -> None:
         """Signal the in-flight job to stop at the next cooperative checkpoint."""
         event = self._cancel_event
         if event is not None:
             event.set()
+            self._job_cancel_requested = True
+        self._refresh_status_bars()
+
+    def cancel_all(self) -> None:
+        """Cancel the running job and every registered long-running task (status-bar Cancel)."""
+        self.request_cancel()
+        for listener in list(self._cancel_listeners):
+            try:
+                listener()
+            except Exception:
+                _logger.exception("Cancel listener %r failed", listener)
+
+    def report_point_queue(self, finished: int, total: int) -> None:
+        """Show control-point queue progress; ``total <= 0`` hides it.
+
+        Call on the GUI thread. A queue that starts while a job runs takes over
+        the strip's text because it is the most recently started task.
+        """
+        if total <= 0:
+            self.clear_point_queue()
+            return
+        total = int(total)
+        finished = max(0, min(int(finished), total))
+        if self._point_activity is None:
+            self._activity_counter += 1
+            self._point_activity = _Activity("", 0, 0, self._activity_counter)
+        self._point_activity.text = format_point_queue_text(finished, total)
+        self._point_activity.current = finished
+        self._point_activity.total = total
+        self._refresh_status_bars()
+
+    def clear_point_queue(self) -> None:
+        """Hide control-point queue progress (queue idle or cancelled)."""
+        if self._point_activity is None:
+            return
+        self._point_activity = None
+        self._refresh_status_bars()
+
+    def _shown_activity(self) -> _Activity | None:
+        """The most recently started active task, if any."""
+        active = [a for a in (self._job_activity, self._point_activity) if a is not None]
+        if not active:
+            return None
+        return max(active, key=lambda activity: activity.started)
+
+    def _cancel_enabled(self) -> bool:
+        """Cancel stays live while any task can still be cancelled."""
+        if self._point_activity is not None:
+            return True
+        return self._job_activity is not None and not self._job_cancel_requested
+
+    def _refresh_status_bars(self) -> None:
+        """Push the shown activity (or hide the strip) to every registered status bar."""
+        activity = self._shown_activity()
+        cancel_enabled = self._cancel_enabled()
         with self._lock:
             bars = list(self._status_bars)
         for bar in bars:
-            bar.set_cancel_enabled(False)
+            try:
+                if activity is None:
+                    bar.hide_activity()
+                else:
+                    bar.show_activity(activity.text, activity.current, activity.total, cancel_enabled)
+            except RuntimeError:
+                # The Qt widget was deleted with its window; stop updating it.
+                self.unregister_status_bar(bar)
 
     def abandon(self) -> None:
         """Cancel the running job and ignore its result (e.g. a new STOS opened).
@@ -119,10 +244,12 @@ class RegistrationJobRunner:
             generation = self._generation
             cancel_event = threading.Event()
             self._cancel_event = cancel_event
-            bars = list(self._status_bars)
+            self._job_cancel_requested = False
+            self._activity_counter += 1
+            self._job_activity = _Activity(
+                format_job_text(title, "", 0, 0), 0, 0, self._activity_counter)
 
-        for bar in bars:
-            bar.show_job(title)
+        self._refresh_status_bars()
         for listener in list(self._busy_changed_listeners):
             listener(True)
 
@@ -147,12 +274,15 @@ class RegistrationJobRunner:
                 if generation != self._generation:
                     return
                 with self._lock:
-                    active_bars = list(self._status_bars)
                     still_busy = self._busy
                     latest_seq = preview_state["seq"]
                     preview_value = preview_state["value"]
-                for bar in active_bars:
-                    bar.set_progress(current, total, label)
+                job_activity = self._job_activity
+                if job_activity is not None:
+                    job_activity.text = format_job_text(title, label, current, total)
+                    job_activity.current = int(current)
+                    job_activity.total = int(total)
+                    self._refresh_status_bars()
                 if (this_preview_seq is None
                         or on_preview is None
                         or not still_busy):
@@ -219,9 +349,9 @@ class RegistrationJobRunner:
         with self._lock:
             self._busy = False
             self._cancel_event = None
-            bars = list(self._status_bars)
-        for bar in bars:
-            bar.hide_job()
+        self._job_activity = None
+        self._job_cancel_requested = False
+        self._refresh_status_bars()
         for listener in list(self._busy_changed_listeners):
             listener(False)
 

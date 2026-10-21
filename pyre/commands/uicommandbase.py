@@ -13,6 +13,9 @@ from pyre.interfaces import IInstantCommand, StatusChangeCallback, ICommand
 
 class CommandBase(IInstantCommand):
     """Shared implementation for all commands"""
+    # True when the command handles Escape itself, so the window-level
+    # "Cancel registration" shortcut must leave it alone (see pyre.ui.escape_claim).
+    claims_escape: bool = False
     _command_completed_callbacks: list[StatusChangeCallback]
     _result: pyre.CommandResult
     _status: pyre.CommandStatus

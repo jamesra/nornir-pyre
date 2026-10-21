@@ -27,6 +27,8 @@ from pyre.commands.stos.point_coords import (
 class CreateControlPointCommand(NavigationCommandBase):
     """This command deletes a selection of control points"""
 
+    claims_escape = True  # Escape abandons the create; keep it from the window cancel shortcut
+
     _space: Space
     _new_point_position: PointPair
     _selected_points: ObservableSet[int]  # The indices of the selected points

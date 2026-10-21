@@ -79,6 +79,8 @@ def indices_in_region(
 class RegionSelectCommand(NavigationCommandBase):
     """Drag a box or lasso over control points, then replace or shift-add/remove the selection."""
 
+    claims_escape = True  # Escape abandons the drag; keep it from the window cancel shortcut
+
     _selected_points: ObservableSet[int]
     _space: Space
     _shape: RegionSelectShape

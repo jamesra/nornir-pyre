@@ -43,6 +43,7 @@ Alignment:
     * Rigid: Space refines angle (+/-5 degrees at 1 degree steps); Shift+Space also refines scale
     * Mesh / RBF: Space auto-aligns the selected point; Shift+Space auto-aligns all points
     * Grid: Space auto-aligns the selected point; Shift+Space is one refine pass; Refine w/ Grid is the multi-pass job with per-pass preview
+    * Esc (or the status-bar Cancel): cancel queued point alignments and any running refine/rotate job. Points already moved stay moved. While creating a point or dragging a selection box, Esc cancels that instead.
 
 Undo/Redo:
     * Ctrl+Z: Undo a step

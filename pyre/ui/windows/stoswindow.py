@@ -7,7 +7,7 @@ import numpy as np
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
-from PyQt6.QtGui import QAction, QActionGroup
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
 from PyQt6.QtCore import Qt
 
 from nornir_shared import prettyoutput
@@ -146,6 +146,7 @@ class StosWindow(PyreWindowBase):
     _action_convert_rbf: QAction
     _convert_transform_type_group: QActionGroup
     _registration_actions: list[QAction]
+    _action_cancel_registration: QAction
 
     @property
     def transform_controller(self) -> pyre.state.TransformController:
@@ -241,6 +242,9 @@ class StosWindow(PyreWindowBase):
         self._update_refinement_menu_state()
         self._sync_convert_transform_type_menu()
         get_registration_job_runner().add_busy_changed_listener(self._on_registration_busy_changed)
+        # The status-bar Cancel cancels point queues too (deduplicated across STOS windows).
+        get_registration_job_runner().add_cancel_listener(
+            self._transform_controller.cancel_point_registrations)
 
         # Add drag and drop support
         self.file_drop = FileDrop(self)
@@ -436,6 +440,17 @@ class StosWindow(PyreWindowBase):
             self._action_refine_rigid_angle_scale,
             self._action_refine_grid,
         ]
+
+        # One cancel for every long-running task: queued control-point alignments
+        # and the refine/rotate job. Escape is window-wide, except while a command
+        # that uses Escape itself is active (see pyre.ui.escape_claim).
+        self._action_cancel_registration = QAction("Cance&l registration", self)
+        self._action_cancel_registration.setShortcut(QKeySequence(Qt.Key.Key_Escape))
+        self._action_cancel_registration.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self._action_cancel_registration.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.cancel_all_long_running())
+        self.addAction(self._action_cancel_registration)
+        menu.addAction(self._action_cancel_registration)
 
         menu.addSeparator()
 
@@ -790,6 +805,15 @@ class StosWindow(PyreWindowBase):
         self._action_refine_rigid_angle.setVisible(is_rigid)
         self._action_refine_rigid_angle_scale.setVisible(is_rigid)
         self._action_refine_rigid_separator.setVisible(is_rigid)
+
+    def cancel_all_long_running(self) -> None:
+        """Cancel queued control-point alignments and the running refine/rotate job.
+
+        Pool workers already aligning a point are not killed (the pool is
+        shared); their results are discarded. Points already moved stay moved.
+        """
+        self._transform_controller.cancel_point_registrations()
+        get_registration_job_runner().request_cancel()
 
     def _on_registration_busy_changed(self, busy: bool) -> None:
         """Enable/disable long registration menu actions while a job runs."""

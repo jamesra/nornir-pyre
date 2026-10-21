@@ -203,7 +203,7 @@ class TestBusyPointsOnController(unittest.TestCase):
     def test_cancel_in_flight_registrations_abandons_job_runner(self) -> None:
         controller = TransformController(_mesh(4))
         self._enqueue_with_mock_pool(controller, [0, 1])
-        with patch("pyre.registration_job.get_registration_job_runner") as get_runner:
+        with patch("pyre.controllers.transformcontroller.get_registration_job_runner") as get_runner:
             runner = MagicMock()
             get_runner.return_value = runner
             controller.cancel_in_flight_registrations()

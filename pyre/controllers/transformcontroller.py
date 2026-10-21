@@ -51,6 +51,7 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.space import Space
 from pyre.selection_event_data import PointPair
 from pyre.qt_eventmanager import qt_post_to_main
+from pyre.registration_job import get_registration_job_runner
 from . import masked_grid_relax
 from pyre.array_host import yx_host as _mapped_yx_host
 from pyre.controllers.alignment_payload import (
@@ -506,6 +507,9 @@ class TransformController:
     _registration_image_store: RegistrationImageStore
     _registration_published_helpers: dict[Space, ImagePermutationHelper]
     _registration_epoch: int
+    # Points queued and finished since the queue last went idle (status-bar progress).
+    _registration_batch_total: int
+    _registration_batch_finished: int
     _registration_leases: dict[tuple[int, int], PublishedPairLease]
     _registration_job_generations: dict[tuple[int, int], tuple[int | None, int | None]]
     _virtual_boundary_indices: list[int] | None
@@ -1233,6 +1237,8 @@ class TransformController:
         self._registration_image_store = RegistrationImageStore()
         self._registration_published_helpers = {}
         self._registration_epoch = 0
+        self._registration_batch_total = 0
+        self._registration_batch_finished = 0
         self._registration_leases = {}
         self._registration_job_generations = {}
         self._virtual_boundary_indices = None
@@ -1538,14 +1544,47 @@ class TransformController:
         still finish; their results are discarded and busy glyphs clear now.
         """
         self._cancel_all_registrations()
-        from pyre.registration_job import get_registration_job_runner
         get_registration_job_runner().abandon()
+
+    def cancel_point_registrations(self) -> None:
+        """User cancel (Escape / status-bar Cancel) of queued control-point alignments.
+
+        Pending alignments are dropped. In-flight pool workers are not killed,
+        because the pool is shared; their results are discarded by epoch when
+        they arrive. Points already applied stay applied, and the selection is
+        not restored afterwards.
+        """
+        was_active = (self._registration_queue_busy()
+                      or self._registration_batch_total > 0)
+        self._registration_reselect_ids.clear()
+        self._suppress_registration_reselect = False
+        self._cancel_all_registrations()
+        if was_active:
+            _logger.info("Cancelled control-point registrations")
+            # Remesh / RBF refresh for points applied before the cancel; nothing
+            # is left to restore because the re-select set was cleared above.
+            self._on_registration_queue_idle()
+        self._fire_busy_points_changed()
 
     def _cancel_all_registrations(self) -> None:
         """Drop pending/in-flight registration work and sync the busy set."""
         self._registration_epoch += 1
         self._registration_queue.cancel_all()
+        self._reset_registration_progress()
         self._sync_register_busy()
+
+    def _report_registration_progress(self) -> None:
+        """Mirror queue progress (finished / queued since idle) on the status-bar strip."""
+        get_registration_job_runner().report_point_queue(
+            self._registration_batch_finished, self._registration_batch_total)
+
+    def _reset_registration_progress(self) -> None:
+        """Start a new progress batch and hide the queue's status-bar progress."""
+        if self._registration_batch_total == 0 and self._registration_batch_finished == 0:
+            return
+        self._registration_batch_total = 0
+        self._registration_batch_finished = 0
+        get_registration_job_runner().clear_point_queue()
 
     def _sync_register_busy(self) -> None:
         """Keep the ``register`` busy reason aligned with the registration queue."""
@@ -1727,6 +1766,8 @@ class TransformController:
         if added:
             _logger.info("Queued control-point alignments ids=%s", added)
             self._remember_registration_reselect_ids(register_indices, added)
+            self._registration_batch_total += len(added)
+            self._report_registration_progress()
             self._sync_register_busy()
             self._pump_registration_queue()
         elif point_ids:
@@ -1800,6 +1841,8 @@ class TransformController:
             if index is None:
                 # Point was deleted while queued; drop it and keep filling capacity.
                 self._registration_queue.finish(point_id)
+                self._registration_batch_finished += 1
+                self._report_registration_progress()
                 self._sync_register_busy()
                 continue
             self._dispatch_point_alignment(point_id, index)
@@ -2104,14 +2147,21 @@ class TransformController:
         job_epoch = self._registration_epoch if epoch is None else int(epoch)
         if job_epoch != self._registration_epoch:
             _logger.info(
-                "Alignment for point id %s discarded: transform or STOS changed", point_id)
+                "Alignment for point id %s discarded: cancelled, or transform or STOS changed",
+                point_id)
             self._release_registration_lease(point_id, job_epoch)
             self._registration_job_generations.pop((point_id, job_epoch), None)
+            # cancel_all left the ID in _cancelled; without this it stayed there
+            # until the point was queued again.
+            self._registration_queue.forget_cancelled(point_id)
             return
         cancelled = self._registration_queue.is_cancelled(point_id)
         stale_images = self._job_images_are_stale(point_id, job_epoch)
         self._release_registration_lease(point_id, job_epoch)
         self._registration_queue.finish(point_id)
+        if self._registration_batch_total > 0:
+            self._registration_batch_finished += 1
+            self._report_registration_progress()
         self._sync_register_busy()
         if stale_images:
             _logger.info(
@@ -2423,6 +2473,7 @@ class TransformController:
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""
+        self._reset_registration_progress()
         self._release_staged_alignment_pair()
         self._registration_source_image = None
         self._registration_target_image = None
