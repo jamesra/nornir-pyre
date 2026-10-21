@@ -23,6 +23,7 @@ from PyQt6.QtCore import QTimer, QThread
 import nornir_imageregistration
 from nornir_imageregistration import ImagePermutationHelper
 from nornir_imageregistration import cp
+from nornir_imageregistration.assemble import transform_for_host_assembly
 from nornir_imageregistration.transforms.base import IControlPoints
 from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool
 import nornir_imageregistration.interactive_edit
@@ -248,17 +249,63 @@ def _is_device_array(value: object) -> bool:
             and hasattr(value, 'get'))
 
 
+def _holds_device_arrays(value: object, depth: int = 2) -> bool:
+    """True when *value*, or pickle state up to *depth* levels down, holds a CuPy array.
+
+    GPU grid and mesh transforms keep their device arrays one level down
+    (``_discrete_transform`` / ``_continuous_transform``), so a top-level scan
+    alone misses them.
+    """
+    if _is_device_array(value):
+        return True
+    if depth <= 0 or isinstance(value, (np.ndarray, str, bytes, int, float, bool)) or value is None:
+        return False
+    if isinstance(value, dict):
+        return any(_holds_device_arrays(item, depth - 1) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_holds_device_arrays(item, depth - 1) for item in value)
+    get_state = getattr(value, '__getstate__', None)
+    if not callable(get_state):
+        return False
+    try:
+        state = get_state()
+    except Exception:
+        _logger.debug("Could not read pickle state of %s", type(value).__name__, exc_info=True)
+        return False
+    if not isinstance(state, dict):
+        return False
+    return any(_holds_device_arrays(item, depth - 1) for item in state.values())
+
+
+def _is_gpu_component_transform(transform: object) -> bool:
+    """True for the CuPy-backed ``*_GPUComponent`` grid and mesh transform classes."""
+    return type(transform).__name__.endswith('_GPUComponent')
+
+
 def host_transform_snapshot(
         transform: nornir_imageregistration.ITransform) -> nornir_imageregistration.ITransform:
     """Return a host-array clone of *transform* safe to pickle into a worker.
 
-    Rebuilt through the transform's own pickle state so control points and
-    matrices are the same values, with device arrays copied to the host on the
-    calling (CUDA-owning) thread. A worker must never receive a live CuPy mesh:
-    its backend is numpy and mapping points from a device array there is how a
-    ``CUDA_ERROR_ILLEGAL_ADDRESS`` happens. Returns *transform* unchanged when
-    it holds no device arrays or does not implement the state protocol.
+    GPU grid and mesh transforms (``*_GPUComponent``) are rebuilt as their CPU
+    classes from host copies of the control points, on the calling
+    (CUDA-owning) thread. Pickling the live GPU object instead makes every cold
+    pool worker start CUDA and compile kernels (2.6 to 2.9 s on the first
+    alignment it runs) even though alignment scoring there is host-only.
+
+    Other transforms are rebuilt through their own pickle state with top-level
+    device arrays copied to the host. A worker must never receive a live CuPy
+    mesh: its backend is numpy and mapping points from a device array there is
+    how a ``CUDA_ERROR_ILLEGAL_ADDRESS`` happens. Returns *transform* unchanged
+    when it holds no device arrays or does not implement the state protocol.
     """
+    if _is_gpu_component_transform(transform):
+        try:
+            host = transform_for_host_assembly(transform)
+        except Exception:
+            _logger.exception("Could not rebuild the GPU transform on the host; using its pickle state")
+            host = transform
+        if host is not transform and not _holds_device_arrays(host):
+            return host
     get_state = getattr(transform, '__getstate__', None)
     set_state = getattr(transform, '__setstate__', None)
     if not callable(get_state) or not callable(set_state):
