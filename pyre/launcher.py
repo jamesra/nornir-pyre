@@ -373,6 +373,14 @@ def Run(image_manager: IImageManager = Provide[IContainer.image_manager],
     print("Starting Pyre")
 
     nornir_shared.misc.SetupLogging(Level=logging.WARNING)
+    # Keep per-point registration INFO lines (queued points, process-pool dispatch,
+    # applied deltas; a few lines per point) so slow or repeated registrations can
+    # be diagnosed. Only these two loggers are raised. With NORNIR_LOG_ROOT set they
+    # land in the session log file (the console handler stays at WARNING); without
+    # it, basicConfig's stream handler prints them, which the console tee captures.
+    for registration_logger in ("pyre.commands.stos.registercontrolpointcommand",
+                                "pyre.controllers.transformcontroller"):
+        logging.getLogger(registration_logger).setLevel(logging.INFO)
     # NDJSON/.pstats under NORNIR_LOG_ROOT; cProfile only during registration jobs.
     from pyre.phase_profile import ensure_configured
     ensure_configured()
