@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pickle
 import unittest
+from typing import Any
 
 import nornir_imageregistration
 import numpy as np
@@ -97,7 +98,7 @@ class TestHostTransformSnapshotGpu(unittest.TestCase):
                          "a CuPy array survived into the worker payload")
         self.assertEqual(snapshot.type, live.type)  # type: ignore[attr-defined]
 
-        def host(array: object) -> np.ndarray:
+        def host(array: Any) -> np.ndarray:
             return np.asarray(nornir_imageregistration.EnsureNumpyArray(array), dtype=np.float64)
 
         np.testing.assert_allclose(host(snapshot.points), host(live.points))  # type: ignore[attr-defined]
