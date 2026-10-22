@@ -7,8 +7,8 @@ import numpy as np
 
 from dependency_injector.wiring import Provide, inject
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QMenu, QMenuBar
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence
+from PyQt6.QtCore import Qt, QUrl
 
 from nornir_shared import prettyoutput
 import nornir_imageregistration
@@ -55,6 +55,9 @@ logger = logging.getLogger(__name__)
 _stos_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-stos-save")
 _warped_save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pyre-warped-save")
 _DEFAULT_BROWSER_LAYOUT_WIDTH = 350
+
+# Help → Online Manual; the same link heads the bundled help text (pyre/README.txt).
+PYRE_MANUAL_URL = "https://nornir.github.io/guides/pyre_use.html"
 
 _STOS_WINDOW_BASE_TITLES: dict[ViewType, str] = {
     ViewType.Source: "Source Image",
@@ -133,10 +136,8 @@ class StosWindow(PyreWindowBase):
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _menu_workarounds: QMenu
     _action_reverse_angle: QAction
-    _menu_refinement: QMenu
     _action_refine_rigid_angle: QAction
     _action_refine_rigid_angle_scale: QAction
-    _action_refine_rigid_separator: QAction
     _action_refine_grid: QAction
     _action_rotate_log_polar: QAction
     _action_rotate_brute: QAction
@@ -254,7 +255,7 @@ class StosWindow(PyreWindowBase):
 
     @classmethod
     def sync_window_visibility_menus(cls, window_manager: IWindowManager) -> None:
-        """Update Windows menu checkmarks to match each view's visibility."""
+        """Update View menu window checkmarks to match each view's visibility."""
         try:
             source_visible = window_manager[ViewType.Source].isVisible()
             target_visible = window_manager[ViewType.Target].isVisible()
@@ -270,40 +271,23 @@ class StosWindow(PyreWindowBase):
             win.menuShowCompositeImage.setChecked(composite_visible)  # type: ignore[union-attr]
 
     def createMenu(self):
-        """Create the menu bar and menus"""
+        """Create the menu bar: File, Transform, Registration, View, Help."""
         menuBar = QMenuBar(self)
         self.setMenuBar(menuBar)
 
-        # Create File menu
-        filemenu = self.__createFileMenu()
-        menuBar.addMenu(filemenu)
+        menuBar.addMenu(self.__createFileMenu())
+        menuBar.addMenu(self.__createTransformMenu())
+        menuBar.addMenu(self.__createRegistrationMenu())
 
-        # Create Operations menu
-        opsmenu = self.__createOpsMenu()
-        menuBar.addMenu(opsmenu)
-
-        # Create Settings menu
-        settingsmenu = self.__createSettingsMenu()
-        menuBar.addMenu(settingsmenu)
-
-        # Create Windows menu
-        self.windmenu = self.__createWindowsMenu()
+        # Kept as an attribute: layout entries depend on the display count.
+        self.windmenu = self.__createViewMenu()
         menuBar.addMenu(self.windmenu)
 
-    def __createSettingsMenu(self) -> QMenu:
-        """Create the top-level Settings menu."""
-        menu = QMenu("&Settings", self)
-        menuTransforms = menu.addAction("&Transforms\u2026")
-        menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
-        menu.addSeparator()
-        menuContrast = menu.addAction("&Contrast\u2026")
-        menuContrast.triggered.connect(  # type: ignore[union-attr]
-            lambda _checked=False: self.onContrastAdjustment())
-        return menu
+        menuBar.addMenu(self.__createHelpMenu())
 
-    def __createWindowsMenu(self):
-        """Create the Windows menu"""
-        menu = QMenu("&Windows", self)
+    def __createViewMenu(self):
+        """Create the View menu: window layouts, window visibility, orientation, contrast."""
+        menu = QMenu("&View", self)
 
         from PyQt6.QtGui import QGuiApplication
         displayCount = len(QGuiApplication.screens())
@@ -319,6 +303,7 @@ class StosWindow(PyreWindowBase):
             submenuWindow1.triggered.connect(self.onLeft1WindowView)  # type: ignore[union-attr]
             submenuWindow2.triggered.connect(self.onRight1WindowView)  # type: ignore[union-attr]
             submenuWindow3.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
+            menu.addSeparator()
 
         elif displayCount >= 3:
             submenuWindow1 = menu.addAction("Left 1 Window View")
@@ -336,19 +321,20 @@ class StosWindow(PyreWindowBase):
             submenuWindow4.triggered.connect(self.on2WindowView)  # type: ignore[union-attr]
             submenuWindow5.triggered.connect(self.onRight2WindowView)  # type: ignore[union-attr]
             submenuWindow6.triggered.connect(self.on3WindowView)  # type: ignore[union-attr]
+            menu.addSeparator()
 
-        # Add checkable menu items for showing different windows
-        self.menuShowFixedImage = menu.addAction("&Target Image")
-        self.menuShowFixedImage.setCheckable(True)  # type: ignore[union-attr]
-        self.menuShowFixedImage.setChecked(True)  # type: ignore[union-attr]
-        self.menuShowFixedImage.triggered.connect(self.onShowTargetWindow)  # type: ignore[union-attr]
-
-        self.menuShowWarpedImage = menu.addAction("&Source Image")
+        # Checkable items that show or hide each STOS window.
+        self.menuShowWarpedImage = menu.addAction("&Source Window")
         self.menuShowWarpedImage.setCheckable(True)  # type: ignore[union-attr]
         self.menuShowWarpedImage.setChecked(True)  # type: ignore[union-attr]
         self.menuShowWarpedImage.triggered.connect(self.onShowSourceWindow)  # type: ignore[union-attr]
 
-        self.menuShowCompositeImage = menu.addAction("&Composite Image")
+        self.menuShowFixedImage = menu.addAction("&Target Window")
+        self.menuShowFixedImage.setCheckable(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.setChecked(True)  # type: ignore[union-attr]
+        self.menuShowFixedImage.triggered.connect(self.onShowTargetWindow)  # type: ignore[union-attr]
+
+        self.menuShowCompositeImage = menu.addAction("&Composite Window")
         self.menuShowCompositeImage.setCheckable(True)  # type: ignore[union-attr]
         self.menuShowCompositeImage.setChecked(True)  # type: ignore[union-attr]
         self.menuShowCompositeImage.triggered.connect(self.onShowCompositeWindow)  # type: ignore[union-attr]
@@ -365,20 +351,17 @@ class StosWindow(PyreWindowBase):
             self.onRestoreOrientationAllWindows)
 
         menu.addSeparator()
-        menuROIInspector = menu.addAction("&Registration ROI Inspector\u2026")
-        menuROIInspector.triggered.connect(  # type: ignore[union-attr]
-            lambda _checked=False: self.onShowROIInspector())
+        menuContrast = menu.addAction("C&ontrast…")
+        menuContrast.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onContrastAdjustment())
 
         return menu
 
-    def __createOpsMenu(self):
-        """Create the Operations menu"""
-        menu = QMenu("&Operations", self)
+    def __createTransformMenu(self):
+        """Create the Transform menu: edits to the transform model itself."""
+        menu = QMenu("&Transform", self)
 
-        menuFlip = menu.addAction("&Flip Image")
-        menuFlip.triggered.connect(self.onFlipImage)  # type: ignore[union-attr]
-
-        convertSubmenu = menu.addMenu("Convert Transform &Type")
+        convertSubmenu = menu.addMenu("&Convert Transform Type")
         assert convertSubmenu is not None
         self._action_convert_rigid = convertSubmenu.addAction("&Rigid")
         assert self._action_convert_rigid is not None
@@ -386,7 +369,7 @@ class StosWindow(PyreWindowBase):
         assert self._action_convert_grid is not None
         self._action_convert_mesh = convertSubmenu.addAction("&Mesh")
         assert self._action_convert_mesh is not None
-        self._action_convert_rbf = convertSubmenu.addAction("&RBF")
+        self._action_convert_rbf = convertSubmenu.addAction("R&BF")
         assert self._action_convert_rbf is not None
         self._convert_transform_type_group = QActionGroup(self)
         self._convert_transform_type_group.setExclusive(True)
@@ -403,33 +386,52 @@ class StosWindow(PyreWindowBase):
         self._action_convert_rbf.triggered.connect(self.onConvertToRbf)  # type: ignore[union-attr]
         convertSubmenu.aboutToShow.connect(self._sync_convert_transform_type_menu)  # type: ignore[union-attr]
 
+        # "\t" text is the shortcut column only: the view panels handle F themselves.
+        menuFlip = menu.addAction("&Flip Source Image\tF")
+        menuFlip.triggered.connect(self.onFlipImage)  # type: ignore[union-attr]
+
+        menuReset = menu.addAction("&Reset Transform…")
+        menuReset.triggered.connect(self.onResetTransformConfirmed)  # type: ignore[union-attr]
+
         menu.addSeparator()
 
-        rotateTranslateSubmenu = menu.addMenu("&Rotate translate estimate")
+        # Obscure migration aids; keep at the bottom of Transform.
+        self._menu_workarounds = menu.addMenu("&Workarounds")
+        assert self._menu_workarounds is not None
+        self._action_reverse_angle = self._menu_workarounds.addAction("&Reverse Angle")
+        self._action_reverse_angle.triggered.connect(self.onReverseAngle)  # type: ignore[union-attr]
+
+        return menu
+
+    def __createRegistrationMenu(self):
+        """Create the Registration menu: automatic alignment jobs, cancel, and their settings."""
+        menu = QMenu("&Registration", self)
+
+        rotateTranslateSubmenu = menu.addMenu("&Estimate Rotation and Translation")
         assert rotateTranslateSubmenu is not None
-        self._action_rotate_log_polar = rotateTranslateSubmenu.addAction("Log Polar (Fast)")
+        self._action_rotate_log_polar = rotateTranslateSubmenu.addAction("&Log Polar (Fast)")
         assert self._action_rotate_log_polar is not None
         self._action_rotate_log_polar.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.LogPolar))
-        self._action_rotate_brute = rotateTranslateSubmenu.addAction("Brute Force (Slow)")
+        self._action_rotate_brute = rotateTranslateSubmenu.addAction("&Brute Force (Slow)")
         assert self._action_rotate_brute is not None
         self._action_rotate_brute.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: self.onRotateTranslate(SliceToSliceMethod.BruteForce))
 
-        self._menu_refinement = menu.addMenu("&Refinement")
-        assert self._menu_refinement is not None
-        self._action_refine_rigid_angle = self._menu_refinement.addAction("Refine &angle (±5°)")
+        menu.addSeparator()
+
+        # Rigid-only refines are hidden for other transform types
+        # (_update_refinement_menu_state). Space / Shift+Space run them from a view.
+        self._action_refine_rigid_angle = menu.addAction("Refine &Angle (±5°)\tSpace")
         assert self._action_refine_rigid_angle is not None
         self._action_refine_rigid_angle.triggered.connect(  # type: ignore[union-attr]
             self.onRefineRigidAngle)
-        self._action_refine_rigid_angle_scale = self._menu_refinement.addAction(
-            "Refine angle &and scale")
+        self._action_refine_rigid_angle_scale = menu.addAction(
+            "Refine Angle and &Scale\tShift+Space")
         assert self._action_refine_rigid_angle_scale is not None
         self._action_refine_rigid_angle_scale.triggered.connect(  # type: ignore[union-attr]
             self.onRefineRigidAngleScale)
-        self._action_refine_rigid_separator = self._menu_refinement.addSeparator()
-        assert self._action_refine_rigid_separator is not None
-        self._action_refine_grid = self._menu_refinement.addAction("Refine w/ &Grid")
+        self._action_refine_grid = menu.addAction("Refine w/ &Grid…")
         assert self._action_refine_grid is not None
         self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
 
@@ -441,10 +443,17 @@ class StosWindow(PyreWindowBase):
             self._action_refine_grid,
         ]
 
+        menu.addSeparator()
+
+        menuClearMasked = menu.addAction("Remove Points on &Masked Areas")
+        menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
+
+        menu.addSeparator()
+
         # One cancel for every long-running task: queued control-point alignments
         # and the refine/rotate job. Escape is window-wide, except while a command
         # that uses Escape itself is active (see pyre.ui.escape_claim).
-        self._action_cancel_registration = QAction("Cance&l registration", self)
+        self._action_cancel_registration = QAction("Cance&l Registration", self)
         self._action_cancel_registration.setShortcut(QKeySequence(Qt.Key.Key_Escape))
         self._action_cancel_registration.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self._action_cancel_registration.triggered.connect(  # type: ignore[union-attr]
@@ -454,22 +463,29 @@ class StosWindow(PyreWindowBase):
 
         menu.addSeparator()
 
-        menuInstructions = menu.addAction("&Mouse and Keyboard Help")
-        menuInstructions.triggered.connect(self.onInstructions)  # type: ignore[union-attr]
+        menuROIInspector = menu.addAction("ROI &Inspector…")
+        menuROIInspector.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onShowROIInspector())
 
-        menuClearMasked = menu.addAction("&Clear All Masked points")
-        menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
+        menuTransforms = menu.addAction("&Transform Settings…")
+        menuTransforms.triggered.connect(self.onTransformsSettings)  # type: ignore[union-attr]
 
-        menuClear = menu.addAction("&Reset Transform")
-        menuClear.triggered.connect(self.onResetTransform)  # type: ignore[union-attr]
+        return menu
 
-        menu.addSeparator()
+    def __createHelpMenu(self):
+        """Create the Help menu."""
+        menu = QMenu("&Help", self)
 
-        # Obscure migration aids; keep at the bottom of Operations.
-        self._menu_workarounds = menu.addMenu("&Workarounds")
-        assert self._menu_workarounds is not None
-        self._action_reverse_angle = self._menu_workarounds.addAction("&Reverse Angle")
-        self._action_reverse_angle.triggered.connect(self.onReverseAngle)  # type: ignore[union-attr]
+        menuInstructions = QAction("&Mouse and Keyboard Controls…", self)
+        menuInstructions.setShortcut(QKeySequence(Qt.Key.Key_F1))
+        menuInstructions.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        menuInstructions.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onInstructions())
+        menu.addAction(menuInstructions)
+
+        menuManual = menu.addAction("&Online Manual")
+        menuManual.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: QDesktopServices.openUrl(QUrl(PYRE_MANUAL_URL)))
 
         return menu
 
@@ -477,48 +493,44 @@ class StosWindow(PyreWindowBase):
         """Create the File menu"""
         filemenu = QMenu("&File", self)
 
-        # Open stos action
-        menuOpenStos = filemenu.addAction("&Open stos file")
+        menuOpenStos = filemenu.addAction("&Open STOS File…")
+        menuOpenStos.setShortcut(QKeySequence(QKeySequence.StandardKey.Open))  # type: ignore[union-attr]
         menuOpenStos.triggered.connect(self.onOpenStos)  # type: ignore[union-attr]
 
-        # Open stos folder browser
-        menuOpenStosBrowser = filemenu.addAction("Open Stos &Folder Browser\u2026")
+        menuOpenStosBrowser = filemenu.addAction("Open STOS &Folder Browser…")
         menuOpenStosBrowser.triggered.connect(self.onOpenStosFolderBrowser)  # type: ignore[union-attr]
 
-        # Open source image action
-        menuOpenSourceImage = filemenu.addAction("&Open Source Image")
+        filemenu.addSeparator()
+
+        menuOpenSourceImage = filemenu.addAction("Open &Source Image…")
         menuOpenSourceImage.triggered.connect(self.onOpenSourceImage)  # type: ignore[union-attr]
 
-        # Open target image action
-        menuOpenTargetImage = filemenu.addAction("&Open Target Image")
+        menuOpenTargetImage = filemenu.addAction("Open &Target Image…")
         menuOpenTargetImage.triggered.connect(self.onOpenTargetImage)  # type: ignore[union-attr]
 
-        # Open source image mask action
-        menuOpenSourceImageMask = filemenu.addAction("&Open Source Image Mask")
+        menuOpenSourceImageMask = filemenu.addAction("Open Source &Mask…")
         menuOpenSourceImageMask.triggered.connect(self.onOpenSourceImageMask)  # type: ignore[union-attr]
 
-        # Open target image mask action
-        menuOpenTargetImageMask = filemenu.addAction("&Open Target Image Mask")
+        menuOpenTargetImageMask = filemenu.addAction("Open Target Mas&k…")
         menuOpenTargetImageMask.triggered.connect(self.onOpenTargetImageMask)  # type: ignore[union-attr]
 
         filemenu.addSeparator()
 
-        # Save stos action
-        menuSaveStos = filemenu.addAction("&Save Stos File")
+        # Save always asks for the path, hence the ellipsis.
+        menuSaveStos = filemenu.addAction("S&ave STOS File…")
+        menuSaveStos.setShortcut(QKeySequence(QKeySequence.StandardKey.Save))  # type: ignore[union-attr]
         menuSaveStos.triggered.connect(self.onSaveStos)  # type: ignore[union-attr]
         if menuSaveStos not in StosWindow._save_stos_menu_actions:
             StosWindow._save_stos_menu_actions.append(menuSaveStos)
 
-        # Save warped image action
-        menuSaveWarpedImage = filemenu.addAction("&Save Warped Image")
+        menuSaveWarpedImage = filemenu.addAction("Save &Warped Image…")
         menuSaveWarpedImage.triggered.connect(self.onSaveWarpedImage)  # type: ignore[union-attr]
         if menuSaveWarpedImage not in StosWindow._save_warped_menu_actions:
             StosWindow._save_warped_menu_actions.append(menuSaveWarpedImage)
 
         filemenu.addSeparator()
 
-        # Exit action
-        menuExit = filemenu.addAction("&Exit")
+        menuExit = filemenu.addAction("E&xit")
         menuExit.triggered.connect(self.onExit)  # type: ignore[union-attr]
 
         return filemenu
@@ -681,7 +693,7 @@ class StosWindow(PyreWindowBase):
         ControlsHelpDialog(self, self._config["readme"]).exec()
 
     def onTransformsSettings(self) -> None:
-        """Open Settings → Transforms dialog for registration defaults."""
+        """Open Registration → Transform Settings for registration defaults."""
         from pyre.ui.windows.transforms_settings_dialog import TransformsSettingsDialog
         TransformsSettingsDialog.edit_settings(self._settings, parent=self)
         self._sync_mesh_lines_from_settings()
@@ -750,6 +762,19 @@ class StosWindow(PyreWindowBase):
                 pyre.controllers.transformcontroller.CreateDefaultRigidTransform())
         self.imagepanel._glpanel.update()
 
+    def onResetTransformConfirmed(self) -> None:
+        """Ask before Transform → Reset Transform discards every control point."""
+        reply = QMessageBox.question(
+            self,
+            "Reset transform",
+            "Replace the current transform with an identity rigid transform? "
+            "All control points are discarded.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.onResetTransform()
+
     def onClearAllPoints(self):
         """Deprecated alias for onResetTransform."""
         self.onResetTransform()
@@ -804,7 +829,6 @@ class StosWindow(PyreWindowBase):
             nornir_imageregistration.IRigidTransform)
         self._action_refine_rigid_angle.setVisible(is_rigid)
         self._action_refine_rigid_angle_scale.setVisible(is_rigid)
-        self._action_refine_rigid_separator.setVisible(is_rigid)
 
     def cancel_all_long_running(self) -> None:
         """Cancel queued control-point alignments and the running refine/rotate job.

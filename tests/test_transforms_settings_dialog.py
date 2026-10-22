@@ -1,4 +1,4 @@
-"""Tests for Settings → Transforms registration defaults dialog and flip default."""
+"""Tests for Registration → Transform Settings defaults dialog and flip default."""
 
 from __future__ import annotations
 

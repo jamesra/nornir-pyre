@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 import types
 import unittest
@@ -100,6 +101,36 @@ class TestBundledReadmeSnippet(unittest.TestCase):
         self.assertIn("Keyboard Controls", section)
         self.assertIn("Grid:", section)
         self.assertIn("Refine w/ Grid", section)
+
+
+def _menu_label(raw: str) -> str:
+    """Menu text as shown: no mnemonic '&', shortcut column ('\\t...') or trailing ellipsis."""
+    label = raw.split("\\t")[0].replace("&", "")
+    for ellipsis in ("…", "\\u2026", "..."):
+        label = label.removesuffix(ellipsis)
+    return label.strip()
+
+
+class TestHelpMenuPaths(unittest.TestCase):
+    """Every "Menu → Item" the help text names must exist in the STOS window menus."""
+
+    def test_menu_paths_in_help_exist(self) -> None:
+        source = (_PYRE_PACKAGE / "ui" / "windows" / "stoswindow.py").read_text(encoding="utf-8")
+        top_level = {_menu_label(m) for m in re.findall(r'QMenu\("([^"]+)", self\)', source)}
+        items = {_menu_label(m) for m in re.findall(
+            r'(?:addAction|addMenu|QAction)\(\s*"([^"]+)"', source)}
+        self.assertIn("Help", top_level)
+
+        help_text = (_PYRE_PACKAGE / "README.txt").read_text(encoding="utf-8")
+        paths = re.findall(r"(\w+) → (.+)", help_text)
+        self.assertTrue(paths, "help text should point at menu entries")
+        for menu, rest in paths:
+            with self.subTest(path=f"{menu} → {rest}"):
+                self.assertIn(menu, top_level)
+                # The prose after the arrow must start with a real item label.
+                self.assertTrue(
+                    any(re.match(re.escape(item) + r"(?!\w)", rest) for item in items),
+                    f"no menu item starts {rest!r}")
 
 
 if __name__ == "__main__":
