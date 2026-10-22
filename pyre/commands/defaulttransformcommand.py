@@ -242,6 +242,9 @@ class DefaultTransformCommand(NavigationCommandBase):
         return new_command
 
     def on_key_down(self, event):
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            # A physical press starts a hold; its auto-repeats register each point once.
+            self._transform_controller.space_hold.begin()
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],
                                target=self._mouse_position_history[Space.Target])
@@ -260,6 +263,8 @@ class DefaultTransformCommand(NavigationCommandBase):
         return
 
     def on_key_up(self, event):
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._transform_controller.space_hold.end()
 
         # Update the mouse position history
         point_pair = PointPair(source=self._mouse_position_history[Space.Source],

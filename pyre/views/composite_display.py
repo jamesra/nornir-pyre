@@ -40,6 +40,10 @@ COMPOSITE_SOURCE_CHANNEL_MIX = np.array([1.0, 0.0, 1.0, 1.0], dtype=np.float32)
 COMPOSITE_TARGET_CHANNEL_MIX = np.array([0.0, 1.0, 0.0, 1.0], dtype=np.float32)
 COMPOSITE_SOURCE_LEGEND_COLOR = "#ff00ff"
 COMPOSITE_TARGET_LEGEND_COLOR = "#00ff00"
+# Display -> lookat solve: stop once Transform(lookat) is this close to the target
+# display point, or after this many refinement steps.
+_DISPLAY_SOLVE_TOLERANCE_PX = 0.01
+_DISPLAY_SOLVE_MAX_ITERATIONS = 8
 
 
 def composite_legend_rich_text() -> str:
@@ -341,10 +345,39 @@ def lookat_from_display_position(
 ) -> NDArray[np.floating]:
     """Map a composite display-space (y,x) position back to source-camera lookat.
 
+    ``InverseTransform`` alone is not an exact inverse of ``Transform``: mesh
+    forward and inverse triangulate different point sets and RBF fits two separate
+    functions, so ``Transform(InverseTransform(p))`` can miss ``p`` by several
+    pixels. Each registration rebases the composite camera through here, so that
+    miss compounded into a drifting view. The estimate is refined until
+    ``Transform(lookat)`` lands on *display_yx*.
+
     Returns a non-finite vector when InverseTransform cannot map the point (caller
     must not assign that to ``camera.lookat``).
     """
-    return _ui_transform_point(transform_controller, False, display_yx)
+    display = _as_numpy_f64(display_yx).ravel()[:2]
+    inverse_display = _ui_transform_point(transform_controller, False, display)
+    if _finite_yx(inverse_display) is None:
+        return inverse_display
+    best = inverse_display
+    best_error = np.inf
+    lookat = inverse_display
+    for _ in range(_DISPLAY_SOLVE_MAX_ITERATIONS):
+        shown = _finite_yx(_ui_transform_point(transform_controller, True, lookat))
+        if shown is None:
+            break
+        error = float(np.max(np.abs(shown - display)))
+        if error >= best_error:
+            break
+        best, best_error = lookat, error
+        if error <= _DISPLAY_SOLVE_TOLERANCE_PX:
+            break
+        # Step by the inverse's own Jacobian: Inv(d) - Inv(Transform(lookat)).
+        correction = _finite_yx(_ui_transform_point(transform_controller, False, shown))
+        if correction is None:
+            break
+        lookat = lookat + (inverse_display - correction)
+    return np.asarray(best, dtype=np.float64).copy()
 
 def rebase_composite_camera_after_rigid_gesture(
         camera: Camera,
@@ -376,11 +409,21 @@ def rebase_composite_camera_to_display(
 
     Used when composite display freeze lifts after control-point registration or remesh:
     keep the on-screen target-display framing still while the warp changes.
+    The display center is then pinned to *display_yx* for this lookat, so any
+    residual solve error cannot move the view and repeated rebases cannot add up.
     """
     new_lookat = lookat_from_display_position(transform_controller, display_yx)
-    if is_plausible_world_point(
+    if not is_plausible_world_point(
             new_lookat, camera, transform_controller=transform_controller):
-        camera.lookat = new_lookat
+        return
+    camera.lookat = new_lookat
+    model = transform_controller.TransformModel
+    if model is None or is_rigid_transform(model):
+        return
+    lookat = np.asarray(camera.lookat, dtype=np.float64).ravel()[:2]
+    transform_controller._cached_composite_display_lookat = _as_numpy_f64(
+        display_yx, copy=True).ravel()[:2]
+    transform_controller._cached_composite_lookat_src = (float(lookat[0]), float(lookat[1]))
 
 
 def visible_rectangle_around_lookat(

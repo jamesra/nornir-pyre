@@ -62,6 +62,48 @@ class ControlPointBusySet:
         return before != self.ids
 
 
+
+class SpaceHoldRegistrations:
+    """Session IDs already registered during the current Space hold.
+
+    Holding Space sends a stream of auto-repeat presses (about 30 per second).
+    Without this each repeat queued the hovered or selected points again as soon
+    as their previous alignment finished, so a held Space re-registered the same
+    point several times a second and it never settled. During one hold each point
+    registers on the first press that reaches it; sweeping onto new points still
+    registers them. A physical (not auto-repeat) press starts a new hold.
+    """
+
+    _ids: set[int] | None
+
+    def __init__(self) -> None:
+        self._ids = None
+
+    @property
+    def active(self) -> bool:
+        """True between a physical Space press and its release."""
+        return self._ids is not None
+
+    def begin(self) -> None:
+        """Start a new hold; nothing counts as registered yet."""
+        self._ids = set()
+
+    def end(self) -> None:
+        """End the hold so later registrations are not filtered."""
+        self._ids = None
+
+    def claim(self, point_ids: Iterable[int]) -> set[int]:
+        """Return the IDs not yet registered in this hold and record them.
+
+        Every ID is returned when no hold is active.
+        """
+        requested = {int(point_id) for point_id in point_ids}
+        if self._ids is None:
+            return requested
+        fresh = requested - self._ids
+        self._ids.update(fresh)
+        return fresh
+
 class ControlPointRegistrationQueue:
     """Deduped FIFO of point IDs allowing several concurrent in-flight jobs."""
 

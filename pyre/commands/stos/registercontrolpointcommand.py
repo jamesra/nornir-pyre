@@ -24,7 +24,7 @@ class RegisterControlPointCommand(InstantCommandBase):
     """Enqueue automatic registration for selected control points."""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
-    _points_to_register: set[int]  # Selection plus the hovered point, captured at construction
+    _points_to_register: set[int]  # Selection plus the hovered point not yet registered this Space hold
     _original_points: NDArray[np.floating]
     _transform_controller: pyre.viewmodels.TransformController  # type: ignore[attr-defined]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
@@ -79,20 +79,37 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._settings = settings.stos.point_registration
 
         if register_all:
-            self._selected_points.update(range(transform_controller.NumPoints))
-            self._points_to_register = set(self._selected_points)
+            requested = set(range(transform_controller.NumPoints))
         else:
             # The hovered point is registered but not added to the shared selection.
             # Selected points are re-selected once the queue goes idle, so adding the
             # hovered point there made every later hover-and-Space press register all
             # earlier presses' points again (press N aligned N points).
-            self._points_to_register = set(self._selected_points) | set(command_points)
+            requested = set(self._selected_points) | set(command_points)
         self._original_points = transform_controller.points
 
-        if len(self._points_to_register) == 0:
+        if len(requested) == 0:
             raise RequiresSelectionError('No points selected')
 
         self._transform_controller = transform_controller
+        # Space auto-repeat: only points this hold has not registered yet.
+        self._points_to_register = self._unregistered_in_space_hold(requested)
+        if register_all and self._points_to_register:
+            self._selected_points.update(range(transform_controller.NumPoints))
+
+    def _unregistered_in_space_hold(self, indices: set[int]) -> set[int]:
+        """Drop indices already registered during the current Space hold."""
+        controller = self._transform_controller
+        index_by_id: dict[int, int] = {}
+        without_id: set[int] = set()
+        for index in indices:
+            point_id = controller.point_id_for_index(index)
+            if point_id is None:
+                without_id.add(index)
+            else:
+                index_by_id[point_id] = index
+        fresh = controller.space_hold.claim(index_by_id.keys())
+        return without_id | {index_by_id[point_id] for point_id in fresh}
 
     def __str__(self):
         return "RegisterControlPointCommand"
@@ -105,6 +122,10 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
+        if not self._points_to_register:
+            # A Space repeat over points this hold already registered.
+            super().execute()
+            return
         queued = sorted(self._points_to_register)
         # Images published to shared memory at load (and on contrast settle) are
         # already the arrays the pool workers attach to; re-wrapping them here

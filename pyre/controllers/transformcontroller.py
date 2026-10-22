@@ -35,6 +35,7 @@ from pyre.controllers.control_point_registration_queue import (
     ControlPointBusySet,
     ControlPointRegistrationQueue,
     REGISTER_BUSY_REASON,
+    SpaceHoldRegistrations,
 )
 from pyre.observable import ObservedAction, ObservableSet
 from pyre.controllers.tile_mesh_cache import TileMeshCpuCache
@@ -489,6 +490,7 @@ class TransformController:
     _next_point_id: int = 0
     _registration_queue: ControlPointRegistrationQueue
     _busy_points: ControlPointBusySet
+    _space_hold: SpaceHoldRegistrations
     __OnBusyPointsChangedListeners: IEventManager[BusyPointsChangedCallback]
     __OnAlignmentResultListeners: IEventManager[AlignmentResultCallback]
     __OnAlignmentAppliedListeners: IEventManager[AlignmentAppliedCallback]
@@ -1221,6 +1223,7 @@ class TransformController:
         self._next_point_id = 0
         self._registration_queue = ControlPointRegistrationQueue()
         self._busy_points = ControlPointBusySet()
+        self._space_hold = SpaceHoldRegistrations()
         self._ui_selected_points = selected_points
         self._registration_reselect_ids = set()
         self._suppress_registration_reselect = False
@@ -1485,6 +1488,8 @@ class TransformController:
         count = self.NumPoints
         self._point_ids = np.arange(count, dtype=np.int64)
         self._next_point_id = count
+        # Reminted IDs would alias points claimed earlier in a hold.
+        self._space_hold.end()
         self._rebuild_id_to_index()
 
     def _reconcile_point_ids(self) -> None:
@@ -1704,6 +1709,11 @@ class TransformController:
             qt_post_to_main(self._fire_busy_points_changed)
             return
         self.__OnBusyPointsChangedListeners.invoke(self, self.busy_point_ids)
+
+    @property
+    def space_hold(self) -> SpaceHoldRegistrations:
+        """Points already registered during the current Space hold."""
+        return self._space_hold
 
     def point_id_for_index(self, index: int) -> int | None:
         """Return the session ID for control-point row *index*, or None."""
@@ -2166,11 +2176,15 @@ class TransformController:
         if stale_images:
             _logger.info(
                 "Alignment for point id %s discarded: images were replaced", point_id)
-        if not cancelled and not stale_images:
-            if record is not None:
-                self.__OnAlignmentResultListeners.invoke(point_id, record)
-            self._apply_registration_record(point_id, snapshot_target, record)
-        self._pump_registration_queue()
+        try:
+            if not cancelled and not stale_images:
+                if record is not None:
+                    self.__OnAlignmentResultListeners.invoke(point_id, record)
+                self._apply_registration_record(point_id, snapshot_target, record)
+        finally:
+            # A failed apply must not strand the queue: without this pump the idle
+            # handler never runs and the status-bar progress stays up.
+            self._pump_registration_queue()
 
     def _apply_registration_record(
             self,
