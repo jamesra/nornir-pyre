@@ -82,6 +82,19 @@ def glyph_timer_interval_ms(*, point_queue_busy: bool, job_busy: bool) -> int:
     return GLYPH_TIMER_IDLE_MS
 
 
+def glyph_timer_needs_paint(*, has_selection: bool, blink_phase_changed: bool,
+                            point_queue_busy: bool, job_busy: bool) -> bool:
+    """True when a glyph-timer tick would change what the panel shows.
+
+    The busy comet and running jobs animate on every tick. A selection only needs a
+    paint when its blink phase has flipped since the last one. Anything else that
+    changes the picture requests its own repaint.
+    """
+    if point_queue_busy or job_busy:
+        return True
+    return has_selection and blink_phase_changed
+
+
 @dataclass
 class ImageTransformPanelConfig:
     glcontext_manager: pyre.interfaces.managers.gl_context_manager.IGLContextManager
@@ -127,6 +140,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _composite_legend: QLabel | None = None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
+    _painted_blink_phase: int | None = None  # Selected-glyph blink phase in the last paint
     _registration_roi_fade: RegistrationRoiFadeTracker
     _escape_claim_filter: EscapeClaimFilter
 
@@ -252,6 +266,7 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.statusbar.space = self.space
 
         self._glpanel._overlay_paint_method = self._paint_control_point_id_overlay
+        self._glpanel._overlay_paint_enabled = lambda: self._settings.ui.show_control_point_ids
 
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
@@ -547,14 +562,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             if self.view_type == ViewType.Composite:
                 QTimer.singleShot(0, self._glpanel.update)
 
-    def _glyph_timer_interval_ms(self) -> int:
-        """Faster idle glyph paints; 5 Hz while a point queue or registration job is busy."""
+    def _glyph_timer_busy(self) -> tuple[bool, bool]:
+        """Return whether a point queue and a registration job are busy."""
         from pyre.registration_job import get_registration_job_runner
 
-        return glyph_timer_interval_ms(
-            point_queue_busy=bool(self._transform_controller.busy_point_ids),
-            job_busy=get_registration_job_runner().busy,
-        )
+        return bool(self._transform_controller.busy_point_ids), get_registration_job_runner().busy
 
     def _on_busy_points_changed(self, controller: TransformController, ids: frozenset[int]) -> None:
         """Repaint immediately so busy glyphs appear without waiting for the blink timer."""
@@ -586,9 +598,17 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         """Timer callback that reschedules itself - workaround for repeating timer issues"""
         try:
             self.DebugTickCounter += 1
-            # Blink only control-point glyphs; reuse the retained texture background.
-            self.glcanvas.update()
-            QTimer.singleShot(self._glyph_timer_interval_ms(), self.on_timer_singleshot)
+            point_queue_busy, job_busy = self._glyph_timer_busy()
+            if glyph_timer_needs_paint(
+                    has_selection=bool(self._selected_points),
+                    blink_phase_changed=selected_blink_phase() != self._painted_blink_phase,
+                    point_queue_busy=point_queue_busy,
+                    job_busy=job_busy):
+                # Blink only control-point glyphs; reuse the retained texture background.
+                self.glcanvas.update()
+            QTimer.singleShot(
+                glyph_timer_interval_ms(point_queue_busy=point_queue_busy, job_busy=job_busy),
+                self.on_timer_singleshot)
         except Exception as e:
             print(f"ERROR in on_timer_singleshot for {self.view_type.value}: {e}")
             import traceback
@@ -872,11 +892,12 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                     )
             if should_draw_registration_roi(self.view_type):
                 self._draw_registration_roi_overlay(cp_view_proj)
+            self._painted_blink_phase = selected_blink_phase()
             self._transform_controller_view.draw(
                 cp_view_proj,
                 tween=ControlPointMap.draw_tween_for_pyre_space(self.space),
                 scale_factor=point_scale,
-                blink_phase=selected_blink_phase(),
+                blink_phase=self._painted_blink_phase,
                 display_point_rows=composite_control_point_draw_rows(
                     self.transform_controller, self.space)
                 if self.view_type == ViewType.Composite and self.transform_controller is not None

@@ -36,6 +36,7 @@ class GLPanel(QOpenGLWidget):
     _glinitialized: bool = False
     _draw_method: Callable[[], None]  # Method we call to render scene onto our canvas
     _overlay_paint_method: Callable[[QPainter], None] | None = None  # Optional QPainter overlay, drawn after GL
+    _overlay_paint_enabled: Callable[[], bool] | None = None  # When it returns False, skip the overlay QPainter
     _glcontextmanager: IGLContextManager = Provide[IContainer.glcontext_manager]
     _gl_funcs: QOpenGLFunctions | None = None
 
@@ -277,9 +278,13 @@ class GLPanel(QOpenGLWidget):
         QOpenGLWidget composites paintGL()'s output into the widget's backing store as part
         of the base paintEvent, so a QPainter opened on self afterwards draws on top of it
         within the same paint, with no native/2D painting mode juggling required.
+        Opening that QPainter costs most of a glyph-only paint even when nothing is drawn,
+        so it is skipped while ``_overlay_paint_enabled`` returns False.
         """
         super().paintEvent(event)
         if self._overlay_paint_method is None:
+            return
+        if self._overlay_paint_enabled is not None and not self._overlay_paint_enabled():
             return
         painter = QPainter(self)
         try:
