@@ -136,10 +136,28 @@ def capture_window_geometry(settings: AppSettings, window_manager: IWindowManage
     from pyre.ui.windows.stoswindow import StosWindow
 
     browser = StosWindow._folder_browser
+    previous_browser = settings.ui.window_geometry.get(STOS_BROWSER_KEY)
     if browser is not None:
-        saved[STOS_BROWSER_KEY] = _geometry_from_widget(browser)
+        geom = _geometry_from_widget(browser)
+        visible_at_exit = StosWindow._folder_browser_visible_at_exit
+        if visible_at_exit is not None:
+            # Quitting hides every window before aboutToQuit; keep what was on screen.
+            geom = geom.model_copy(update={"visible": visible_at_exit})
+        saved[STOS_BROWSER_KEY] = geom
+    elif previous_browser is not None:
+        # Never opened this session: keep its last frame and remember that it stayed closed.
+        saved[STOS_BROWSER_KEY] = previous_browser.model_copy(update={"visible": False})
 
     settings.ui.window_geometry = saved
+
+
+def browser_visible_last_session(settings: AppSettings) -> bool:
+    """True unless the saved folder-browser entry says it was closed when Pyre last quit.
+
+    Settings without an entry (older files, a folder never shown) count as visible.
+    """
+    geom = settings.ui.window_geometry.get(STOS_BROWSER_KEY)
+    return geom is None or geom.visible
 
 
 def _stos_geometry_restorable(saved: dict[str, WindowGeometry], screens) -> bool:

@@ -45,7 +45,11 @@ from pyre.ui.windows.refine_grid_settings_dialog import (
     GridSettingsDialogResult,
     RefineGridSettingsDialog,
 )
-from pyre.ui.window_geometry import apply_frame_geometry_to_widget, apply_saved_browser_geometry
+from pyre.ui.window_geometry import (
+    apply_frame_geometry_to_widget,
+    apply_saved_browser_geometry,
+    browser_visible_last_session,
+)
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
 from pyre.observable import ObservableSet
@@ -121,6 +125,8 @@ class StosWindow(PyreWindowBase):
     dirname: str = ''
     _view_type: ViewType
     _folder_browser: 'StosFileBrowserWindow | None' = None  # shared across all StosWindow instances
+    # Whether the browser was on screen when exit began; quitting hides it before aboutToQuit.
+    _folder_browser_visible_at_exit: bool | None = None
     _stos_save_in_progress: bool = False
     _stos_save_initiator: 'StosWindow | None' = None
     _save_stos_menu_actions: list[QAction] = []
@@ -1315,10 +1321,18 @@ class StosWindow(PyreWindowBase):
             *,
             geometry_restored: bool = False,
     ) -> None:
-        """Show the browser at startup when a saved folder path still exists."""
+        """Show the browser at startup when a saved folder path still exists.
+
+        A browser that was closed when Pyre last quit stays closed (and is not created, so it
+        does not scan the folder) until it is opened from the menu.
+        """
         from PyQt6.QtGui import QGuiApplication
         from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
         if not StosFileBrowserWindow.has_cached_folder(settings):
+            return
+        if not browser_visible_last_session(settings):
+            if not geometry_restored and len(QGuiApplication.screens()) == 1:
+                cls.apply_single_monitor_composite_layout(anchor_window._window_manager)
             return
         browser = cls._ensure_folder_browser()
         last_loaded = settings.stos.stos_fullpath
@@ -1349,7 +1363,14 @@ class StosWindow(PyreWindowBase):
         cls._folder_browser = None
 
     def onExit(self):
-        """Exit the application; folder-browser geometry is captured on aboutToQuit."""
+        """Exit the application; folder-browser geometry is captured on aboutToQuit.
+
+        Qt closes every window while quitting, so the browser's visibility is recorded
+        here (on the first call; closing the STOS windows re-enters onExit) for the next launch.
+        """
+        if StosWindow._folder_browser_visible_at_exit is None:
+            browser = StosWindow._folder_browser
+            StosWindow._folder_browser_visible_at_exit = browser is not None and browser.isVisible()
         super().onExit()
 
     @staticmethod

@@ -16,6 +16,7 @@ from pyre.ui.window_geometry import (
     apply_frame_geometry_to_widget,
     apply_saved_browser_geometry,
     apply_saved_window_geometry,
+    browser_visible_last_session,
     capture_window_geometry,
     clamp_frame_geometry,
     is_geometry_valid,
@@ -63,8 +64,9 @@ class TestCaptureWindowGeometry(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._app = QApplication.instance() or QApplication(sys.argv)
 
-    def test_capture_writes_stos_window_keys(self) -> None:
-        settings = AppSettings(ui=UISettings())
+    @staticmethod
+    def _stos_windows() -> tuple[dict[str, QMainWindow], MagicMock]:
+        """Show one window per STOS key and return them with a window manager mock."""
         windows: dict[str, QMainWindow] = {}
         for key in STOS_WINDOW_KEYS:
             win = QMainWindow()
@@ -78,6 +80,47 @@ class TestCaptureWindowGeometry(unittest.TestCase):
         window_manager.__getitem__ = lambda _self, key: windows[
             key.value if hasattr(key, "value") else key
         ]
+        return windows, window_manager
+
+    def test_capture_remembers_a_browser_not_opened_this_session_as_closed(self) -> None:
+        previous = WindowGeometry(x=5, y=6, width=350, height=600, visible=True)
+        settings = AppSettings(ui=UISettings(window_geometry={STOS_BROWSER_KEY: previous}))
+        _windows, window_manager = self._stos_windows()
+
+        with patch("pyre.ui.windows.stoswindow.StosWindow._folder_browser", None):
+            capture_window_geometry(settings, window_manager)
+
+        saved = settings.ui.window_geometry[STOS_BROWSER_KEY]
+        self.assertFalse(saved.visible)
+        self.assertEqual((saved.x, saved.y, saved.width, saved.height), (5, 6, 350, 600))
+
+    def test_capture_records_a_closed_browser_as_not_visible(self) -> None:
+        settings = AppSettings(ui=UISettings())
+        _windows, window_manager = self._stos_windows()
+        browser = QMainWindow()
+        browser.setGeometry(30, 40, 350, 600)
+
+        with patch("pyre.ui.windows.stoswindow.StosWindow._folder_browser", browser):
+            capture_window_geometry(settings, window_manager)
+
+        self.assertFalse(settings.ui.window_geometry[STOS_BROWSER_KEY].visible)
+
+    def test_capture_uses_browser_visibility_recorded_when_exit_began(self) -> None:
+        """Quitting hides the browser before aboutToQuit; onExit's record wins."""
+        settings = AppSettings(ui=UISettings())
+        _windows, window_manager = self._stos_windows()
+        browser = QMainWindow()
+        browser.setGeometry(30, 40, 350, 600)
+
+        with patch("pyre.ui.windows.stoswindow.StosWindow._folder_browser", browser), \
+                patch("pyre.ui.windows.stoswindow.StosWindow._folder_browser_visible_at_exit", True):
+            capture_window_geometry(settings, window_manager)
+
+        self.assertTrue(settings.ui.window_geometry[STOS_BROWSER_KEY].visible)
+
+    def test_capture_writes_stos_window_keys(self) -> None:
+        settings = AppSettings(ui=UISettings())
+        windows, window_manager = self._stos_windows()
 
         with patch("pyre.ui.windows.stoswindow.StosWindow._folder_browser", None):
             capture_window_geometry(settings, window_manager)
@@ -209,6 +252,57 @@ class TestStartupBrowserPlacement(unittest.TestCase):
             StosWindow._folder_browser = None
         mock_layout.assert_called_once_with(anchor._window_manager)
         anchor._layout_browser_left_of_composite.assert_not_called()
+
+    @staticmethod
+    def _closed_browser_settings() -> AppSettings:
+        closed = WindowGeometry(x=50, y=50, width=350, height=600, visible=False)
+        return AppSettings(ui=UISettings(
+            stos_browser_folder="/tmp/stos", window_geometry={STOS_BROWSER_KEY: closed}))
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.apply_single_monitor_composite_layout")
+    @patch("pyre.ui.windows.stosfilebrowser.StosFileBrowserWindow.has_cached_folder", return_value=True)
+    @patch("PyQt6.QtGui.QGuiApplication")
+    def test_browser_closed_last_session_stays_closed(
+            self,
+            mock_qgui: MagicMock,
+            _has_cached: MagicMock,
+            mock_layout: MagicMock) -> None:
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        mock_qgui.screens.return_value = [_screen(QRect(0, 0, 1920, 1080))]
+        anchor = MagicMock()
+        with patch.object(StosWindow, "_ensure_folder_browser") as ensure:
+            StosWindow.open_folder_browser_if_cached_folder_exists(
+                self._closed_browser_settings(), anchor, geometry_restored=False)
+        ensure.assert_not_called()
+        mock_layout.assert_called_once_with(anchor._window_manager)
+        anchor._layout_browser_left_of_composite.assert_not_called()
+
+    @patch("pyre.ui.windows.stoswindow.StosWindow.apply_single_monitor_composite_layout")
+    @patch("pyre.ui.windows.stosfilebrowser.StosFileBrowserWindow.has_cached_folder", return_value=True)
+    def test_browser_closed_last_session_keeps_restored_layout(
+            self,
+            _has_cached: MagicMock,
+            mock_layout: MagicMock) -> None:
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        anchor = MagicMock()
+        with patch.object(StosWindow, "_ensure_folder_browser") as ensure:
+            StosWindow.open_folder_browser_if_cached_folder_exists(
+                self._closed_browser_settings(), anchor, geometry_restored=True)
+        ensure.assert_not_called()
+        mock_layout.assert_not_called()
+
+
+class TestBrowserVisibleLastSession(unittest.TestCase):
+    def test_no_saved_entry_counts_as_visible(self) -> None:
+        self.assertTrue(browser_visible_last_session(AppSettings(ui=UISettings())))
+
+    def test_saved_visibility_is_used(self) -> None:
+        for visible in (True, False):
+            geom = WindowGeometry(x=0, y=0, width=350, height=600, visible=visible)
+            settings = AppSettings(ui=UISettings(window_geometry={STOS_BROWSER_KEY: geom}))
+            self.assertEqual(browser_visible_last_session(settings), visible)
 
 
 class TestBrowserMinimumLayoutWidth(unittest.TestCase):
