@@ -135,6 +135,8 @@ class StosBrowserListDeleteFilter(QObject):
 
 _BROWSER_MIN_LAYOUT_WIDTH = 180
 _BROWSER_LAYOUT_PADDING = 44  # list margins + scrollbar reserve
+# Scoring a large folder takes minutes; save at least this often so quitting keeps progress.
+_QUALITY_CACHE_SAVE_INTERVAL_S = 10.0
 _COL_NAME = 0
 _COL_QUALITY = 1
 _COL_MODIFIED = 2
@@ -168,6 +170,8 @@ class StosFileBrowserWindow(QMainWindow):
     _quality_histogram: StosQualityHistogramWidget
     _quality_cache: QualityCache
     _score_generation: int
+    _score_future: Future | None
+    _quality_scores_incomplete: bool  # Scoring was deferred while hidden or cut short by close
     _scan_generation: int
     _last_completed_scan_generation: int
     _pending_rescan_basename: str | None
@@ -179,6 +183,7 @@ class StosFileBrowserWindow(QMainWindow):
     _pending_load: _PendingStosLoad | None
     _debounce_timer: QTimer
     _load_executor: ThreadPoolExecutor
+    _load_executor_shut_down: bool
 
     @staticmethod
     def has_cached_folder(settings: AppSettings) -> bool:
@@ -208,6 +213,8 @@ class StosFileBrowserWindow(QMainWindow):
         self._list_delete_filter = None
         self._load_generation = 0
         self._score_generation = 0
+        self._score_future = None
+        self._quality_scores_incomplete = False
         self._scan_generation = 0
         self._last_completed_scan_generation = 0
         self._pending_rescan_basename = None
@@ -216,6 +223,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._quality_cache = QualityCache()
         self._pending_load = None
         self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-load")
+        self._load_executor_shut_down = False
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.timeout.connect(self._execute_pending_load)
@@ -723,9 +731,20 @@ class StosFileBrowserWindow(QMainWindow):
             selected_score=selected,
         )
 
+    def _quality_scoring_visible(self) -> bool:
+        """True when the window is on screen, so background scores would be seen."""
+        return self.isVisible() and not self.isMinimized()
+
     def _queue_quality_scores(self, paths: list[str]) -> None:
-        """Compute missing/stale pair ZNCC scores in the background."""
+        """Compute missing/stale pair ZNCC scores in the background.
+
+        Scoring a folder can keep a core busy for minutes, so it waits while the window
+        is hidden or minimized; showing it again re-checks the folder and scores then.
+        """
         if not self._folder or not paths:
+            return
+        if not self._quality_scoring_visible():
+            self._quality_scores_incomplete = True
             return
         folder = self._folder
         self._score_generation += 1
@@ -736,17 +755,25 @@ class StosFileBrowserWindow(QMainWindow):
 
         def _worker() -> tuple[QualityCache, list[StosBrowserRow]]:
             cache = load_quality_cache(folder)
+            unsaved = False
+            last_save = time.monotonic()
             for path in unique_paths:
                 if generation != self._score_generation:
                     break
                 if not os.path.isfile(path):
                     continue
                 try:
-                    cache, _entry, _computed = score_stos_into_cache(
+                    cache, _entry, computed = score_stos_into_cache(
                         folder, path, cache=cache, max_side=2048)
+                    unsaved = unsaved or computed
                 except Exception as exc:
                     print(f"STOS quality score failed for {path}: {exc}")
-            save_quality_cache(folder, cache)
+                if unsaved and time.monotonic() - last_save >= _QUALITY_CACHE_SAVE_INTERVAL_S:
+                    save_quality_cache(folder, cache)
+                    unsaved = False
+                    last_save = time.monotonic()
+            if unsaved:
+                save_quality_cache(folder, cache)
             rows2, cache, _stale = attach_quality_scores(
                 folder, rows_snapshot, source, cache=cache)
             return cache, rows2
@@ -769,6 +796,14 @@ class StosFileBrowserWindow(QMainWindow):
 
         future = self._load_executor.submit(_worker)
         future.add_done_callback(lambda f: _on_done(f))
+        self._score_future = future
+
+    def _resume_deferred_quality_scores(self) -> None:
+        """Re-check the folder and score what is still stale once the window is on screen."""
+        if not self._quality_scores_incomplete or not self._quality_scoring_visible():
+            return
+        self._quality_scores_incomplete = False
+        self._queue_quality_attach_only()
 
     def _row_list_color(self, row: StosBrowserRow) -> QColor | None:
         """Return list foreground color for manual override / manual-only rows."""
@@ -1186,12 +1221,30 @@ class StosFileBrowserWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
 
+    def showEvent(self, event) -> None:
+        """Restart background work that closing or hiding the window deferred."""
+        super().showEvent(event)
+        if self._load_executor_shut_down:
+            # closeEvent shut the executor down; the shared window is reopened, not rebuilt.
+            self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-load")
+            self._load_executor_shut_down = False
+        self._resume_deferred_quality_scores()
+
+    def changeEvent(self, event: QEvent) -> None:
+        """Resume deferred quality scoring when the window is restored from minimized."""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange:
+            self._resume_deferred_quality_scores()
+
     def closeEvent(self, event) -> None:
         """Drop the application event filter when the browser window closes."""
         self._debounce_timer.stop()
         self._pending_load = None
         self._load_generation += 1  # supersede any in-flight apply
+        if self._score_future is not None and not self._score_future.done():
+            self._quality_scores_incomplete = True  # resume on reopen; saved scores are kept
         self._score_generation += 1
         self._remove_mouse_navigation_filter()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
+        self._load_executor_shut_down = True
         super().closeEvent(event)
