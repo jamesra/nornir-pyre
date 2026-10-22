@@ -6,6 +6,11 @@
     Verifies pyre.exe exists, performs a subprocess import smoke test, and
     confirms frozen log/settings paths resolve. Full GUI validation still
     requires a clean Windows VM without Python installed.
+
+    The smoke test also runs tasks on a real process pool (POOL_OK). This
+    catches worker churn: a frozen worker that re-runs Pyre instead of the
+    multiprocessing bootstrap exits at once and is respawned in a loop, which
+    pins every core while the GUI looks idle.
 #>
 [CmdletBinding()]
 param(
@@ -44,6 +49,9 @@ try {
 Write-Host $SmokeOutput
 if ($SmokeExitCode -ne 0 -or $SmokeOutput -notmatch 'SMOKE_OK') {
     throw "Smoke test failed (exit $SmokeExitCode): SMOKE_OK not found in output"
+}
+if ($SmokeOutput -notmatch 'POOL_OK') {
+    throw "Process pool smoke test failed (exit $SmokeExitCode): POOL_OK not found in output"
 }
 
 Write-Host "Smoke test passed."
