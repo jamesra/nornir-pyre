@@ -1496,11 +1496,14 @@ class StosWindow(PyreWindowBase):
         dialog.setWindowTitle("Save registered warped image")
         if StosWindow.imagedirname:
             dialog.setDirectory(StosWindow.imagedirname)
-        dialog.setNameFilter("PNG files (*.png)")
+        filter_16bit = "PNG 16-bit (*.png)"
+        filter_8bit = "PNG 8-bit (*.png)"
+        dialog.setNameFilters([filter_16bit, filter_8bit])
         dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
 
         if dialog.exec() != QFileDialog.DialogCode.Accepted:
             return
+        bpp = 8 if dialog.selectedNameFilter() == filter_8bit else None
 
         selected_files = dialog.selectedFiles()
         if not selected_files:
@@ -1514,14 +1517,15 @@ class StosWindow(PyreWindowBase):
         source_shape = tuple(int(v) for v in config.SourceImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
         target_image = config.TargetImageViewModel.Image  # type: ignore[attr-defined]
         transform = config.Transform
-        self._submit_async_warped_save(fullpath, transform, source_shape, target_image)
+        self._submit_async_warped_save(fullpath, transform, source_shape, target_image, bpp)
 
     def _submit_async_warped_save(
             self,
             fullpath: str,
             transform: nornir_imageregistration.ITransform,
             fixed_shape: tuple[int, ...],
-            warped_image: np.ndarray) -> None:
+            warped_image: np.ndarray,
+            bpp: int | None = None) -> None:
         """Queue a background registered-image write and update UI while in flight."""
         StosWindow._warped_save_in_progress = True
         StosWindow._warped_save_initiator = self
@@ -1538,6 +1542,7 @@ class StosWindow(PyreWindowBase):
             transform,
             fixed_shape,
             warped_image,
+            bpp,
         )
         future.add_done_callback(
             lambda completed: qt_post_to_main(StosWindow._on_warped_save_finished, completed, fullpath),

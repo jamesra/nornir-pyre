@@ -50,6 +50,28 @@ class TestSaveRegisteredWarpedImage(unittest.TestCase):
             SaveRegisteredWarpedImage(out_path, transform, (8, 8), warped)
             self.assertTrue(os.path.isfile(out_path))
 
+    def test_save_registered_warped_image_wide_int_png(self) -> None:
+        """uint16/int32/uint32 inputs export as 16-bit PNG without Pillow mode errors."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        for dtype in (np.uint16, np.int32, np.uint32):
+            warped = np.array([[0, 1000], [2500, 4000]], dtype=dtype)
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = os.path.join(tmp, "registered_int.png")
+                SaveRegisteredWarpedImage(out_path, transform, (2, 2), warped)
+                self.assertTrue(os.path.isfile(out_path), dtype)
+
+    def test_save_registered_warped_image_8bit_png(self) -> None:
+        """bpp=8 writes an 8-bit greyscale PNG regardless of input dtype."""
+        from PIL import Image
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        for dtype in (np.uint8, np.uint16, np.int32, np.float32):
+            warped = np.linspace(0, 1 if dtype == np.float32 else 200, 64).astype(dtype).reshape(8, 8)
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = os.path.join(tmp, "registered_8.png")
+                SaveRegisteredWarpedImage(out_path, transform, (8, 8), warped, bpp=8)
+                with Image.open(out_path) as im:
+                    self.assertEqual(im.mode, "L", dtype)
+
     def test_save_registered_warped_image_float16_raw_intensity_png(self) -> None:
         """float16 EM-style intensities (not 0..1) should not be scaled by 2**32-1."""
         transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)

@@ -41,14 +41,18 @@ def SaveRegisteredWarpedImage(
         fileFullPath: str,
         transform: ITransform,
         fixed_image_shape: Sequence[int],
-        warpedImage: NDArray) -> None:
-    """Save the warped image registered into fixed space to a file."""
+        warpedImage: NDArray,
+        bpp: int | None = None) -> None:
+    """Save the warped image registered into fixed space to a file.
+
+    :param bpp: Output bit depth, e.g. 8 for an 8-bit image.  None keeps the data's depth (16-bit for PNG).
+    """
     registeredImage = AssembleHugeRegisteredWarpedImage(
         transform,
         fixed_image_shape,
         warpedImage,
     )
-    nornir_imageregistration.SaveImage(fileFullPath, registeredImage)
+    nornir_imageregistration.SaveImage(fileFullPath, registeredImage, bpp=bpp)
 
 
 def AssembleHugeRegisteredWarpedImage(
