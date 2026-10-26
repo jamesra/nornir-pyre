@@ -54,7 +54,7 @@ Display:
     * F: Flip the source (mapped) image (also Transform → Flip Source Image)
 
 Alignment:
-    * Mesh / RBF: Space auto-aligns the selected points and the point under the cursor; Shift+Space auto-aligns every point
+    * Mesh / RBF: Space auto-aligns the selected points and the point under the cursor; Shift+Space auto-aligns every point. Holding Space aligns each point once: sweep the cursor over points to align them in turn, and release and press again to re-align one
     * Grid: Space auto-aligns like Mesh. Shift+Space runs one grid-refine pass (settings dialog, then a live preview). Registration → Refine w/ Grid runs the chosen number of passes as one job with a preview after each pass; several Shift+Space presses are not the same as that job.
     * Rigid: Space refines the angle (+/-5 degrees in 1 degree steps); Shift+Space also refines scale (both are also in the Registration menu)
     * Esc (or Registration → Cancel Registration, or the status-bar Cancel): Cancel queued point alignments and any running refine/rotate job. Points already moved stay moved. While creating a point or dragging a selection box, Esc cancels that instead.
