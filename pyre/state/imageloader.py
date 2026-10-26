@@ -5,6 +5,7 @@ import os
 import threading
 
 from dependency_injector.wiring import inject, Provide
+import numpy as np
 from pyre.settings import AppSettings
 
 from nornir_imageregistration import StosFile
@@ -17,6 +18,7 @@ from pyre.resources import try_locate_file
 from pyre.interfaces.viewtype import ViewType
 from pyre.perf_debug import timed
 from pyre.viewmodels import ImageViewModel
+from pyre.viewmodels.imageviewmodel import working_float_dtype
 from pyre.controllers.transformcontroller import TransformController
 from pyre.container import IContainer
 
@@ -159,8 +161,10 @@ class ImageLoader(IImageLoader):
                         found_mask_fullpath,
                     )
 
+            # Integer images become floats here; float images keep their own type.
+            float_dtype = working_float_dtype(image.dtype) if np.issubdtype(image.dtype, np.integer) else None
             with timed(f'ImagePermutationHelper {os.path.basename(found_image_fullpath)}'):
-                helper = nornir_imageregistration.ImagePermutationHelper(image, image_mask)
+                helper = nornir_imageregistration.ImagePermutationHelper(image, image_mask, dtype=float_dtype)
             with self._cache_lock:
                 # Another worker may have filled the cache while we decoded.
                 permutations = self._filepath_cache.setdefault(cache_key, helper)

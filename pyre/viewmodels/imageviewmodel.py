@@ -11,7 +11,7 @@ from typing import Generator, cast
 
 import OpenGL.GL as gl
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 import scipy.ndimage
 
 import nornir_imageregistration
@@ -22,6 +22,15 @@ from pyre.gl_engine.helpers import check_for_error, raise_on_error
 from pyre.perf_debug import timed
 
 Logger = logging.getLogger("ImageArray")
+
+
+def working_float_dtype(source_dtype: DTypeLike) -> type[np.floating]:
+    """Return the float type Pyre holds an image in, given the dtype it was stored as.
+
+    float16 represents every 8-bit level exactly but keeps only 11 significant bits, so
+    images deeper than 8 bits are held as float32 to keep their precision.
+    """
+    return np.float16 if np.dtype(source_dtype).itemsize <= 1 else np.float32
 
 
 class ImageViewModel:
@@ -158,7 +167,8 @@ class ImageViewModel:
             Logger.info("Loading image: " + input_image)
             self._ImageFilename = input_image
 
-            self._Image = nornir_imageregistration.LoadImage(input_image, dtype=np.float16) * 255  # //
+            float_dtype = working_float_dtype(nornir_imageregistration.get_image_file_dtype(input_image))
+            self._Image = nornir_imageregistration.LoadImage(input_image, dtype=float_dtype) * 255  # //
 
             self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(self._Image)
             Logger.info("Loading done")
