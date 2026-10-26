@@ -790,19 +790,15 @@ class StosWindow(PyreWindowBase):
         config = pyre.state.get_current_stos_config()
         if config is None:
             return
-        if not (
-                config.FixedImageMaskViewModel is None or config.WarpedImageMaskViewModel is None):
-            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          config.FixedImageMaskViewModel.Image,
-                                          config.WarpedImageMaskViewModel.Image)
-
-        elif config.FixedImageMaskViewModel is not None:
-            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel,
-                                          config.FixedImageMaskViewModel.Image, None)  # type: ignore[arg-type]
-
-        elif config.WarpedImageMaskViewModel is not None:
-            pyre.common.ClearPointsOnMask(self._transform_controller.TransformModel, None,  # type: ignore[arg-type]
-                                          config.WarpedImageMaskViewModel.Image)
+        # StosState's Fixed* mask is the source-image mask and Warped* is the target-image mask.
+        source_mask_vm = config.FixedImageMaskViewModel
+        target_mask_vm = config.WarpedImageMaskViewModel
+        if source_mask_vm is None and target_mask_vm is None:
+            return
+        pyre.common.ClearPointsOnMask(
+            self._transform_controller,
+            None if source_mask_vm is None else source_mask_vm.Image,
+            None if target_mask_vm is None else target_mask_vm.Image)
 
     def onFlipImage(self):
         """Handle Flip Image action"""

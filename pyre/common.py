@@ -674,14 +674,17 @@ def _indices_to_remove_for_mask(
     return all_masked_indices
 
 
-def ClearPointsOnMask(transform: ITransform, FixedMaskImage: NDArray,
-                      WarpedMaskImage: NDArray):
-    '''Remove all transform points that are positioned in the mask image'''
+def ClearPointsOnMask(controller: TransformController, SourceMaskImage: NDArray | None,
+                      TargetMaskImage: NDArray | None):
+    '''Remove all control points that fall on masked pixels or outside their image's mask.
 
-    if FixedMaskImage is not None:
-        fixed_points = transform.TransformModel.TargetPoints  # type: ignore[attr-defined]
-        transform.RemovePoints(_indices_to_remove_for_mask(fixed_points, FixedMaskImage))  # type: ignore[attr-defined]
+    StosState keeps the source mask as ``FixedImageMaskViewModel`` and the target mask as
+    ``WarpedImageMaskViewModel``; each mask is tested against the points of its own space.'''
 
-    if WarpedMaskImage is not None:
-        warped_points = transform.TransformModel.SourcePoints  # type: ignore[attr-defined]
-        transform.RemovePoints(_indices_to_remove_for_mask(warped_points, WarpedMaskImage))  # type: ignore[attr-defined]
+    if SourceMaskImage is not None:
+        source_points = controller.TransformModel.SourcePoints  # type: ignore[attr-defined]
+        controller.RemovePoints(_indices_to_remove_for_mask(source_points, SourceMaskImage))
+
+    if TargetMaskImage is not None:
+        target_points = controller.TransformModel.TargetPoints  # type: ignore[attr-defined]
+        controller.RemovePoints(_indices_to_remove_for_mask(target_points, TargetMaskImage))
