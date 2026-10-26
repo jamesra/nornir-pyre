@@ -161,22 +161,24 @@ def save_stos_object(stos_obj: StosFile, fullpath: str) -> str:
 def stos_image_dims_from_stos_config(
         stos_config,
 ) -> tuple[list[float] | None, list[float] | None]:
-    """Read control/mapped image dims from loaded STOS view models when available."""
-    control_dim: list[float] | None = None
-    mapped_dim: list[float] | None = None
+    """Return ``(ControlImageDim, MappedImageDim)`` from the loaded STOS view models.
+
+    The STOS control image is the Target and the mapped image is the Source. This
+    used to read them the other way round (in ``StosState`` the deprecated "Fixed"
+    names hold Source), so Save STOS wrote swapped sizes whenever the two images
+    differed, and grid transforms were written with the target size as their bounds.
+    """
+    target_dim: list[float] | None = None
+    source_dim: list[float] | None = None
     if stos_config is None:
-        return control_dim, mapped_dim
-    source_vm = getattr(stos_config, "SourceImageViewModel", None) or getattr(
-        stos_config, "FixedImageViewModel", None
-    )
-    target_vm = getattr(stos_config, "TargetImageViewModel", None) or getattr(
-        stos_config, "WarpedImageViewModel", None
-    )
-    if source_vm is not None and getattr(source_vm, "Image", None) is not None:
-        control_dim = stos_image_dim_from_shape(source_vm.Image.shape)
+        return target_dim, source_dim
+    source_vm = getattr(stos_config, "SourceImageViewModel", None)
+    target_vm = getattr(stos_config, "TargetImageViewModel", None)
     if target_vm is not None and getattr(target_vm, "Image", None) is not None:
-        mapped_dim = stos_image_dim_from_shape(target_vm.Image.shape)
-    return control_dim, mapped_dim
+        target_dim = stos_image_dim_from_shape(target_vm.Image.shape)
+    if source_vm is not None and getattr(source_vm, "Image", None) is not None:
+        source_dim = stos_image_dim_from_shape(source_vm.Image.shape)
+    return target_dim, source_dim
 
 
 def SyncWindows(LookAt, scale: float, window_manager: IWindowManager) -> None:

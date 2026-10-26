@@ -5,14 +5,17 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import nornir_imageregistration
+import numpy as np
 from nornir_imageregistration import StosFile
 
 from pyre.common import (
     build_stos_object_for_save,
     save_stos_object,
     stos_image_dim_from_shape,
+    stos_image_dims_from_stos_config,
 )
 
 
@@ -20,6 +23,39 @@ class TestStosSaveHelpers(unittest.TestCase):
     def test_stos_image_dim_from_shape(self) -> None:
         dims = stos_image_dim_from_shape((480, 640))
         self.assertEqual(dims, [1.0, 1.0, 640, 480])
+
+    def test_dims_from_stos_config_put_target_in_control(self) -> None:
+        """ControlImageDim is the Target image's size, MappedImageDim the Source's.
+
+        They were read the other way round, so Save STOS wrote swapped sizes
+        whenever the source and target images differed.
+        """
+        config = SimpleNamespace(
+            SourceImageViewModel=SimpleNamespace(Image=np.zeros((100, 150))),
+            TargetImageViewModel=SimpleNamespace(Image=np.zeros((200, 300))),
+        )
+        control_dim, mapped_dim = stos_image_dims_from_stos_config(config)
+        self.assertEqual(control_dim, [1.0, 1.0, 300.0, 200.0])
+        self.assertEqual(mapped_dim, [1.0, 1.0, 150.0, 100.0])
+
+        rigid = nornir_imageregistration.transforms.Rigid(
+            target_offset=(0.0, 0.0),
+            source_rotation_center=(0.0, 0.0),
+            angle=0.0,
+        )
+        stos_obj = build_stos_object_for_save(
+            "D:/no/such/target.png",
+            "D:/no/such/source.png",
+            rigid,
+            control_image_dim=control_dim,
+            mapped_image_dim=mapped_dim,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "sizes.stos")
+            save_stos_object(stos_obj, out_path)
+            reloaded = StosFile.Load(out_path)
+        self.assertEqual([float(v) for v in reloaded.ControlImageDim], [1.0, 1.0, 300.0, 200.0])
+        self.assertEqual([float(v) for v in reloaded.MappedImageDim], [1.0, 1.0, 150.0, 100.0])
 
     def test_save_stos_object_writes_file(self) -> None:
         rigid = nornir_imageregistration.transforms.Rigid(
