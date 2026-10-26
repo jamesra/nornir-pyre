@@ -7,7 +7,7 @@ import logging
 import tempfile
 import copy
 import threading
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable, NamedTuple, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ from dependency_injector.wiring import Provide, inject
 import numpy
 import numpy as np
 from numpy.typing import NDArray
+from PIL import Image
 from PyQt6.QtWidgets import QWidget
 
 import nornir_imageregistration
@@ -35,6 +36,54 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.controllers.transformcontroller import TransformController
 from pyre.settings import AppSettings
 from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_source_and_target_image_data
+
+if TYPE_CHECKING:
+    from pyre.viewmodels.imageviewmodel import ImageViewModel
+
+
+class WarpedImageExport(NamedTuple):
+    """What Save Warped Image writes: the source image warped into the target image's space."""
+    target_shape: tuple[int, ...]
+    source_image: NDArray
+    source_bpp: int | None  # Bits per pixel in the source image file, when it can be read
+
+
+def image_file_bpp(image_fullpath: str | None) -> int | None:
+    """Return the bits per pixel an image file stores, from its header, or None if unreadable.
+
+    Bare 32-bit ``I``/``F`` files report 32 instead of being sized from their pixel values,
+    which would read the whole image.
+    """
+    if not image_fullpath:
+        return None
+    try:
+        with Image.open(image_fullpath) as image:
+            if image.mode in ("I", "F"):
+                return 32
+            return int(np.dtype(nornir_imageregistration.dtype_for_pillow_image(image)).itemsize * 8)
+    except (OSError, ValueError):
+        return None
+
+
+def warped_image_export_bpp(requested_bpp: int | None, source_bpp: int | None) -> int | None:
+    """Return the bit depth to export; an 8-bit source is written as 8-bit, never 16-bit."""
+    if source_bpp is not None and source_bpp <= 8:
+        return 8
+    return requested_bpp
+
+
+def warped_image_export(source_view_model: 'ImageViewModel',
+                        target_view_model: 'ImageViewModel') -> WarpedImageExport:
+    """Collect the Save Warped Image inputs from the source and target image view models.
+
+    ``Transform`` maps source to target, so the source image is warped onto a canvas the
+    size of the target image (as ``TransformStos`` does with the mapped and control images).
+    """
+    return WarpedImageExport(
+        target_shape=tuple(int(v) for v in target_view_model.Image.shape),
+        source_image=source_view_model.Image,
+        source_bpp=image_file_bpp(source_view_model.ImageFilename),
+    )
 
 
 def SaveRegisteredWarpedImage(

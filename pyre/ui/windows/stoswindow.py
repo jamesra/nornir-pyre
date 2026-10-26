@@ -19,6 +19,8 @@ import nornir_pools as pools
 import pyre
 from pyre.common import (
     SaveRegisteredWarpedImage,
+    warped_image_export,
+    warped_image_export_bpp,
     build_stos_object_for_save,
     compute_grid_refine_transform,
     create_pyre_grid_refinement_settings,
@@ -1488,6 +1490,8 @@ class StosWindow(PyreWindowBase):
             QMessageBox.warning(self, "Save warped image", "No transform is loaded.")
             return
 
+        export = warped_image_export(config.SourceImageViewModel, config.TargetImageViewModel)
+
         dialog = QFileDialog(self)
         dialog.setWindowTitle("Save registered warped image")
         if StosWindow.imagedirname:
@@ -1495,11 +1499,14 @@ class StosWindow(PyreWindowBase):
         filter_16bit = "PNG 16-bit (*.png)"
         filter_8bit = "PNG 8-bit (*.png)"
         dialog.setNameFilters([filter_16bit, filter_8bit])
+        if warped_image_export_bpp(None, export.source_bpp) == 8:
+            dialog.selectNameFilter(filter_8bit)
         dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
 
         if dialog.exec() != QFileDialog.DialogCode.Accepted:
             return
-        bpp = 8 if dialog.selectedNameFilter() == filter_8bit else None
+        requested_bpp = 8 if dialog.selectedNameFilter() == filter_8bit else None
+        bpp = warped_image_export_bpp(requested_bpp, export.source_bpp)
 
         selected_files = dialog.selectedFiles()
         if not selected_files:
@@ -1510,17 +1517,15 @@ class StosWindow(PyreWindowBase):
         self.filename = os.path.basename(fullpath)
         config.OutputImageFullPath = fullpath  # type: ignore[attr-defined]
 
-        source_shape = tuple(int(v) for v in config.SourceImageViewModel.Image.shape)  # type: ignore[attr-defined, union-attr]
-        target_image = config.TargetImageViewModel.Image  # type: ignore[attr-defined]
-        transform = config.Transform
-        self._submit_async_warped_save(fullpath, transform, source_shape, target_image, bpp)
+        self._submit_async_warped_save(
+            fullpath, config.Transform, export.target_shape, export.source_image, bpp)
 
     def _submit_async_warped_save(
             self,
             fullpath: str,
             transform: nornir_imageregistration.ITransform,
-            fixed_shape: tuple[int, ...],
-            warped_image: np.ndarray,
+            target_shape: tuple[int, ...],
+            source_image: np.ndarray,
             bpp: int | None = None) -> None:
         """Queue a background registered-image write and update UI while in flight."""
         StosWindow._warped_save_in_progress = True
@@ -1536,8 +1541,8 @@ class StosWindow(PyreWindowBase):
             SaveRegisteredWarpedImage,
             fullpath,
             transform,
-            fixed_shape,
-            warped_image,
+            target_shape,
+            source_image,
             bpp,
         )
         future.add_done_callback(

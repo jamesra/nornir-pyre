@@ -5,13 +5,22 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 from nornir_imageregistration.transforms import Rigid
+from PIL import Image
 
 import nornir_imageregistration
 from nornir_imageregistration.assemble import transform_for_host_assembly
-from pyre.common import AssembleHugeRegisteredWarpedImage, SaveRegisteredWarpedImage
+from pyre.common import (
+    AssembleHugeRegisteredWarpedImage,
+    SaveRegisteredWarpedImage,
+    image_file_bpp,
+    warped_image_export,
+    warped_image_export_bpp,
+)
 from pyre.views.composite_display import apply_rigid_yx, transform_visible_rectangle
 
 
@@ -82,6 +91,56 @@ class TestSaveRegisteredWarpedImage(unittest.TestCase):
             loaded = nornir_imageregistration.EnsureNumpyArray(
                 nornir_imageregistration.LoadImage(out_path, dtype=np.uint16))
             np.testing.assert_array_equal(loaded, np.array([[0, 1000], [2500, 4000]], dtype=np.uint16))
+
+
+class TestWarpedImageExportInputs(unittest.TestCase):
+    """Save Warped Image warps the source into target space and never deepens 8-bit sources."""
+
+    def test_image_file_bpp_reads_the_file_header(self) -> None:
+        ramp = np.linspace(0, 1, 64).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {
+                "l.png": (Image.fromarray((ramp * 255).astype(np.uint8)), 8),
+                "rgb.png": (Image.fromarray((ramp * 255).astype(np.uint8)).convert("RGB"), 8),
+                "i16.png": (Image.fromarray((ramp * 65535).astype(np.uint16)), 16),
+                "i32.tif": (Image.fromarray((ramp * 65535).astype(np.int32), mode="I"), 32),
+            }
+            for name, (image, expected) in files.items():
+                path = os.path.join(tmp, name)
+                image.save(path)
+                self.assertEqual(image_file_bpp(path), expected, name)
+            self.assertIsNone(image_file_bpp(os.path.join(tmp, "missing.png")))
+        self.assertIsNone(image_file_bpp(None))
+
+    def test_8bit_source_is_never_exported_as_16bit(self) -> None:
+        self.assertEqual(warped_image_export_bpp(None, 8), 8)
+        self.assertEqual(warped_image_export_bpp(8, 8), 8)
+        self.assertIsNone(warped_image_export_bpp(None, 16))
+        self.assertEqual(warped_image_export_bpp(8, 16), 8)
+        self.assertIsNone(warped_image_export_bpp(None, None))
+
+    def test_source_image_is_warped_onto_a_target_sized_canvas(self) -> None:
+        """Transform maps source to target, so the canvas is the target shape (as TransformStos)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = os.path.join(tmp, "source.png")
+            Image.fromarray(np.zeros((6, 9), dtype=np.uint8)).save(source_path)
+            source: Any = SimpleNamespace(Image=np.zeros((6, 9), dtype=np.float16), ImageFilename=source_path)
+            target: Any = SimpleNamespace(Image=np.zeros((10, 4), dtype=np.float16), ImageFilename=None)
+            export = warped_image_export(source, target)
+        self.assertEqual(export.target_shape, (10, 4))
+        self.assertIs(export.source_image, source.Image)
+        self.assertEqual(export.source_bpp, 8)
+
+    def test_8bit_source_held_as_float_saves_as_8bit_png(self) -> None:
+        """Pyre holds images as float16 0..1; an 8-bit source must still save as mode L."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        held = np.linspace(0.0, 1.0, 64, dtype=np.float16).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "registered.png")
+            SaveRegisteredWarpedImage(out_path, transform, (8, 8), held,
+                                      bpp=warped_image_export_bpp(None, 8))
+            with Image.open(out_path) as written:
+                self.assertEqual(written.mode, "L")
 
 
 class TestTransformForHostAssembly(unittest.TestCase):
