@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+import os
 import unittest
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +17,7 @@ from hypothesis import strategies as st
 import pyre.state
 from pyre.interfaces.viewtype import ViewType
 from pyre.settings.app import AppSettings, ImageAndMaskPath
-from pyre.state import InitializeStateFromSettings, set_current_stos_config
+from pyre.state import InitializeStateFromSettings, UpdateSettingsFromArguments, set_current_stos_config
 
 
 class _LoadResult:
@@ -181,6 +183,53 @@ class TestRestoreSavedImages(unittest.TestCase):
         self.settings.stos.target_image = _image("/t.png")
         self._run()
         self.sync.assert_not_called()
+
+
+class TestCommandLineImages(unittest.TestCase):
+    """``-Source`` / ``-Target`` images replace the previous session's STOS."""
+
+    def setUp(self) -> None:
+        self.loader = _FakeImageLoader()
+        self.settings = AppSettings()
+        self.settings.stos.stos_filename = "/previous/session.stos"
+        self.settings.stos.stos_opened_from_browser_folder = "/previous"
+        self.stos_config = SimpleNamespace(
+            SourceImageViewModel=None,
+            TargetImageViewModel=None,
+            FixedImageMaskViewModel=None,
+            WarpedImageMaskViewModel=None,
+        )
+        set_current_stos_config(self.stos_config)  # type: ignore[arg-type]
+        patcher = mock.patch.object(pyre.state, "_sync_registration_roles_from_manager")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self) -> None:
+        set_current_stos_config(None)
+
+    def test_images_load_once_instead_of_the_previous_stos(self) -> None:
+        """The saved STOS used to be restored over the named images (the fake has no load_stos)."""
+        args = argparse.Namespace(stosFullPath=None, SourceImageFullPath="s.png", TargetImageFullPath="t.png")
+        UpdateSettingsFromArguments(args, settings=self.settings)
+        self.assertIsNone(self.settings.stos.stos_filename)
+        self.assertIsNone(self.settings.stos.stos_opened_from_browser_folder)
+        self.assertEqual(self.loader.calls, [], "arguments only update settings")
+
+        InitializeStateFromSettings(
+            mock.MagicMock(),
+            image_loader=self.loader,  # type: ignore[arg-type]
+            settings=self.settings,
+        )
+        loads = [(args_["key"], args_["image_fullpath"]) for kind, args_ in self.loader.calls if kind == "load"]
+        self.assertEqual(loads, [(ViewType.Target.value, os.path.abspath("t.png")),
+                                 (ViewType.Source.value, os.path.abspath("s.png"))])
+        self.assertIsNotNone(self.stos_config.SourceImageViewModel)
+        self.assertIsNotNone(self.stos_config.TargetImageViewModel)
+
+    def test_stos_argument_still_wins(self) -> None:
+        args = argparse.Namespace(stosFullPath="/new.stos", SourceImageFullPath="s.png", TargetImageFullPath=None)
+        UpdateSettingsFromArguments(args, settings=self.settings)
+        self.assertEqual(self.settings.stos.stos_filename, "/new.stos")
 
 
 _slot = st.one_of(

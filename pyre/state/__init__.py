@@ -130,8 +130,8 @@ def _restore_saved_image(image_loader: ImageLoader,
 
 @inject
 def UpdateSettingsFromArguments(arg_values,
-                                image_loader: ImageLoader = Provide[IContainer.image_loader],
                                 settings: AppSettings = Provide[IContainer.settings]):
+    """Record ``-stos`` / ``-Source`` / ``-Target`` in settings; InitializeStateFromSettings loads them."""
     import logging
     _log = logging.getLogger(__name__)
 
@@ -141,28 +141,21 @@ def UpdateSettingsFromArguments(arg_values,
 
     else:
         _log.info("No STOS argument provided at startup")
-        if arg_values.TargetImageFullPath is not None:
-            result = image_loader.load_image_into_manager(
-                key=ViewType.Target.value,
-                image_fullpath=arg_values.TargetImageFullPath,
-                mask_fullpath=None,
-            )
-            image_loader.create_image_viewmodel(load_result=result)
+        target_arg = arg_values.TargetImageFullPath
+        source_arg = arg_values.SourceImageFullPath
+        if target_arg is not None or source_arg is not None:
+            # Images named on the command line replace the previous session's STOS.
+            # These used to be loaded here and then InitializeStateFromSettings restored
+            # the saved STOS over them; now only the settings change and that restore
+            # loads the images once and wires them into StosState.
+            settings.stos.stos_filename = None
+            settings.stos.stos_opened_from_browser_folder = None
+        if target_arg is not None:
             settings.stos.target_image = ImageAndMaskPath(
-                image_fullpath=result.image_fullpath,
-                mask_fullpath=result.mask_fullpath,
-            )
-        if arg_values.SourceImageFullPath is not None:
-            result = image_loader.load_image_into_manager(
-                key=ViewType.Source.value,
-                image_fullpath=arg_values.SourceImageFullPath,
-                mask_fullpath=None,
-            )
-            image_loader.create_image_viewmodel(load_result=result)
+                image_fullpath=os.path.abspath(target_arg), mask_fullpath=None)
+        if source_arg is not None:
             settings.stos.source_image = ImageAndMaskPath(
-                image_fullpath=result.image_fullpath,
-                mask_fullpath=result.mask_fullpath,
-            )
+                image_fullpath=os.path.abspath(source_arg), mask_fullpath=None)
 
     # if 'mosaicFullPath' in arg_values and arg_values.mosaicFullPath is not None:
     #     tiles_path = os.path.dirname(arg_values.mosaicFullPath)
