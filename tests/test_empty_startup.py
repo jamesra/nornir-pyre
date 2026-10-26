@@ -38,6 +38,8 @@ class TestInitializeStateFromSettingsEmpty(unittest.TestCase):
         self.transform_controller = TransformController()
         self.image_loader = MagicMock()
         self.image_loader._image_manager = self.image_manager
+        # The app's loader and StosState share one viewmodel manager.
+        self.image_loader._image_viewmodel_manager = self.image_viewmodel_manager
         self.settings = AppSettings()
 
         set_current_stos_config(StosState(

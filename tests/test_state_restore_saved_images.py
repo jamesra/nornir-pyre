@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -33,12 +34,14 @@ class _FakeImageLoader:
     load_errors: dict[str, BaseException]
     viewmodel_errors: dict[str, BaseException]
     _image_manager: object
+    _image_viewmodel_manager: dict[str, object]  # View key -> viewmodel, like ImageViewModelManager
 
     def __init__(self) -> None:
         self.calls = []
         self.load_errors = {}
         self.viewmodel_errors = {}
         self._image_manager = object()
+        self._image_viewmodel_manager = {}
 
     def load_image_into_manager(self, **kwargs: Any) -> _LoadResult:
         """Record the call, then raise the configured error for this key or return a result."""
@@ -48,12 +51,15 @@ class _FakeImageLoader:
             raise err
         return _LoadResult(kwargs["key"])
 
-    def create_image_viewmodel(self, *, load_result: _LoadResult) -> None:
-        """Record the call, then raise the configured error for this result's key."""
+    def create_image_viewmodel(self, *, load_result: _LoadResult) -> object:
+        """Record the call, then raise the configured error or register a viewmodel for the key."""
         self.calls.append(("viewmodel", {"key": load_result.key}))
         err = self.viewmodel_errors.get(load_result.key)
         if err is not None:
             raise err
+        viewmodel = object()
+        self._image_viewmodel_manager[load_result.key] = viewmodel
+        return viewmodel
 
 
 def _image(path: str | None, mask: str | None = None) -> ImageAndMaskPath:
@@ -149,6 +155,26 @@ class TestRestoreSavedImages(unittest.TestCase):
             self._run()
         self.assertEqual(len(self.loader.calls), 1)
         self.sync.assert_not_called()
+
+    def test_restored_images_are_wired_into_stos_state(self) -> None:
+        """Both restored images become the StosState view models.
+
+        The STOS restore wired them, but the image-only restore did not, so the panels
+        showed both images while Save Warped Image reported them as not loaded.
+        """
+        stos_config = SimpleNamespace(
+            SourceImageViewModel=None,
+            TargetImageViewModel=None,
+            FixedImageMaskViewModel=None,
+            WarpedImageMaskViewModel=None,
+        )
+        set_current_stos_config(stos_config)  # type: ignore[arg-type]
+        self.settings.stos.target_image = _image("/t.png")
+        self.settings.stos.source_image = _image("/s.png")
+        self._run()
+        viewmodels = self.loader._image_viewmodel_manager
+        self.assertIs(stos_config.SourceImageViewModel, viewmodels[ViewType.Source.value])
+        self.assertIs(stos_config.TargetImageViewModel, viewmodels[ViewType.Target.value])
 
     def test_no_stos_config_skips_sync(self) -> None:
         set_current_stos_config(None)

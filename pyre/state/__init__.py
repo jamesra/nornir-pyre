@@ -243,6 +243,14 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
         _restore_saved_image(image_loader, ViewType.Source, settings.stos.source_image, "source")
         stos_config = get_current_stos_config()
         if stos_config is not None:
+            # Same wiring as the STOS restore above. Without it the panels showed both
+            # images while StosState had no view models, so Save Warped Image asked for
+            # images that were already loaded.
+            wire_stos_state_after_load(
+                stos_config,
+                image_loader._image_viewmodel_manager,  # type: ignore[attr-defined]
+                image_manager=image_manager,
+            )
             _sync_registration_roles_from_manager(
                 stos_config,
                 image_manager,
