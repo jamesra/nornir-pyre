@@ -9,7 +9,7 @@
 
     Canonical package version lives in pyproject.toml (mirrored in
     release/package-versions.yaml). Do not use the monorepo root VERSION file
-    for the installer filename — that is the umbrella release id only.
+    for the installer filename; that is the umbrella release id only.
 
     ISCC discovery order:
     1. -IsccPath parameter (if the file exists)
