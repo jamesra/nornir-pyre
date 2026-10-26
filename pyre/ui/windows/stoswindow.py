@@ -1483,7 +1483,7 @@ class StosWindow(PyreWindowBase):
             QMessageBox.warning(
                 self,
                 "Save warped image",
-                "Load both the fixed and warped images before saving the registered image.",
+                "Load both the source and target images before saving the registered image.",
             )
             return
         if config.Transform is None:

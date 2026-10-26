@@ -70,7 +70,9 @@ def resolve_warped_and_fixed_image_data(
         elif target_bn == control_bn:
             fixed_slot = slot_for_target
 
-        if warped_slot is not None and fixed_slot is not None:
+        # Same-named images in different folders match both roles to one slot,
+        # which would register an image against itself; use the default layout.
+        if warped_slot is not None and fixed_slot is not None and warped_slot is not fixed_slot:
             return warped_slot, fixed_slot
 
     return slot_for_source, slot_for_target

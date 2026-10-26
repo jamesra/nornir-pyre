@@ -53,6 +53,33 @@ class TestStosRegistrationPreloaded(unittest.TestCase):
     self.assertIs(warped_out, warped)
     self.assertIs(fixed_out, fixed)
 
+  def test_same_basename_images_keep_separate_slots(self) -> None:
+    """Same-named images in different folders must not both resolve to one slot.
+
+    Basename matching mapped both the mapped and control roles to the Source slot,
+    so registration would have aligned the source image against itself.
+    """
+    image_manager = MagicMock()
+    source = MagicMock(spec=nornir_imageregistration.ImagePermutationHelper)
+    target = MagicMock(spec=nornir_imageregistration.ImagePermutationHelper)
+    image_manager.__getitem__ = MagicMock(side_effect=lambda key: source if key == "Source" else target)
+
+    stos = MagicMock()
+    stos.MappedImageFullPath = r"Y:\section_2\0001.png"
+    stos.ControlImageFullPath = r"Y:\section_1\0001.png"
+
+    warped_out, fixed_out = resolve_source_and_target_image_data(
+        image_manager,
+        "Source",
+        "Target",
+        stos=stos,
+        settings_source_image_path=r"Y:\section_2\0001.png",
+        settings_target_image_path=r"Y:\section_1\0001.png",
+    )
+
+    self.assertIs(warped_out, source)
+    self.assertIs(fixed_out, target)
+
 
 if __name__ == "__main__":
   unittest.main()
