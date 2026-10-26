@@ -34,6 +34,7 @@ from __future__ import annotations
 import os
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import wait as wait_for_futures
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -704,7 +705,13 @@ class StosFileBrowserWindow(QMainWindow):
             self._queue_quality_scores(stale)
 
     def wait_for_scan_idle(self, timeout_s: float = 5.0) -> None:
-        """Block until the outstanding folder scan/attach finishes (for tests)."""
+        """Block until the folder scan/attach and any scoring it started finish (for tests).
+
+        A finished attach can start background ZNCC scoring, which reads every stale
+        ``.stos`` and may write ``stos_quality.json`` into the folder. Returning before
+        it ended let a test remove its temporary folder while the worker still wrote
+        there, failing cleanup with "directory is not empty" on a loaded machine.
+        """
         init_main_thread_dispatcher()
         future = self._scan_future
         if future is not None:
@@ -717,9 +724,24 @@ class StosFileBrowserWindow(QMainWindow):
             if self._last_completed_scan_generation == self._scan_generation:
                 if app is not None:
                     app.processEvents()
+                self._wait_for_scoring_idle(deadline)
                 return
             time.sleep(0.01)
         raise TimeoutError("Stos Browser folder scan/attach did not complete")
+
+    def _wait_for_scoring_idle(self, deadline: float) -> None:
+        """Block until the outstanding quality-scoring worker ends, then apply its result."""
+        future = self._score_future
+        if future is None:
+            return
+        # wait() rather than result(): closeEvent cancels queued work, and result()
+        # would raise CancelledError for a run that simply never started.
+        done, _pending = wait_for_futures([future], timeout=max(0.0, deadline - time.monotonic()))
+        if not done:
+            raise TimeoutError("Stos Browser quality scoring did not complete")
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
 
     def _refresh_quality_histogram(self) -> None:
         selected = None

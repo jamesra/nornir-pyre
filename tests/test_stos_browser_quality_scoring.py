@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -161,6 +162,34 @@ class TestStosBrowserQualityScoring(unittest.TestCase):
                 self.assertIsNot(second, first)
                 second.result(timeout=5.0)
             self.assertEqual(sorted(set(scored)), sorted(paths))
+
+    def test_scan_idle_waits_for_scoring_the_scan_started(self) -> None:
+        """wait_for_scan_idle returns only once scoring started by the scan has ended.
+
+        Scoring can write stos_quality.json into the folder. A test that removed its
+        temporary folder as soon as the scan finished raced that write, and cleanup
+        failed with "directory is not empty" on a loaded machine.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stub_stos_folder(tmp, 2)
+            browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
+            self.addCleanup(browser.close)
+            browser.show()
+            scored: list[str] = []
+            started = threading.Event()
+
+            def slow_score(folder: str, path: str, *, cache: QualityCache, **kwargs: Any):
+                started.set()
+                time.sleep(0.2)
+                return _fake_score(scored)(folder, path, cache=cache, **kwargs)
+
+            with patch(_SCORE, side_effect=slow_score), patch(_SAVE):
+                browser._apply_folder(tmp, persist=False, confirm_manual=False)
+                browser.wait_for_scan_idle()
+                self.assertTrue(started.is_set(), "the scan should have started scoring")
+                assert browser._score_future is not None
+                self.assertTrue(browser._score_future.done())
+            self.assertEqual(sorted(scored), sorted(paths))
 
     def test_reopened_window_can_rescan(self) -> None:
         """closeEvent shuts the executor down; showing the window again replaces it."""
