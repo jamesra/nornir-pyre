@@ -9,11 +9,13 @@ unchanged transform re-uploaded the whole control-point buffer on every change e
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
 
 from pyre.controllers.transformcontroller import TransformController
+from pyre.views.pointview import PointView
 from pyre.views.transformcontrollerview import TransformControllerView
 
 
@@ -29,6 +31,9 @@ def _mesh() -> MeshWithRBFFallback:
 
 class _FakePointView:
     """Mimics PointView's storage: swap to XY on set, return stored rows on get."""
+
+    # The real property, so the view tests below also cover PointView.num_points.
+    num_points = PointView.num_points
 
     def __init__(self) -> None:
         self._points: np.ndarray = np.zeros((0, 4), dtype=np.float32)
@@ -50,6 +55,10 @@ class _FakePointView:
     @property
     def texture_index(self) -> np.ndarray:
         return self._texture
+
+    @texture_index.setter
+    def texture_index(self, value: np.ndarray) -> None:
+        self._texture = np.asarray(value, dtype=np.float32)
 
 
 class _StubView:
@@ -183,6 +192,87 @@ class TestTheUploadIsSkipped(unittest.TestCase):
         self.assertTrue(self.controller.interactive_edit_in_progress)
         self.view.fire(self.controller)
         self.assertEqual(0, self.view._controlpoint_view.upload_count)
+
+
+class TestPointViewNumPoints(unittest.TestCase):
+    """PointView.num_points is the row count of the point buffer, as a Python int."""
+
+    @staticmethod
+    def point_view(rows: int) -> PointView:
+        # Built without __init__, which needs a GL context; num_points reads only the buffer.
+        view = object.__new__(PointView)
+        view._point_buffer = SimpleNamespace(data=np.zeros((rows, 4), dtype=np.float32))  # type: ignore[assignment]
+        return view
+
+    def test_counts_the_buffer_rows(self) -> None:
+        for rows in (0, 1, 5):
+            with self.subTest(rows=rows):
+                count = self.point_view(rows).num_points
+                self.assertEqual(rows, count)
+                self.assertIs(int, type(count))
+
+
+class TestThePointCountSites(unittest.TestCase):
+    """Selection paths size their checks and arrays by the control-point buffer's row count."""
+
+    def setUp(self) -> None:
+        self.controller = TransformController(_mesh())
+        # A real view built without __init__, which needs the DI container and a GL context.
+        self.view = object.__new__(TransformControllerView)
+        self.view._transform_controller = self.controller
+        self.view._selection_mask = None
+        self.point_view = _FakePointView()
+        self.view._controlpoint_view = self.point_view  # type: ignore[assignment]
+        self.point_view.points = self.controller.points
+        self.n = int(self.controller.points.shape[0])
+
+    def test_selected_rejects_a_mask_of_another_length(self) -> None:
+        for length in (self.n - 1, self.n + 1):
+            with self.subTest(length=length), self.assertRaises(ValueError):
+                self.view.selected = np.zeros(length, dtype=bool)
+
+    def test_selected_accepts_a_mask_of_the_point_count(self) -> None:
+        mask = np.array([True, False, False, True])
+        self.view.selected = mask
+        np.testing.assert_array_equal(mask, self.view.selected)
+
+    def test_set_selected_by_index_marks_the_given_rows(self) -> None:
+        self.view.set_selected_by_index([1, self.n - 1])
+        np.testing.assert_array_equal([False, True, False, True], self.view.selected)
+
+    def test_set_selected_by_index_rejects_the_point_count(self) -> None:
+        with self.assertRaises(ValueError):
+            self.view.set_selected_by_index([0, self.n])
+
+    def test_no_points_leave_the_texture_untouched(self) -> None:
+        self.point_view.points = np.zeros((0, 4), dtype=np.float32)
+        sentinel = np.full((2, 1), 7.0, dtype=np.float32)
+        self.point_view.texture_index = sentinel
+        self.view._apply_selection_texture(1)
+        np.testing.assert_array_equal(sentinel, self.point_view.texture_index)
+
+    def test_the_texture_gets_one_state_per_point(self) -> None:
+        self.view._selection_mask = np.array([False, True, False, False])
+        self.point_view.texture_index = np.zeros((1, 1), dtype=np.float32)
+        self.view._apply_selection_texture(1)
+        np.testing.assert_array_equal([[0.0], [1.0], [0.0], [0.0]], self.point_view.texture_index)
+
+    def test_a_texture_shorter_than_the_points_resets_the_selection(self) -> None:
+        self.view._selection_mask = np.array([True, False, False, False])
+        self.point_view.texture_index = np.zeros((2, 1), dtype=np.float32)
+        uploads = self.point_view.upload_count
+        TransformControllerView._OnTransformChange(self.view, self.controller)
+        self.assertIsNone(self.view._selection_mask)
+        self.assertEqual(uploads + 1, self.point_view.upload_count,
+                         'a pending reset must upload even though the positions are unchanged')
+
+    def test_a_matching_texture_keeps_the_selection(self) -> None:
+        mask = np.array([True, False, False, False])
+        self.view._selection_mask = mask
+        uploads = self.point_view.upload_count
+        TransformControllerView._OnTransformChange(self.view, self.controller)
+        self.assertIs(mask, self.view._selection_mask)
+        self.assertEqual(uploads, self.point_view.upload_count)
 
 
 if __name__ == '__main__':

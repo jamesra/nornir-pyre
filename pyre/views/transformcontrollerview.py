@@ -248,7 +248,7 @@ class TransformControllerView:
         tc_points = self._transform_controller.points  # type: ignore[union-attr]
         buf_points = self._controlpoint_view.points
 
-        reset_selection = len(self._controlpoint_view.texture_index) != self._controlpoint_view.points.shape[0]
+        reset_selection = len(self._controlpoint_view.texture_index) != self._controlpoint_view.num_points
 
         # Uploading is what re-aligns the texture buffer with the point count, so a pending
         # reset must not be skipped even when the positions themselves are unchanged.
@@ -279,7 +279,7 @@ class TransformControllerView:
         if self._controlpoint_view is None:
             return
 
-        n = int(self._controlpoint_view.points.shape[0])
+        n = self._controlpoint_view.num_points
         if n == 0:
             return
 
@@ -308,7 +308,7 @@ class TransformControllerView:
             self._apply_selection_texture(0)
             return
 
-        if self._controlpoint_view is not None and value.shape[0] != self._controlpoint_view.points.shape[0]:  # type: ignore[union-attr]
+        if self._controlpoint_view is not None and value.shape[0] != self._controlpoint_view.num_points:  # type: ignore[union-attr]
             raise ValueError("Selected array must have the same number of elements as the control points")
 
         if value.dtype == np.integer:
@@ -325,10 +325,10 @@ class TransformControllerView:
 
     def set_selected_by_index(self, index: Iterable[int] | NDArray[np.integer]):
         """Converts passed sequences of integers into a boolean array where values at the index are true"""
-        selected = np.zeros(self._controlpoint_view.points.shape[0], dtype=bool)  # type: ignore[union-attr]
+        selected = np.zeros(self._controlpoint_view.num_points, dtype=bool)  # type: ignore[union-attr]
         np_index = TransformController._ensure_numpy_friendly_index(index)  # type: ignore[arg-type]
 
-        if np.any(np_index >= self._controlpoint_view.points.shape[0]):  # type: ignore[union-attr]
+        if np.any(np_index >= self._controlpoint_view.num_points):  # type: ignore[union-attr]
             raise ValueError("Selected index is out of bounds")
 
         selected[np_index] = True  # type: ignore[index]

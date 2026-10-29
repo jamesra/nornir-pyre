@@ -150,6 +150,11 @@ class PointView:
             self._texture_buffer.data = np.zeros((point_count, 1), dtype=np.float32)
 
     @property
+    def num_points(self) -> int:
+        """Number of control points (rows) in the point buffer."""
+        return int(self.points.shape[0])
+
+    @property
     def texture_index(self) -> NDArray[np.floating]:
         """
         Get the array of texture indices.
