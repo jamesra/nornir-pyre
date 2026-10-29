@@ -14,6 +14,7 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
+from pyre.commands.extensions import arrow_key_nudge_yx
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.container import IContainer
@@ -169,41 +170,18 @@ class TranslateControlPointCommand(NavigationCommandBase):
         pyre_common.repaint_peer_stos_gl_panels(self._window_manager, exclude_gl_panel=self.parent)
 
     def on_key_down(self, event: QKeyEvent):
-        """Called when a key is pressed"""
-        keycode = event.key()
+        """Nudge the selected points with the arrow keys (see arrow_key_nudge_yx)."""
+        nudge_yx = arrow_key_nudge_yx(event)
+        if nudge_yx is None or self.HighlightedPointIndex is None:  # type: ignore[attr-defined]
+            return
 
-        if (keycode == Qt.Key.Key_Left or
-            keycode == Qt.Key.Key_Right or
-            keycode == Qt.Key.Key_Up or
-            keycode == Qt.Key.Key_Down) and self.HighlightedPointIndex is not None:  # type: ignore[attr-defined]
-
-            # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
-            multiplier = 1
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                multiplier *= 5
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                multiplier *= 25
-
-            delta = [0, 0]
-            if keycode == Qt.Key.Key_Left:
-                delta = [0, -1]
-            elif keycode == Qt.Key.Key_Right:
-                delta = [0, 1]
-            elif keycode == Qt.Key.Key_Up:
-                delta = [1, 0]
-            elif keycode == Qt.Key.Key_Down:
-                delta = [-1, 0]
-
-            delta[0] *= multiplier
-            delta[1] *= multiplier
-
-            self._transform_controller.MovePoint(
-                list(self._selected_point_set),
-                delta[1],
-                delta[0],
-                space=self._edit_space_for_translate(),
-            )
-        return
+        dy, dx = nudge_yx
+        self._transform_controller.MovePoint(
+            list(self._selected_point_set),
+            dx,
+            dy,
+            space=self._edit_space_for_translate(),
+        )
 
     def activate(self):
         super().activate()

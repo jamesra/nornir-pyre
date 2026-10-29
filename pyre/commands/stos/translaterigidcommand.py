@@ -17,6 +17,7 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
+from pyre.commands.extensions import arrow_key_nudge_yx
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IWindowManager
 from pyre.container import IContainer
 from pyre.transform_edit_policy import target_panel_manipulation_locked
@@ -146,41 +147,15 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
                 self._transform_controller.type, self.space, self._view_type()):
             return
 
-        keycode = event.key()
+        nudge_yx = arrow_key_nudge_yx(event)
+        if nudge_yx is None:
+            return
 
-        if (keycode == Qt.Key.Key_Left or
-                keycode == Qt.Key.Key_Right or
-                keycode == Qt.Key.Key_Up or
-                keycode == Qt.Key.Key_Down):
+        dy, dx = nudge_yx
+        if self._space == Space.Source:
+            dy, dx = -dy, -dx
 
-            # Users can nudge points with the arrow keys.  Holding shift steps five pixels, holding Ctrl shifts 25.  Holding both steps 125
-            multiplier = 1
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                multiplier *= 5
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                multiplier *= 25
-
-            delta = [0, 0]
-            if keycode == Qt.Key.Key_Left:
-                delta = [0, -1]
-            elif keycode == Qt.Key.Key_Right:
-                delta = [0, 1]
-            elif keycode == Qt.Key.Key_Up:
-                delta = [1, 0]
-            elif keycode == Qt.Key.Key_Down:
-                delta = [-1, 0]
-
-            delta[0] *= multiplier
-            delta[1] *= multiplier
-
-            if self._space == Space.Source:
-                delta[0] = -delta[0]
-                delta[1] = -delta[1]
-
-            self._transform_controller.Translate(delta,
-                                                 space=self._space)
-
-        return
+        self._transform_controller.Translate([dy, dx], space=self._space)
 
     def on_mouse_wheel(self, event: QMouseEvent):
         """Legacy handler retained for compatibility; Qt dispatch uses on_mouse_scroll."""

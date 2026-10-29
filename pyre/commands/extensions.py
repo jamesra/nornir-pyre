@@ -7,6 +7,31 @@ from pyre.selection_event_data import InputEvent, InputModifiers
 # Roughly one mouse-wheel notch when platforms report pixelDelta instead of angleDelta.
 _PIXEL_DELTA_PER_NOTCH = 15.0
 
+# One-pixel (dy, dx) step per arrow key: Up is +Y, Right is +X.
+_ARROW_KEY_UNIT_YX: dict[int, tuple[int, int]] = {
+    Qt.Key.Key_Left: (0, -1),
+    Qt.Key.Key_Right: (0, 1),
+    Qt.Key.Key_Up: (1, 0),
+    Qt.Key.Key_Down: (-1, 0),
+}
+
+
+def arrow_key_nudge_yx(event: QKeyEvent) -> tuple[int, int] | None:
+    """Return the (dy, dx) arrow-key nudge for ``event``, or None for any other key.
+
+    Users can nudge with the arrow keys. One press steps one pixel; holding Shift
+    steps 5, holding Ctrl steps 25, holding both steps 125. Other modifiers are ignored.
+    """
+    unit_yx = _ARROW_KEY_UNIT_YX.get(event.key())
+    if unit_yx is None:
+        return None
+    multiplier = 1
+    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        multiplier *= 5
+    if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        multiplier *= 25
+    return unit_yx[0] * multiplier, unit_yx[1] * multiplier
+
 
 def wheel_scroll_steps(event: QWheelEvent) -> float:
     """Return wheel motion in standard-notch units (1.0 ≈ one detent).
