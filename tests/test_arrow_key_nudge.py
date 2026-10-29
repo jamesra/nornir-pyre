@@ -20,6 +20,7 @@ from hypothesis import strategies as st
 from nornir_imageregistration.transforms import TransformType
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QKeyEvent
+
 from pyre.commands.extensions import arrow_key_nudge_yx
 from pyre.commands.stos.translatecontrolpointcommand import TranslateControlPointCommand
 from pyre.commands.stos.translaterigidcommand import ManipulateRigidTransformCommand
