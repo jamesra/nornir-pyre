@@ -6,21 +6,83 @@ Created on Feb 10, 2015
 
 from __future__ import annotations
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 import numpy as np
-import wx
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QGuiApplication, QMouseEvent, QKeyEvent, QWheelEvent
 import nornir_imageregistration
+from pyre.array_host import yx_host
 
 import abc
+import math
 import pyre
 from pyre.selection_event_data import PointPair
 import pyre.ui
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands.uicommandbase import UICommandBase, InstantCommandBase
 from pyre.interfaces.managers import ICommandHistory, ICommandQueue
 from pyre.space import Space
 
 from pyre.container import IContainer
+from pyre.transform_edit_policy import (
+    rigid_rotation_locked,
+    wheel_rotate_locked,
+)
+from pyre.controllers.transform_display import gesture_for_wheel_rotate
+from pyre.interfaces.viewtype import ViewType
+from pyre.commands.extensions import wheel_scroll_steps
+from pyre.views.composite_display import (
+    lookat_delta_from_display_delta,
+    world_point_pair_for_composite_mouse,
+    apply_composite_display_pan_delta,
+    resolve_composite_display_draw_params,
+    target_space_lookat_for_stos_view,
+    is_plausible_world_delta,
+    is_plausible_world_point,
+)
+from pyre.views.gltiles import is_rigid_transform
+
+import pyre.ui.widgets.imagetransformviewpanel as imagetransformviewpanel_module
+
+
+def wheel_applies_warped_transform(controller: object) -> bool:
+    """True when Ctrl+wheel may rotate the transform.
+
+    Queued (busy) control points must stay put, so leftover modifiers after
+    Shift+Space zoom the camera instead of rotating the registration.
+    """
+    busy = getattr(controller, "busy_point_ids", None)
+    return not bool(busy)
+
+
+def wheel_applies_relative_scale(controller: object) -> bool:
+    """True when Shift+wheel may scale the transform.
+
+    Whole-transform scale is only allowed with no UI selection and no queued
+    (busy) points. Otherwise leftover Shift zooms the camera.
+    """
+    if not wheel_applies_warped_transform(controller):
+        return False
+    checker = getattr(controller, "has_ui_control_point_selection", None)
+    if callable(checker):
+        return not checker()
+    return True
+
+
+def wheel_scale_uses_target_points(
+        model: nornir_imageregistration.ITransform | None,
+        view_type: ViewType | None,
+        space: Space) -> bool:
+    """True when Shift+scroll should scale TargetPoints (composite/target mesh-like).
+
+    Rigid CS2D stays on ``ScaleWarpedAboutSourcePoint`` with a source-space pivot.
+    """
+    if model is None or is_rigid_transform(model):
+        return False
+    if not isinstance(model, nornir_imageregistration.ITransformRelativeScaling):
+        return False
+    return view_type == ViewType.Composite or space == Space.Target
 
 
 class NavigationCommandBase(UICommandBase, abc.ABC):
@@ -28,13 +90,13 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
     A command that needs to handle the mouse position in volume coordinates
     """
 
-    _last_mouse_position: tuple[float, float]
-    _transform_controller: pyre.state.TransformController
+    _last_mouse_position: tuple[float, float] | None
+    _transform_controller: pyre.state.TransformController  # type: ignore[attr-defined]
 
     # Bounds the camera is allowed to travel within
     _bounds: nornir_imageregistration.Rectangle
 
-    _history_manager: ICommandHistory = Provide[pyre.container.IContainer.history_manager]
+    _history_manager: ICommandHistory = Provide[pyre.container.IContainer.history_manager]  # type: ignore[attr-defined]
 
     _commandqueue: ICommandQueue
 
@@ -54,10 +116,9 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         """The space the command is operating in"""
         return self._space
 
-    @inject
     def __init__(self,
-                 parent: wx.Window,
-                 transform_controller: pyre.viewmodels.TransformController,
+                 parent: QWidget,
+                 transform_controller: pyre.viewmodels.TransformController,  # type: ignore[attr-defined]
                  camera: pyre.ui.Camera,
                  space: Space,
                  bounds: nornir_imageregistration.Rectangle,
@@ -78,64 +139,179 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         super(NavigationCommandBase, self).__init__(parent=parent,
                                                     completed_func=completed_func)
 
+    def _stos_image_panel(self) -> imagetransformviewpanel_module.ImageTransformViewPanel | None:
+        """Return the ImageTransformViewPanel hosting this command, if any (not mosaic)."""
+        w = self.parent
+        if w is None:
+            return None
+        cand = w.parent()
+        if isinstance(cand, imagetransformviewpanel_module.ImageTransformViewPanel):
+            return cand
+        return None
+
+    def _view_type(self) -> ViewType | None:
+        """View type for the STOS panel hosting this command, if known."""
+        panel = self._stos_image_panel()
+        return panel.view_type if panel is not None else None
+
     @staticmethod
-    def ParamToMousePosition(e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def ParamToMousePosition(e: QMouseEvent | QWheelEvent | tuple[float, float]) -> tuple[float, float]:
         """
-        :param e Either a wx.MouseEvent or a tuple of (y, x) coordinates:
+        :param e Either a QMouseEvent or a tuple of (y, x) coordinates:
         :return: (y, x) coordinates of mouse
         """
 
         if isinstance(e, tuple):
             y, x = e
-        elif isinstance(e, wx.MouseEvent):
-            x, y = e.GetPosition()
+        elif isinstance(e, QMouseEvent) or isinstance(e, QWheelEvent):
+            x, y = e.position().x(), e.position().y()
         else:
             raise ValueError("Unknown e type")
 
         return y, x
 
     @staticmethod
-    def GetCorrectedMousePosition(e: wx.MouseEvent | tuple[float, float], height: int) -> tuple[float, float]:
-        """wxPython inverts the mouse position, flip it back"""
+    def GetCorrectedMousePosition(e: QMouseEvent | QWheelEvent | tuple[float, float], height: int) -> tuple[float, float]:
+        """Qt mouse coordinates have origin at top-left, convert to bottom-left origin"""
         y, x = NavigationCommandBase.ParamToMousePosition(e)
 
         return height - y, x
 
-    def get_space_position(self, e: wx.MouseEvent | tuple[float, float]) -> tuple[float, float]:
+    def get_space_position(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> tuple[float, float]:
         """
         Return the mouse position in the source or target space, matching the source property of our instance
-        :param e: wx.MouseEvent or (y,x) tuple
+        :param e: QMouseEvent or (y,x) tuple
         :return: (y,x) tuple
         """
         y, x = NavigationCommandBase.ParamToMousePosition(e)
         cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
-        return self.camera.ImageCoordsForMouse(cy, cx)
+        return self.camera.ImageCoordsForMouse(cy, cx)  # type: ignore[return-value]
 
-    def get_world_positions(self, e: wx.MouseEvent | tuple[float, float]) -> PointPair:
+    def _adjust_camera_lookat_for_cursor(self, before: PointPair, after: PointPair) -> None:
+        """Keep the world point under the cursor when zooming or panning."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            if is_rigid_transform(model):
+                delta_display = after.target - before.target
+                if not is_plausible_world_delta(
+                        delta_display, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
+                delta_lookat = lookat_delta_from_display_delta(model, delta_display)
+                if not is_plausible_world_delta(
+                        delta_lookat, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
+                proposed = self.camera.lookat - delta_lookat
+                if not is_plausible_world_point(
+                        proposed, self.camera,
+                        transform_controller=self._transform_controller):
+                    return
+                self.camera.lookat = proposed
+                return
+            delta_display = after.target - before.target
+            if not is_plausible_world_delta(
+                    delta_display, self.camera,
+                    transform_controller=self._transform_controller):
+                return
+            apply_composite_display_pan_delta(
+                self.camera, self._transform_controller, -delta_display)
+            return
+        delta = after[self.space] - before[self.space]
+        if not is_plausible_world_delta(
+                delta, self.camera,
+                transform_controller=self._transform_controller):
+            return
+        proposed = self.camera.lookat - delta
+        if not is_plausible_world_point(
+                proposed, self.camera,
+                transform_controller=self._transform_controller):
+            return
+        self.camera.lookat = proposed
+
+    def _translate_camera_by_display_delta(self, display_delta: tuple[float, float]) -> None:
+        """Pan the camera; on composite, delta is in target display space."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            apply_composite_display_pan_delta(
+                self.camera, self._transform_controller, np.asarray(display_delta, dtype=np.float64))
+            return
+        self._camera.translate(display_delta)
+
+    def get_world_positions(self, e: QMouseEvent | QWheelEvent | tuple[float, float]) -> PointPair:
         """
-        Returns a tuple of the mouse position in both source and target space
+        Returns a tuple of the mouse position in both source and target space.
+        When no transform is loaded (TransformModel is None) both spaces return the
+        camera-space position so that panning and cursor tracking remain functional.
         :param e:
         :return:
         """
-        position = np.array(self.get_space_position(e))
+        y, x = NavigationCommandBase.ParamToMousePosition(e)
+        cy, cx = self.GetCorrectedMousePosition((y, x), self.height)
+
+        if self._view_type() == ViewType.Composite:
+            composite_pair = world_point_pair_for_composite_mouse(
+                self.camera, self._transform_controller, cy, cx)
+            if composite_pair is not None:
+                return composite_pair
+
+        position = np.array(self.camera.ImageCoordsForMouse(cy, cx))
+
+        if self._transform_controller.TransformModel is None:
+            host_position = yx_host(position)
+            return PointPair(target=host_position, source=host_position)
 
         if self._space == Space.Source:
-            return PointPair(target=np.squeeze(self._transform_controller.InverseTransform(position)),
-                             source=position)
+            host_source = yx_host(position)
+            mapped = yx_host(self._transform_controller.Transform(position, extrapolate=True))
+            if not np.all(np.isfinite(mapped)):
+                mapped = host_source
+            return PointPair(target=mapped,
+                             source=host_source)
         elif self._space == Space.Target:
-            return PointPair(target=position,
-                             source=np.squeeze(self._transform_controller.InverseTransform(position)))
+            mapped = yx_host(self._transform_controller.InverseTransform(position, extrapolate=True))
+            host_target = yx_host(position)
+            if not np.all(np.isfinite(mapped)):
+                # Outside hull / cold RBF: keep status usable without poisoning history.
+                mapped = host_target
+            return PointPair(target=host_target,
+                             source=mapped)
         else:
             raise ValueError("Unknown space")
 
-    def on_mouse_motion(self, event: wx.MouseEvent):
+    def _keyboard_pan_delta(self, dy_frac: float, dx_frac: float) -> tuple[float, float]:
+        """Return a display- or source-space pan step for WASD keyboard navigation."""
+        view = self._view_type()
+        model = self._transform_controller.TransformModel
+        if view == ViewType.Composite and model is not None:
+            _, bounds = resolve_composite_display_draw_params(
+                self.camera,
+                self._transform_controller,
+                (self.height, self.parent.size().width()),
+            )
+            vis_h, vis_w = bounds.Height, bounds.Width
+        else:
+            vis_h = self.camera.visible_world_height
+            vis_w = self.camera.visible_world_width
+        return dy_frac * vis_h, dx_frac * vis_w
+
+    def on_mouse_motion(self, event: QMouseEvent):
         """Called when the mouse moves"""
 
         try:
-            width, height = self.parent.GetClientSize()
+            width, height = self.parent.size().width(), self.parent.size().height()
+            if width > 0 and height > 0:
+                self.camera.window_size = np.array((height, width))
             (y, x) = self.GetCorrectedMousePosition(event, height)
 
             if self._last_mouse_position is None:
+                self._last_mouse_position = (y, x)
+                return
+
+            # Only pan after a right-press established the drag; ignore buttoned moves that arrive first.
+            if not (event.buttons() & Qt.MouseButton.RightButton):
                 self._last_mouse_position = (y, x)
                 return
 
@@ -144,19 +320,20 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
 
             self._last_mouse_position = (y, x)
 
-            ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
-            if ImageX is None:
-                return
-
-            ImageDX = (float(dx) / width) * self.camera.visible_world_width
-            ImageDY = (float(dy) / height) * self.camera.visible_world_height
-
-            if event.RightIsDown():
-                self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
+            if (self._view_type() == ViewType.Composite
+                    and self._transform_controller.TransformModel is not None):
+                scale = self.camera.scale
+                if scale != 0.0:
+                    display_delta = np.array((-dy / scale, -dx / scale), dtype=np.float64)
+                    if np.all(np.isfinite(display_delta)):
+                        apply_composite_display_pan_delta(
+                            self.camera, self._transform_controller, display_delta)
+            else:
+                self.camera.pan_by_screen_delta(dx, dy, width, height)
 
             # Commenting this block until I have a command to translate control points
-            # if event.LeftIsDown():
-            #     if event.CmdDown():
+            # if event.buttons() & Qt.MouseButton.LeftButton:
+            #     if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             #         # Translate all points
             #         self._transform_controller.TranslateFixed((ImageDY, ImageDX))
             #     else:
@@ -164,7 +341,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             #         if self.SelectedPointIndex is not None:
             #             self.SelectedPointIndex = self._transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
             #                                                                            ImageDY, space=self.space)
-            #         elif event.ShiftDown():  # The shift key is selected and we do not have a last point dragged
+            #         elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:  # The shift key is selected and we do not have a last point dragged
             #             return
             #         else:
             #             # find nearest point
@@ -173,40 +350,106 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
             #                                                                          space=self.space)
 
         finally:
-            event.Skip()
+            event.accept()
 
-    def on_mouse_scroll(self, e: wx.MouseEvent):
+    def on_mouse_scroll(self, e: QWheelEvent):
         try:
             if self.camera is None:
                 return
 
-            scroll_y = e.GetWheelRotation() / 120.0
+            scroll_y = wheel_scroll_steps(e)
 
-            if e.CmdDown() and e.AltDown() and isinstance(self._transform_controller.TransformModel,
-                                                          nornir_imageregistration.ITransformRelativeScaling):
+            # Keep camera pixel geometry aligned with the GL panel for zoom/rotate-to-cursor.
+            panel_w, panel_h = self.parent.size().width(), self.parent.size().height()
+            if panel_w > 0 and panel_h > 0:
+                self._width, self._height = panel_w, panel_h
+                self.camera.window_size = np.array((panel_h, panel_w))
+
+            # Wheel events can keep Shift/Ctrl from an earlier gesture; query live keys.
+            wheel_mods = QGuiApplication.queryKeyboardModifiers()
+            shift_scale = (
+                (wheel_mods & Qt.KeyboardModifier.ShiftModifier)
+                and not (wheel_mods & Qt.KeyboardModifier.ControlModifier)
+                and isinstance(
+                    self._transform_controller.TransformModel,
+                    nornir_imageregistration.ITransformRelativeScaling)
+                and wheel_applies_relative_scale(self._transform_controller)
+            )
+            if shift_scale and scroll_y != 0.0:
                 scale_delta = (1.0 + (-scroll_y / 50.0))
-                self._transform_controller.TransformModel.ScaleWarped(scale_delta)
-            elif e.CmdDown():  # We rotate when command is down
-                angle = float(abs(scroll_y) * 2) ** 2.0
-                if e.ShiftDown():
-                    angle = float(abs(scroll_y) / 2) ** 2.0
-
-                rangle = (angle / 180.0) * 3.14159
-                if scroll_y < 0:
-                    rangle = -rangle
-
-                # print "Angle: " + str(angle)
                 try:
-                    width, height = self.parent.GetClientSize()
+                    point_pair = self.get_world_positions(e)
+                    view = self._view_type()
+                    model = self._transform_controller.TransformModel
 
-                    area = np.array([height, width])
-                    center = area / 2.0
-                    world_center = self.camera.ImageCoordsForMouse(center[0], center[1])
-
-                    self._transform_controller.Rotate(rangle, world_center)
+                    self._transform_controller.begin_interactive_edit(
+                        self.space,
+                        view_type=self._view_type(),
+                        gesture=gesture_for_wheel_rotate(
+                            self.space, self._view_type(), self._transform_controller.type))
+                    try:
+                        if wheel_scale_uses_target_points(model, view, self.space):
+                            # Composite glyphs live at TargetPoints; scale about the
+                            # display/target cursor so the overlay grows under the mouse.
+                            target_pivot = yx_host(point_pair.target).astype(np.float32)
+                            self._transform_controller.ScaleFixed(
+                                scale_delta, target_pivot, space=Space.Target)
+                        else:
+                            # ScaleWarpedAboutSourcePoint expects source-space pivot
+                            # (same as rigid rotate).
+                            source_pivot = yx_host(point_pair.source).astype(np.float32)
+                            self._transform_controller.ScaleWarped(
+                                scale_delta, source_pivot, space=self.space)
+                        if view == ViewType.Composite:
+                            pair_after = self.get_world_positions(e)
+                            self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
+                    finally:
+                        self._transform_controller.end_interactive_edit()
+                    self.parent.update()
                 except NotImplementedError:
-                    print("Current transform does not support rotation")
                     pass
+            elif (
+                    (wheel_mods & Qt.KeyboardModifier.ControlModifier)
+                    and wheel_applies_warped_transform(self._transform_controller)
+            ):  # rotate
+                if wheel_rotate_locked(
+                        self._transform_controller.type, self.space, self._view_type()):
+                    pass
+                else:
+                    angle = float(abs(scroll_y) * 2) ** 2.0
+                    if wheel_mods & Qt.KeyboardModifier.ShiftModifier:
+                        angle = float(abs(scroll_y) / 2) ** 2.0
+
+                    rangle = (angle / 180.0) * math.pi
+                    if scroll_y < 0:
+                        rangle = -rangle
+
+                    # print "Angle: " + str(angle)
+                    try:
+                        point_pair = self.get_world_positions(e)
+                        view = self._view_type()
+                        if view == ViewType.Composite:
+                            world_center = yx_host(point_pair.source).astype(np.float32)
+                        elif self.space == Space.Source:
+                            world_center = yx_host(point_pair.source).astype(np.float32)
+                        else:
+                            world_center = yx_host(point_pair.target).astype(np.float32)
+
+                        self._transform_controller.begin_interactive_edit(
+                            self.space,
+                            view_type=self._view_type(),
+                            gesture=gesture_for_wheel_rotate(
+                                self.space, self._view_type(), self._transform_controller.type))
+                        try:
+                            self._transform_controller.Rotate(rangle, world_center, space=self.space)
+                            if view == ViewType.Composite:
+                                pair_after = self.get_world_positions(e)
+                                self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
+                        finally:
+                            self._transform_controller.end_interactive_edit()
+                        self.parent.update()
+                    except NotImplementedError:
+                        pass
 
                 # if isinstance(self._transform_controller.TransformModel, nornir_imageregistration.ITransformTargetRotation):
                 #     self._transform_controller.TransformModel.RotateTargetPoints(-rangle,
@@ -223,88 +466,107 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 zdelta = (1 + (scroll_y / 40))
 
                 mouse_position = self.get_world_positions(e)
-                screen_center = self.get_world_positions((self.height / 2, self.width / 2))
 
                 new_scale = self.camera.scale * zdelta
                 max_image_dimension_value = max(self._bounds.Width, self._bounds.Height)
                 if self._transform_controller.width is not None:
-                    max_transform_dimension = max(self._transform_controller.width, self._transform_controller.height)
+                    max_transform_dimension = max(self._transform_controller.width, self._transform_controller.height)  # type: ignore[arg-type]
                     max_image_dimension_value = max(max_image_dimension_value, max_transform_dimension)
 
                 if new_scale > max_image_dimension_value * 2.0:
                     new_scale = max_image_dimension_value * 2.0
 
-                self.camera.scale = new_scale
-
-                mouse_position_after_scale = self.get_world_positions(e)
-                delta = mouse_position_after_scale[self.space] - mouse_position[self.space]
-
-                self.camera.lookat -= delta
+                with self.camera.defer_change_events():
+                    self.camera.scale = new_scale
+                    # Cursor-lock uses before/after world positions. When the camera
+                    # is already lost (runaway lookat from a bad transform), recenter
+                    # instead of amplifying garbage coordinates.
+                    if is_plausible_world_point(
+                            self.camera.lookat, self.camera,
+                            transform_controller=self._transform_controller):
+                        mouse_position_after_scale = self.get_world_positions(e)
+                        self._adjust_camera_lookat_for_cursor(
+                            mouse_position, mouse_position_after_scale)
+                    else:
+                        panel = self._stos_image_panel()
+                        if panel is not None:
+                            panel.center_camera()
+                        else:
+                            self.camera.lookat = (0.0, 0.0)
 
                 mouse_y, mouse_x = self.GetCorrectedMousePosition(e, self.height)
-
-                # print(
-                #    f'Scrolling at {mouse_x}x {mouse_y}y mouse -> {self.space} {mouse_position.source} source {mouse_position.target} target')
+                self.parent.update()
                 self._last_mouse_position = mouse_y, mouse_x
         finally:
-            e.Skip()
+            e.accept()
 
-    def on_key_down(self, e):
-        keycode = e.GetKeyCode()
+    def on_key_down(self, e: QKeyEvent):
+        keycode = e.key()
 
         symbol = ''
         try:
-            key_char = '%c' % keycode
-            symbol = key_char.lower()
+            # Convert key code to character if it's a printable ASCII character
+            if 32 <= keycode <= 126:  # ASCII printable characters
+                key_char = chr(keycode)
+                symbol = key_char.lower()
         except:
             pass
 
-        # if keycode == wx.WXK_TAB:
-        #     try:
-        #         if self.composite:
-        #             self.NextGLFunction()
-        #         else:
-        #             self.ShowWarped = not self.ShowWarped
-        #     except:
-        #         pass
+        panel = self._stos_image_panel()
+        if keycode == Qt.Key.Key_Tab and not (e.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            if panel is not None:
+                self._transform_controller.NextViewMode()
+                self.parent.update()
+            e.accept()
+            return
+
+        if symbol == 'l' and panel is not None:
+            panel.show_lines = not panel.show_lines
+            self.parent.update()
+            e.accept()
+            return
 
         if symbol == 'a':  # "A" Character
-            ImageDX = -0.05 * self.camera.visible_world_width
-            self._camera.translate((0.0, ImageDX))
+            dy, dx = self._keyboard_pan_delta(0.0, -0.05)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 'd':  # "D" Character
-            ImageDX = 0.05 * self.camera.visible_world_width
-            self._camera.translate((0, ImageDX))
+            dy, dx = self._keyboard_pan_delta(0.0, 0.05)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 'w':  # "W" Character
-            ImageDY = 0.05 * self.camera.visible_world_height
-            self._camera.translate((ImageDY, 0))
+            dy, dx = self._keyboard_pan_delta(0.05, 0.0)
+            self._translate_camera_by_display_delta((dy, dx))
         elif symbol == 's':  # "S" Character
-            ImageDY = -0.05 * self.camera.visible_world_height
-            self._camera.translate((ImageDY, 0))
+            dy, dx = self._keyboard_pan_delta(-0.05, 0.0)
+            self._translate_camera_by_display_delta((dy, dx))
 
-        elif keycode == wx.WXK_PAGEUP:
+        elif keycode == Qt.Key.Key_PageUp:
             self.camera.scale *= 0.9
-        elif keycode == wx.WXK_PAGEDOWN:
+        elif keycode == Qt.Key.Key_PageDown:
             self.camera.scale *= 1.1
-
-            self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
-        # elif symbol == 'l':
-        #    self.show_lines = not self.show_lines
-        # elif keycode == wx.WXK_F1:
+        # elif keycode == Qt.Key.Key_F1:
         #    self._image_transform_view.Debug = not self._image_transform_view.Debug
         elif symbol == 'm':
-            look_at = [self.camera.y, self.camera.x]
+            # Match Source / Target / Composite to this window's center + scale.
+            # Canonical sync space is Target (control); each panel converts for its camera.
+            look_at = target_space_lookat_for_stos_view(
+                self.camera,
+                self._transform_controller,
+                self.space,
+                self._view_type(),
+            )
+            config = pyre.state.get_current_stos_config()
+            if config is not None:
+                config.WindowsLookAtFixedPoint(look_at, self.camera.scale)
 
-            # if not self.FixedSpace and self.ShowWarped:
-            #    LookAt = self._transform_controller.transform([LookAt])
-            #    LookAt = LookAt[0]
-
-            pyre.state.currentStosConfig.WindowsLookAtFixedPoint(look_at, self.camera.scale)
-            # pyre.SyncWindows(LookAt, self.camera.scale)
-
-        elif symbol == 'z' and e.CmdDown():
+        elif symbol == 'z' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Undo()
-        elif symbol == 'x' and e.CmdDown():
+        elif symbol == 'x' and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.history_manager.Redo()
         elif symbol == 'f':
             self._transform_controller.FlipWarped()
             self.history_manager.SaveState(self._transform_controller.FlipWarped)
+
+        e.accept()
+
+    def on_key_up(self, e: QKeyEvent) -> None:
+        e.accept()

@@ -46,7 +46,7 @@ _transform_fragment_shader_program = """
 
 class TransformShader(BaseShader):
     """
-    This is a shader that has a pair of verticies and textures for source/target space and can tween between them
+    This is a shader that has a pair of vertices and textures for source/target space and can tween between them
     """
 
     _source_texture_location: int | None = None
@@ -78,68 +78,38 @@ class TransformShader(BaseShader):
 
     @property
     def source_pos_location(self) -> int:
-        if self._source_pos_location is None:
-            self._source_pos_location = gl.glGetAttribLocation(self.program, "vertex_source_position")
-            if self._source_pos_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._source_pos_location
+        return self._cached_attrib_location("_source_pos_location", "vertex_source_position")
 
     @property
     def target_pos_location(self) -> int:
-        if self._target_pos_location is None:
-            self._target_pos_location = gl.glGetAttribLocation(self.program, "vertex_target_position")
-            if self._target_pos_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._target_pos_location
+        return self._cached_attrib_location("_target_pos_location", "vertex_target_position")
 
     @property
     def texture_coord_location(self) -> int:
-        if self._texture_coord_location is None:
-            self._texture_coord_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
-            if self._texture_coord_location == -1:
-                raise ValueError("Could not find texture coordinate attribute")
-        return self._texture_coord_location
+        return self._cached_attrib_location("_texture_coord_location", "vertex_texture_coordinate",
+                                            "Could not find texture coordinate attribute")
 
     @property
-    def source_texture_location(self):
-        if self._source_texture_location is None:
-            self._source_texture_location = gl.glGetUniformLocation(self.program, "source_texture")
-            if self._source_texture_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        return self._source_texture_location
+    def source_texture_location(self) -> int:
+        return self._cached_uniform_location("_source_texture_location", "source_texture",
+                                             "Could not find texture_sampler attribute")
 
     @property
-    def target_texture_location(self):
-        if self._target_texture_location is None:
-            self._target_texture_location = gl.glGetUniformLocation(self.program, "target_texture")
-            if self._target_texture_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        return self._target_texture_location
+    def target_texture_location(self) -> int:
+        return self._cached_uniform_location("_target_texture_location", "target_texture",
+                                             "Could not find texture_sampler attribute")
 
     @property
     def vertex_tween_location(self) -> int:
-        if self._vertex_tween_location is None:
-            self._vertex_tween_location = gl.glGetUniformLocation(self.program, "vert_tween")
-            if self._vertex_tween_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._vertex_tween_location
+        return self._cached_uniform_location("_vertex_tween_location", "vert_tween")
 
     @property
     def texture_tween_location(self) -> int:
-        if self._texture_tween_location is None:
-            self._texture_tween_location = gl.glGetUniformLocation(self.program, "texture_tween")
-            if self._texture_tween_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._texture_tween_location
+        return self._cached_uniform_location("_texture_tween_location", "texture_tween")
 
     @property
     def model_view_projection_matrix_location(self) -> int:
-        if self._model_view_projection_matrix_location is None:
-            self._model_view_projection_matrix_location = gl.glGetUniformLocation(self.program,
-                                                                                  "model_view_projection_matrix")
-            if self._model_view_projection_matrix_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._model_view_projection_matrix_location
+        return self._cached_uniform_location("_model_view_projection_matrix_location", "model_view_projection_matrix")
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating], source_texture: int, target_texture: int,
              vertex_array_object: ShaderVAO,
@@ -148,8 +118,8 @@ class TransformShader(BaseShader):
         :param model_view_proj_matrix: The model view projection matrix
         :param source_texture: The source texture
         :param target_texture: The target texture
-        :param vertex_array_object: The vertex array object with verticies defined for source and target space verticies and texture coordinates
-        :param vertex_tween: The fractional amount of the tween between source and target space for verticies
+        :param vertex_array_object: The vertex array object with vertices defined for source and target space vertices and texture coordinates
+        :param vertex_tween: The fractional amount of the tween between source and target space for vertices
         :param texture_tween: The fractional amount of the tween between source and target textures
         """
         try:
@@ -157,8 +127,8 @@ class TransformShader(BaseShader):
             check_for_error()
             vertex_array_object.bind()
 
-            bind_texture(source_texture, self.source_texture_location, gl.GL_TEXTURE0)
-            bind_texture(target_texture, self.target_texture_location, gl.GL_TEXTURE1)
+            bind_texture(source_texture, self.source_texture_location or 0, gl.GL_TEXTURE0)
+            bind_texture(target_texture, self.target_texture_location or 0, gl.GL_TEXTURE1)
 
             # tween = math.floor(time.time() % 2)
             # tween = (time.time() % 15) / 15.0

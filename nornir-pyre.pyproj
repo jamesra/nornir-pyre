@@ -42,13 +42,11 @@
     <Compile Include="pyre\tileexportwindow.py" />
     <Compile Include="pyre\ui\camera.py" />
     <Compile Include="pyre\ui\camerastatusbar.py" />
-    <Compile Include="pyre\ui\camera_command.py" />
     <Compile Include="pyre\ui\command_base.py" />
     <Compile Include="pyre\ui\glpanel.py" />
     <Compile Include="pyre\ui\imagetransformpanel.py" />
     <Compile Include="pyre\ui\imagetransformpanelbase.py" />
     <Compile Include="pyre\ui\mosaictransformpanel.py" />
-    <Compile Include="pyre\ui\rectangle_command.py" />
     <Compile Include="pyre\ui\__init__.py" />
     <Compile Include="pyre\viewmodels\imageviewmodel.py" />
     <Compile Include="pyre\viewmodels\mosaicviewmodel.py" />

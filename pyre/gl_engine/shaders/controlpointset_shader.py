@@ -20,8 +20,9 @@ _controlpointset_vertex_shader_program = """
         in vec2 vertex_texture_coordinate;
         in vec2 point_source_offset; //The position of the point in source space
         in vec2 point_target_offset; //The position of the point in target space
-        in float texture_index; //The index of the texture to use
+        in float texture_index; // 0 idle, 1 selected, 2 busy
         out float frag_texture_index;
+        const float BUSY_QUAD_SCALE = 2.0;
         
         mat4 BuildTranslation(vec3 delta)
         {
@@ -45,11 +46,15 @@ _controlpointset_vertex_shader_program = """
             vec3 blended_offset_pos = mix(vec3(point_source_offset, 1),
                                    vec3(point_target_offset, 1),
                                    tween);
+            vec3 local_vertex = vertex_position;
+            if (texture_index >= 1.5) {
+                local_vertex = vertex_position * BUSY_QUAD_SCALE;
+            }
             mat4 translate_matrix;
             translate_matrix = BuildScaleTranslation(scale, blended_offset_pos);
             mat4 model_view_proj;
             model_view_proj =  view_projection_matrix * translate_matrix; 
-            gl_Position = model_view_proj * vec4(vertex_position, 1.0);
+            gl_Position = model_view_proj * vec4(local_vertex, 1.0);
             frag_texture_coordinate = vertex_texture_coordinate;
             frag_texture_index = texture_index;
         }
@@ -58,23 +63,62 @@ _controlpointset_vertex_shader_program = """
 _controlpointset_fragment_shader_program = """
     #version 450
     uniform sampler2DArray texture_sampler;
+    uniform float busy_angle; // Spin angle for the busy comet, radians
     in vec2 frag_texture_coordinate;
     in float frag_texture_index;
     out vec4 outputColor;
+    const float BUSY_QUAD_SCALE = 2.0;
+    const float PI = 3.14159265359;
+    const float COMET_ARC = 1.0 / 3.0;
+    const float COMET_STROKE = 0.18;
+    const vec3 GLYPH_GREY = vec3(0.78);
+    const vec3 COMET_BLUE = vec3(0.35, 0.65, 1.0);
+
     void main() {
-        vec4 texColor = texture(
+        if (frag_texture_index < 1.5) {
+            outputColor = texture(
                 texture_sampler, vec3(frag_texture_coordinate, frag_texture_index)
-            ); 
-        // outputColor = vec4(texColor.r, frag_texture_coordinate.x, frag_texture_coordinate.y, 1);
-        //outputColor = vec4(frag_texture_index, texColor.g, texColor.b, 1);
-        outputColor = texColor;
+            );
+            return;
+        }
+
+        vec2 glyphUV = 0.5 + (frag_texture_coordinate - 0.5) * BUSY_QUAD_SCALE;
+        vec4 texColor = vec4(0.0);
+        if (glyphUV.x >= 0.0 && glyphUV.x <= 1.0 && glyphUV.y >= 0.0 && glyphUV.y <= 1.0) {
+            texColor = texture(texture_sampler, vec3(glyphUV, 0.0));
+        }
+        vec4 glyph = vec4(GLYPH_GREY, texColor.a);
+
+        vec2 p = frag_texture_coordinate * 2.0 - 1.0;
+        float r = length(p);
+        float ang = atan(p.y, p.x);
+        float a = fract((ang - busy_angle) / (2.0 * PI));
+        float along = clamp(a / COMET_ARC, 0.0, 1.0);
+        float arcMask = 1.0 - smoothstep(COMET_ARC - 0.02, COMET_ARC + 0.02, a);
+        // Keep the whole 1/3-turn readable; pow(1-t,2) plus SRC_ALPHA made only the head a spec.
+        float tail = 1.0 - along;
+        float cometAlong = mix(0.5, 1.0, pow(tail, 0.6)) * arcMask;
+        float rGlyph = 1.0 / BUSY_QUAD_SCALE;
+        float rInner = rGlyph + 0.03;
+        float rOuter = rInner + COMET_STROKE;
+        float ring = smoothstep(rInner - 0.02, rInner + 0.02, r)
+            * (1.0 - smoothstep(rOuter - 0.02, rOuter + 0.02, r));
+        float cometAlpha = cometAlong * ring;
+        vec4 comet = vec4(COMET_BLUE, cometAlpha);
+
+        float outA = glyph.a + comet.a * (1.0 - glyph.a);
+        vec3 premul = glyph.rgb * glyph.a + comet.rgb * comet.a * (1.0 - glyph.a);
+        outputColor = vec4(outA > 0.0 ? premul / outA : vec3(0.0), outA);
     }
 """
 
 
 class ControlPointSetShader(BaseShader):
-    """
-    This shader renders a set of points with a texture centered on each point
+    """Instanced control-point billboards.
+
+    Instance ``texture_index`` 0/1 sample the idle/selected texture layers.
+    Index 2 is busy: the glyph stays upright and light-grey while a blue comet
+    arc spins in the extra margin outside the point.
     """
 
     _texture_sampler_location: int | None = None
@@ -86,18 +130,19 @@ class ControlPointSetShader(BaseShader):
     _tween_location: int | None = None
     _scale_location: int | None = None
     _view_projection_matrix_location: int | None = None
+    _busy_angle_location: int | None = None
     _attributes: Sequence[VertexAttribute] | None = None
     _vertex_layout: VertexArrayLayout | None = None
     _pointset_layout: VertexArrayLayout | None = None
     _texture_index_location: int | None = None  # Index of the texture the instance should use
 
     @property
-    def vertex_layout(self) -> VertexArrayLayout:
+    def vertex_layout(self) -> VertexArrayLayout | None:
         """The layout of the vertex buffer"""
         return self._vertex_layout
 
     @property
-    def pointset_layout(self) -> VertexArrayLayout:
+    def pointset_layout(self) -> VertexArrayLayout | None:
         """
         The layout for the pointset buffer.
         SourceX, SourceY, TargetX, TargetY for each point
@@ -140,88 +185,65 @@ class ControlPointSetShader(BaseShader):
 
     @property
     def texture_index_location(self) -> int:
-        if self._texture_index_location is None:
-            self._texture_index_location = gl.glGetAttribLocation(self.program, "texture_index")
-            if self._texture_index_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._texture_index_location
+        return self._cached_attrib_location("_texture_index_location", "texture_index")
 
     @property
     def vertex_location(self) -> int:
-        if self._vertex_location is None:
-            self._vertex_location = gl.glGetAttribLocation(self.program, "vertex_position")
-            if self._vertex_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._vertex_location
+        return self._cached_attrib_location("_vertex_location", "vertex_position")
 
     @property
     def texture_coord_location(self) -> int:
-        if self._vertex_texture_location is None:
-            self._vertex_texture_location = gl.glGetAttribLocation(self.program, "vertex_texture_coordinate")
-            if self._vertex_texture_location == -1:
-                raise ValueError("Could not find texture coordinate attribute")
-        return self._vertex_texture_location
+        return self._cached_attrib_location("_vertex_texture_location", "vertex_texture_coordinate",
+                                            "Could not find texture coordinate attribute")
 
     @property
     def point_source_offset_location(self) -> int:
-        if self._point_source_offset_location is None:
-            self._point_source_offset_location = gl.glGetAttribLocation(self.program, "point_source_offset")
-            if self._point_source_offset_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._point_source_offset_location
+        return self._cached_attrib_location("_point_source_offset_location", "point_source_offset")
 
     @property
     def point_target_offset_location(self) -> int:
-        if self._point_target_offset_location is None:
-            self._point_target_offset_location = gl.glGetAttribLocation(self.program, "point_target_offset")
-            if self._point_target_offset_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._point_target_offset_location
+        return self._cached_attrib_location("_point_target_offset_location", "point_target_offset")
 
     @property
-    def texture_sampler(self):
-        if self._texture_sampler_location is None:
-            self._texture_sampler_location = gl.glGetUniformLocation(self.program, "texture_sampler")
-            if self._texture_sampler_location == -1:
-                raise ValueError("Could not find texture_sampler attribute")
-        return self._texture_sampler_location
+    def texture_sampler(self) -> int:
+        return self._cached_uniform_location("_texture_sampler_location", "texture_sampler",
+                                             "Could not find texture_sampler attribute")
 
     @property
     def tween_location(self) -> int:
-        if self._tween_location is None:
-            self._tween_location = gl.glGetUniformLocation(self.program, "tween")
-            if self._tween_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._tween_location
+        return self._cached_uniform_location("_tween_location", "tween")
 
     @property
     def scale_location(self) -> int:
-        if self._scale_location is None:
-            self._scale_location = gl.glGetUniformLocation(self.program, "scale")
-            if self._scale_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._scale_location
+        return self._cached_uniform_location("_scale_location", "scale")
 
     @property
     def model_view_projection_matrix_location(self) -> int:
-        if self._view_projection_matrix_location is None:
-            self._view_projection_matrix_location = gl.glGetUniformLocation(self.program,
-                                                                            "view_projection_matrix")
-            if self._view_projection_matrix_location == -1:
-                raise ValueError("Could not find attribute")
-        return self._view_projection_matrix_location
+        return self._cached_uniform_location("_view_projection_matrix_location", "view_projection_matrix")
+
+    @property
+    def busy_angle_location(self) -> int:
+        return self._cached_uniform_location("_busy_angle_location", "busy_angle", "Could not find busy_angle uniform")
 
     def draw(self, model_view_proj_matrix: NDArray[np.floating],
              texture: int,
              vao: InstancedVAO,
              num_instances: int,
              scale: float,
-             tween: float):
-        """Draws the texture using the vertex and index buffers."""
+             tween: float,
+             busy_angle: float = 0.0):
+        """Draw instanced control-point billboards.
+
+        ``busy_angle`` drives the comet arc for instances with texture index 2.
+        """
+        if num_instances == 0:
+            return
+
         try:
             gl.glUseProgram(self.program)
             check_for_error()
-            vao.bind()
+            if not vao.bind():
+                return  # Skip drawing if the vao isn't able to bind (May be invalid)
 
             gl.glActiveTexture(gl.GL_TEXTURE0)
             check_for_error()
@@ -233,6 +255,8 @@ class ControlPointSetShader(BaseShader):
             gl.glUniform1f(self.tween_location, tween)
             check_for_error()
             gl.glUniform1f(self.scale_location, scale)
+            check_for_error()
+            gl.glUniform1f(self.busy_angle_location, float(busy_angle))
             check_for_error()
             gl.glUniformMatrix4fv(self.model_view_projection_matrix_location, 1, False,
                                   model_view_proj_matrix.astype(np.float32))
@@ -249,3 +273,4 @@ class ControlPointSetShader(BaseShader):
             check_for_error()
             vao.unbind()
             gl.glUseProgram(0)
+            check_for_error("after glUseProgram(0) in controlpointset_shader draw")

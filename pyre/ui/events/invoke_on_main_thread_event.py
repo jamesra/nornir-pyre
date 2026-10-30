@@ -1,19 +1,23 @@
-import wx
+from __future__ import annotations
+
+from PyQt6.QtCore import QEvent
 from dependency_injector.wiring import Provide
 import traceback
+
+import pyre
 from pyre.container import IContainer
+from pyre.interfaces import IEventManager
 
 # from pyre.interfaces import IEventManager
 
-# An event that invokes a callback on the main thread
-wx_INVOKE_ON_MAIN_THREAD_EventType = wx.NewEventType()
-wx_EVT_INVOKE_ON_MAIN_THREAD = wx.PyEventBinder(wx_INVOKE_ON_MAIN_THREAD_EventType)
+class QtInvokeOnMainThreadEvent(QEvent):
+    """A Qt event that invokes a callback on the main thread"""
+    # Create a custom event type
+    EVENT_TYPE = QEvent.Type(QEvent.Type.User + 1)
 
-
-class wxInvokeOnMainThreadEvent(wx.PyEvent):
     _args: tuple | None
     _kwargs: dict | None
-    _obj: "pyre.interfaces.IEventManager"
+    _obj: IEventManager
     _stack_list: list[str] | None
     _stack: str | None
 
@@ -35,13 +39,13 @@ class wxInvokeOnMainThreadEvent(wx.PyEvent):
         return self._kwargs
 
     @property
-    def obj(self) -> "pyre.interfaces.IEventManager | None":
+    def obj(self) -> IEventManager | None:
         return self._obj
 
-    def __init__(self, obj: "pyre.interfaces.IEventManager",
+    def __init__(self, obj: IEventManager,
                  args: tuple | None = None,
                  kwargs: dict | None = None):
-        super().__init__(id=wx.ID_ANY, eventType=wx_INVOKE_ON_MAIN_THREAD_EventType)
+        super().__init__(QtInvokeOnMainThreadEvent.EVENT_TYPE)
         self._args = args
         self._kwargs = kwargs
         self._obj = obj
@@ -55,7 +59,7 @@ class wxInvokeOnMainThreadEvent(wx.PyEvent):
     def invoke(self):
         """Invoke the callback for the event"""
         try:
-            self._obj.invoke(*self._args, **self._kwargs)
+            self._obj.invoke(*(self._args or ()), **(self._kwargs or {}))
         except Exception as e:
             if self.debug:
                 print(f"Exception invoking event {e} from {self._stack}")

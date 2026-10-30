@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 import nornir_imageregistration
 from pyre.interfaces.action import Action
 from pyre.interfaces.named_tuples import ImageLoadResult, LoadStosResult
+from pyre.viewmodels.imageviewmodel import ImageViewModel
 
 
 class IImageLoader(abc.ABC):
@@ -26,7 +27,7 @@ class IImageLoader(abc.ABC):
 
     @abc.abstractmethod
     def create_image_viewmodel(self, name: str | Enum,
-                               permutations: nornir_imageregistration.ImagePermutationHelper) -> "pyre.viewmodels.ImageViewModel":
+                               permutations: nornir_imageregistration.ImagePermutationHelper) -> ImageViewModel:
         raise NotImplementedError()
 
 

@@ -4,30 +4,37 @@ from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Configuration
 import numpy as np
 from numpy.typing import NDArray
-import wx
+from PyQt6.QtCore import QTimer
 
 import nornir_imageregistration
 import pyre
 from pyre.observable import ObservableSet, ObservedAction
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback, ICommand
+from pyre.interfaces import StatusChangeCallback, ICommand
 from pyre.commands import InstantCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
 from pyre.container import IContainer
 from pyre.selection_event_data import InputEvent, InputModifiers, SelectionEventData, InputSource, PointPair
+from pyre.commands.stos.point_coords import (
+    control_point_row_from_pair,
+    known_space_for_control_point_create,
+    known_yx_from_pair,
+)
+from pyre.interfaces.viewtype import ViewType
 
 
 class CreateRegisterControlPointCommand(InstantCommandBase):
-    """This command deletes a selection of control points"""
+    """Add a control point at the current mouse pair and queue registration for that point."""
 
     _space: Space
+    _view_type: ViewType | None
     _new_point_position: PointPair
     _selected_points: ObservableSet[int]  # The indices of the selected points
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _original_points: NDArray[np.floating]
     _left_mouse_down: bool = False
-    _transform_controller: pyre.viewmodels.TransformController
+    _transform_controller: "pyre.viewmodels.TransformController"  # type: ignore[name-defined]
     _commandqueue: ICommandQueue
 
     _source_image: str
@@ -39,22 +46,13 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  source_image: str,
                  target_image: str,
-                 completed_func: StatusChangeCallback = None,
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 completed_func: StatusChangeCallback | None = None,
+                 transform_controller: "pyre.viewmodels.TransformController" = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
+                 space: Space = Space.Source,
+                 view_type: ViewType | None = None,
                  **kwargs):
-        """
-
-        :param parent:
-        :param transform_controller:
-        :param camera:
-        :param bounds:
-        :param translate_origin:  Where the mouse was when the translation started
-        :param selected_points:
-        :param space:
-        :param completed_func:
-        """
-        super().__init__(completed_func=completed_func)
+        super().__init__(completed_func=completed_func)  # type: ignore[arg-type]
         source_position = self._mouse_position_history[Space.Source]
         target_position = self._mouse_position_history[Space.Target]
 
@@ -64,14 +62,16 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._selected_points = selected_points
         self._transform_controller = transform_controller
         self._commandqueue = commandqueue
+        self._space = space
+        self._view_type = view_type
         self._new_point_position = PointPair(source=source_position, target=target_position)
         self._original_points = transform_controller.points
 
     def on_activate(self):
-        wx.CallAfter(self.queue_registration_command)
+        QTimer.singleShot(0, self.queue_registration_command)
 
     def __str__(self):
-        return "CreateControlPointCommand"
+        return "CreateRegisterControlPointCommand"
 
     def can_execute(self) -> bool:
         return True
@@ -82,9 +82,11 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
 
     def queue_registration_command(self):
 
-        point = self._new_point_position
-        # point = self._new_point_position.source if self.space == Space.Source else self._new_point_position.target
-        newpoint = np.array([point.target[0], point.target[1], point.source[0], point.source[1]], dtype=np.float32)
+        known_space = known_space_for_control_point_create(self._space, self._view_type)
+        known_yx = known_yx_from_pair(self._new_point_position, known_space)
+        point = self._transform_controller.map_pair_for_control_point_create(
+            known_space, known_yx)
+        newpoint = control_point_row_from_pair(point)
         index = self._transform_controller.TransformModel.AddPoint(newpoint)
 
         # Ensure only the new point is selected
@@ -92,7 +94,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._selected_points.add(index)
 
         # Queue up a translate command to move the point to the new position if the LMB is still down
-        registration_command = pyre.commands.stos.RegisterControlPointCommand(
+        registration_command = pyre.commands.stos.RegisterControlPointCommand(  # type: ignore[attr-defined]
             selected_points=self._selected_points,
             command_points={index},
             source_image=self._source_image,

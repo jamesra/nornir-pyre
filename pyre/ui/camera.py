@@ -4,7 +4,11 @@ Created on Oct 17, 2012
 @author: u0490822
 """
 
+from __future__ import annotations
+
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Callable
 
 import numpy as np
@@ -17,8 +21,10 @@ from pyre.interfaces.readonlycamera import IReadOnlyCamera
 from pyre.settings import AppSettings, UISettings
 
 
-def screen_to_volume(camera, point):
-    camera.ImageCoordsForMouse(point)
+def screen_to_volume(camera: Camera, point: nornir_imageregistration.PointLike) -> NDArray[np.floating]:
+    """Convert a screen (y, x) position to world coordinates."""
+    y, x = nornir_imageregistration.EnsurePointsAre1DNumpyArray(point)
+    return camera.ImageCoordsForMouse(float(y), float(x))
 
 
 class Camera(IReadOnlyCamera):
@@ -34,10 +40,12 @@ class Camera(IReadOnlyCamera):
     __on_change_event_listeners: list[Callable[[], None]]
     _angle: float
     _scale: float
-    _lookat: NDArray[float]
+    _lookat: NDArray[np.floating]
     _log: logging.Logger
-    _window_size: NDArray[int]
-    _view_size: NDArray[float]
+    _window_size: NDArray[np.integer]
+    _view_size: NDArray[np.floating]
+    _deferred_change_depth: int
+    _deferred_change_pending: bool
 
     @property
     def max_zoom(self) -> float:
@@ -59,7 +67,7 @@ class Camera(IReadOnlyCamera):
 
     @property
     def window_size(self) -> tuple[int, int]:
-        return self._window_size
+        return self._window_size  # type: ignore[return-value]
 
     @window_size.setter
     def window_size(self, value: tuple[int, int]):
@@ -75,7 +83,7 @@ class Camera(IReadOnlyCamera):
 
     @property
     def aspect(self) -> float:
-        return self._aspect
+        return self._aspect  # type: ignore[return-value]
 
     @property
     def WindowWidth(self) -> int:
@@ -85,13 +93,37 @@ class Camera(IReadOnlyCamera):
     def WindowHeight(self) -> int:
         return int(self._window_size[nornir_imageregistration.iPoint.Y])
 
-    def _calc_view_size(self, scale: float, aspect: float) -> NDArray[float]:
-        """Calculate the size of the visible world based on the scale"""
-        size = self._window_size[0] / scale
-        return np.array((size, aspect * size))
+    def _calc_view_size(self, scale: float, aspect: float | None = None) -> NDArray[np.floating]:
+        """Calculate the size of the visible world based on the scale."""
+        del aspect  # Kept for call-site compatibility; size is fully determined by window_size / scale.
+        return self._window_size / scale
+
+    def pan_by_cursor_motion(
+            self,
+            prev_y: float,
+            prev_x: float,
+            curr_y: float,
+            curr_x: float) -> None:
+        """Pan so the world point under the cursor is unchanged between two screen positions."""
+        before = self.ImageCoordsForMouse(prev_y, prev_x)
+        after = self.ImageCoordsForMouse(curr_y, curr_x)
+        self.lookat = self.lookat + (before - after)
+
+    def pan_by_screen_delta(
+            self,
+            dx: float,
+            dy: float,
+            width: int,
+            height: int) -> None:
+        """Pan the camera so content follows a screen-space drag of (dx, dy) pixels."""
+        del width, height  # Use window_size so pan matches ImageCoordsForMouse.
+        scale = self._scale
+        if scale == 0.0:
+            return
+        self.lookat = (self.y - float(dy) / scale, self.x - float(dx) / scale)
 
     @property
-    def visible_world_size(self) -> NDArray[float]:
+    def visible_world_size(self) -> NDArray[np.floating]:
         return self._view_size
 
     @property
@@ -120,6 +152,9 @@ class Camera(IReadOnlyCamera):
 
     @scale.setter
     def scale(self, value: float):
+        if not np.isfinite(value) or value == 0.0:
+            self._log.debug("Ignoring non-finite camera scale %s", value)
+            return
 
         if value > self.max_zoom:
             value = self.max_zoom
@@ -130,8 +165,8 @@ class Camera(IReadOnlyCamera):
         self._view_size = self._calc_view_size(self.scale, self.aspect)
         self._FireChangeEvent()
 
-    def top_left_visible_world_coords(self):
-        """Coordinates of the top left corner of the visible world"""
+    def min_visible_world_coords(self):
+        """Minimum (y, x) corner of the visible world in bottom-left image coordinates."""
         return self.lookat - (self.visible_world_size / 2.0)
 
     def ImageCoordsForMouse(self, y: float, x: float) -> NDArray[np.floating]:
@@ -139,8 +174,18 @@ class Camera(IReadOnlyCamera):
 
         offset = np.array((y, x), dtype=float)
         offset = (offset / self._window_size) * self.visible_world_size
-        world_coords = self.top_left_visible_world_coords() + offset
+        world_coords = self.min_visible_world_coords() + offset
         return world_coords
+
+    def screen_coords_for_world(self, y: float, x: float) -> NDArray[np.floating]:
+        """Inverse of ImageCoordsForMouse: world (y, x) -> bottom-left-origin screen (y, x).
+
+        Callers that need Qt's top-left-origin widget coordinates must still flip y via
+        ``window_height - y``, matching how ``GetCorrectedMousePosition`` flips the other way.
+        """
+        offset = np.array((y, x), dtype=float) - self.min_visible_world_coords()
+        screen_coords = (offset / self.visible_world_size) * self._window_size
+        return screen_coords
 
         # image_x = ((float(x) / self.WindowWidth) * self.visible_world_width) + (
         #         self.x - (self.visible_world_width / 2.0))
@@ -168,17 +213,23 @@ class Camera(IReadOnlyCamera):
         """
         self._config = settings.ui
         self._log = log
-        self._lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)  # centered on
+        lookat = nornir_imageregistration.EnsurePointsAre1DNumpyArray(position)
+        if not np.all(np.isfinite(lookat)):
+            log.warning("Camera initialized with non-finite lookat %s; using (0, 0)", position)
+            lookat = np.zeros(2, dtype=float)
+        self._lookat = lookat  # centered on
         self._angle = 0  # tilt
-        self._scale = scale  # zoom
+        self._scale = float(scale) if np.isfinite(scale) and scale != 0.0 else 1.0
         self.__OnChangeEventListeners = []
+        self._deferred_change_depth = 0
+        self._deferred_change_pending = False
         self._aspect = None
         self._window_size = np.array((1, 1))
 
         if size is None:
-            self.window_size = np.array((480, 640))
+            self.window_size = np.array((480, 640))  # type: ignore[assignment]
         else:
-            self.window_size = np.array(size)
+            self.window_size = np.array(size)  # type: ignore[assignment]
 
     def AddOnChangeEventListener(self, func: Callable[[], None]):
         self.__OnChangeEventListeners.append(func)
@@ -188,29 +239,54 @@ class Camera(IReadOnlyCamera):
             self.__OnChangeEventListeners.remove(func)
 
     def _FireChangeEvent(self):
+        if self._deferred_change_depth > 0:
+            self._deferred_change_pending = True
+            return
         for func in self.__OnChangeEventListeners:
             func()
+
+    @contextmanager
+    def defer_change_events(self) -> Iterator[None]:
+        """Coalesce lookat/scale updates into a single listener notification.
+
+        Composite zoom must not paint once at the new scale (old lookat) and
+        again after the cursor-lock lookat adjust — those two framings jump.
+        """
+        self._deferred_change_depth += 1
+        try:
+            yield
+        finally:
+            self._deferred_change_depth -= 1
+            if self._deferred_change_depth == 0 and self._deferred_change_pending:
+                self._deferred_change_pending = False
+                self._FireChangeEvent()
 
     def translate(self, delta: nornir_imageregistration.PointLike):
         """translate the camera by the specified amount"""
         # print("Translate X: %g Y: %g" % (delta[1], delta[0]))
-        delta = nornir_imageregistration.EnsureArray(delta, float)
-        self.lookat += delta
+        # Camera state is UI-side and should remain NumPy-backed even when compute paths use CuPy.
+        delta = nornir_imageregistration.EnsureNumpyArray(delta, float)
+        if not np.all(np.isfinite(delta)):
+            self._log.debug("Ignoring non-finite camera translate delta %s", delta)
+            return
+        self.lookat = self.lookat + delta
 
     @property
-    def lookat(self) -> NDArray[float]:
+    def lookat(self) -> NDArray[np.floating]:
         return np.copy(self._lookat)
 
     @lookat.setter
     def lookat(self, point: nornir_imageregistration.PointLike):
-        """:param tuple point: (y,x)
-           :param float scale: scale
+        """Set the camera center in world (y, x). Non-finite values are ignored.
+
+        Bad mesh/grid InverseTransforms can yield NaN; accepting those would leave the
+        view stuck at infinity until the user reloads.
         """
-        self._lookat = np.array(point, dtype=float)
-        # self._scale = scale
-
-        # print("X: %g Y: %g S: %g" % (self.x, self.y, self.scale))
-
+        candidate = np.asarray(point, dtype=float).ravel()[:2]
+        if candidate.shape[0] < 2 or not np.all(np.isfinite(candidate)):
+            self._log.debug("Ignoring non-finite camera lookat %s", point)
+            return
+        self._lookat = np.array(candidate, dtype=float, copy=True)
         self._FireChangeEvent()
 
     @property
@@ -228,9 +304,41 @@ class Camera(IReadOnlyCamera):
         """View projection matrix"""
         return self._view_proj
 
-    def focus(self, win_width: int, win_height: int):
+    def image_coords_for_lookat(
+            self,
+            lookat: nornir_imageregistration.PointLike,
+            y: float,
+            x: float) -> NDArray[np.floating]:
+        """Convert mouse position to world (y,x) for an alternate lookat."""
+        saved_lookat = self._lookat
+        self._lookat = np.asarray(lookat, dtype=float)
+        try:
+            return self.ImageCoordsForMouse(y, x)
+        finally:
+            self._lookat = saved_lookat
 
-        self.WindowSize = (win_height, win_width)
+    def view_proj_for_lookat(
+            self,
+            lookat: nornir_imageregistration.PointLike,
+            win_width: int,
+            win_height: int) -> NDArray[np.floating]:
+        """Build an orthographic view_proj for an alternate lookat without mutating camera state."""
+        saved_lookat = self._lookat
+        saved_window_size = np.array(self._window_size, copy=True)
+        saved_view_size = np.array(self._view_size, copy=True)
+        saved_aspect = self._aspect
+        self._lookat = np.asarray(lookat, dtype=float)
+        try:
+            self.focus(win_width, win_height)
+            return np.copy(self._view_proj)
+        finally:
+            self._lookat = saved_lookat
+            self._window_size = saved_window_size
+            self._view_size = saved_view_size
+            self._aspect = saved_aspect
+
+    def focus(self, win_width: int, win_height: int):
+        self.window_size = (win_height, win_width)
 
         aspect = self.aspect
 
@@ -248,6 +356,10 @@ class Camera(IReadOnlyCamera):
                                                       -half_window_size[0], half_window_size[0],
                                                       -255, 255)
 
+        # self._projection = self.orthogonal_projection(0, win_width,
+        #                                               0, win_height,
+        #                                               -255, 255)
+
         self._view = self.look_at(position=np.array((self.x, self.y, +1.0)),
                                   target=np.array((self.x, self.y, -1.0)),
                                   up=np.array((0, 1, 0)))  # camera  x,y,z
@@ -256,7 +368,7 @@ class Camera(IReadOnlyCamera):
         self._view_proj = self._view @ self._projection
 
     @classmethod
-    def orthogonal_projection(cls: NDArray[np.floating], left: float, right: float, bottom: float, top: float,
+    def orthogonal_projection(cls, left: float, right: float, bottom: float, top: float,  # type: ignore[misc]
                               z_near: float, z_far: float) -> NDArray[np.floating]:
         """Create a Mat4 orthographic projection matrix for use with OpenGL.
 
@@ -275,11 +387,11 @@ class Camera(IReadOnlyCamera):
         ty = -(top + bottom) / height
         tz = -(z_far + z_near) / depth
 
-        return np.array(((sx, 0, 0, tx),
-                         (0, sy, 0, ty),
-                         (0, 0, sz, tz),
-                         (0, 0, 0, 1.0)),
-                        dtype=np.float32)
+        return np.array(((sx, 0, 0, 0.0),
+                         (0, sy, 0, 0.0),
+                         (0, 0, sz, 0.0),
+                         (tx, ty, tz, 1.0)),
+                        dtype=np.float64)
 
     @staticmethod
     def normalize(vec: NDArray[np.floating], axis=-1, order=2):
@@ -304,3 +416,4 @@ class Camera(IReadOnlyCamera):
                          (s[1], u[1], -f[1], 0.0),
                          (s[2], u[2], -f[2], 0.0),
                          (-s.dot(position), -u.dot(position), f.dot(position), 1.0)))
+

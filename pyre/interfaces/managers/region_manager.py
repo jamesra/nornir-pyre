@@ -5,7 +5,7 @@ import abc
 
 import nornir_imageregistration
 from nornir_imageregistration import PointLike
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.selection_event_data import SelectionEventData
 
 
@@ -14,7 +14,7 @@ class IRegion(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def centroid(self) -> NDArray[(2,), np.floating]:
+    def centroid(self) -> NDArray[np.floating]:
         """The center of the region, may not match bounding box for bounding_box depending on how centroid is calculated"""
         raise NotImplementedError()
 

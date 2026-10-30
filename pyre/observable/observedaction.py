@@ -3,7 +3,7 @@ import enum
 
 class ObservedAction(enum.IntEnum):
     """The actions that can be observed"""
-    NONE = 0,
+    NONE = 0
     ADD = 1  # New items appended to end of the list
     INSERT = 2  # New items inserted into the list
     REMOVE = 3  # Items removed from the list

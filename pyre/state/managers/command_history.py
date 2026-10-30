@@ -8,7 +8,7 @@ from pyre.interfaces.managers.command_history import ICommandHistory
 
 
 class CommandHistory(ICommandHistory):
-    """Saves and returns objects along with indicies"""
+    """Saves and returns objects along with indices"""
 
     @property
     def HistoryDepth(self):

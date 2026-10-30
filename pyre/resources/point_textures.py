@@ -7,6 +7,31 @@ import pyre
 import pyre.resource_paths
 
 
+def _load_point_image(path: str) -> np.ndarray:
+    """
+    Load a point sprite image from disk and return RGBA uint8 (H, W, 4), contiguous.
+    Converts grayscale/RGB to RGBA so texture upload is correct.
+    """
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Point texture not found: {path}")
+    # OpenGL texture upload needs host memory; force numpy so CuPy backend does not return GPU array
+    raw = nornir_imageregistration.LoadImage(path, backend="numpy")
+    if raw.ndim == 2:
+        raw = np.stack([raw] * 4, axis=-1)
+    elif raw.shape[-1] == 3:
+        alpha = np.full((*raw.shape[:2], 1), 255, dtype=raw.dtype)
+        raw = np.concatenate([raw, alpha], axis=-1)
+    if raw.shape[-1] != 4:
+        raise ValueError(f"Point texture {path} has shape {raw.shape}, need (H, W, 4)")
+    if not np.issubdtype(raw.dtype, np.uint8):
+        if np.issubdtype(raw.dtype, np.floating):
+            raw = (np.clip(raw, 0, 1) * 255).astype(np.uint8)
+        else:
+            raw = np.clip(raw, 0, 255).astype(np.uint8)
+    raw = np.ascontiguousarray(raw)
+    return raw
+
+
 class PointTextures:
     """
     Provides graphics for transform points
@@ -25,14 +50,14 @@ class PointTextures:
     def PointImage(self) -> int:
         if PointTextures.__pointImage is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__pointImage is not None
         return PointTextures.__pointImage
 
     @property
     def SelectedPointImage(self) -> int:
         if PointTextures.__selectedPointImage is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointImage is not None
         return PointTextures.__selectedPointImage
 
     @property
@@ -41,37 +66,37 @@ class PointTextures:
         A texture array, with 0 being the unselected texture and 1 the selected texture
         :return:
         """
+        assert self.__point_array is not None
         return self.__point_array
 
     @property
     def SelectedPointSpriteOn(self) -> int:
         if PointTextures.__selectedPointSpriteOn is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointSpriteOn is not None
         return PointTextures.__selectedPointSpriteOn
 
     @property
     def SelectedPointSpriteOff(self) -> int:
         if PointTextures.__selectedPointSpriteOff is None:
             PointTextures.LoadTextures()
-
+        assert PointTextures.__selectedPointSpriteOff is not None
         return PointTextures.__selectedPointSpriteOff
 
     @classmethod
     def LoadTextures(cls):
         if not cls.__initialized:
-            image_path = os.path.join(pyre.resource_paths.ResourcePath(), "Point.png")
-            point_image = nornir_imageregistration.LoadImage(image_path)
+            res = pyre.resource_paths.ResourcePath()
+            point_image = _load_point_image(os.path.join(res, "Point.png"))
             cls.__pointImage = pyre.gl_engine.create_rgba_texture(point_image)
 
-            selected_image_path = os.path.join(pyre.resource_paths.ResourcePath(), "SelectedPoint.png")
-            selected_image = nornir_imageregistration.LoadImage(selected_image_path)
+            selected_image = _load_point_image(os.path.join(res, "SelectedPoint.png"))
             cls.__selectedPointImage = pyre.gl_engine.create_rgba_texture(selected_image)
 
             cls.__selectedPointSpriteOn = cls.__selectedPointImage
             cls.__selectedPointSpriteOff = cls.__pointImage
 
-            array_image = np.array([point_image, selected_image])
+            array_image = np.array([point_image, selected_image], dtype=np.uint8)
             cls.__point_array = pyre.gl_engine.create_rgba_texture_array(array_image)
 
             cls.__initialized = True

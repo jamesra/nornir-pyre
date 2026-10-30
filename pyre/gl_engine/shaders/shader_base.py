@@ -1,9 +1,10 @@
 from abc import ABC
+from collections.abc import Callable
 
 from OpenGL import GL as gl
 from OpenGL.GL import shaders as glshaders
 
-from pyre.gl_engine.helpers import check_for_error
+from pyre.gl_engine.helpers import check_for_error, delete_gl_object_on_teardown
 from pyre.gl_engine.vertexarraylayout import VertexArrayLayout
 
 
@@ -22,7 +23,7 @@ def bind_texture(texture: int, texture_location: int, gl_texture: int = gl.GL_TE
     check_for_error()
 
     # Assign the sampler to the texture we just bound
-    offset = gl_texture - gl.GL_TEXTURE0
+    offset = gl_texture - gl.GL_TEXTURE0  # type: ignore[operator]
     gl.glUniform1i(texture_location, offset)
     check_for_error()
 
@@ -34,6 +35,7 @@ class VertexShader:
 
     @property
     def shader(self) -> int:
+        assert self._shader is not None
         return self._shader
 
     def __init__(self, vertex_shader_program: str):
@@ -46,7 +48,10 @@ class VertexShader:
 
     def __del__(self):
         if self._shader is not None:
-            gl.glDeleteShader(self._shader)
+            shader = self._shader
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteShader(shader), f"vertex shader {shader}")
+            self._shader = None
 
 
 class FragmentShader:
@@ -56,6 +61,7 @@ class FragmentShader:
 
     @property
     def shader(self) -> int:
+        assert self._shader is not None
         return self._shader
 
     def __init__(self, vertex_shader_program: str):
@@ -68,16 +74,35 @@ class FragmentShader:
 
     def __del__(self):
         if self._shader is not None:
-            gl.glDeleteShader(self._shader)
+            shader = self._shader
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteShader(shader), f"fragment shader {shader}")
+            self._shader = None
 
 
 class BaseShader(ABC):
-    """Shared code for shaders."""
+    """Shared code for shaders.
+
+    A program is compiled once and reused from every STOS panel, with its attrib and
+    uniform locations cached alongside it. That is valid because shaders, programs, buffers
+    and textures are *shared* objects: while ``AA_ShareOpenGLContexts`` is enabled (set in
+    launcher.main_qt before the QApplication is built) a name from one context refers to the
+    same object in every other, and locations are properties of the shared program.
+
+    VAOs and framebuffers are container objects, which the OpenGL specification excludes
+    from sharing, so those are tracked per context instead -- see ContextAwareVAOHelper.
+    The difference between the two is that distinction, not an inconsistency.
+    """
     _vertex_shader: VertexShader
     _fragment_shader: FragmentShader
     _program: int | None = None
 
     _vertex_layout: VertexArrayLayout
+
+    @property
+    def initialized(self) -> bool:
+        """True after initialize_gl_objects() has linked the GL program."""
+        return self._program is not None
 
     def initialize_gl_objects(self):
         """Compile the shaders and programs.  Override for different behavior"""
@@ -100,6 +125,32 @@ class BaseShader(ABC):
 
         return self._program
 
+    def _cached_attrib_location(self, cache_attr: str, name: str,
+                                message: str = "Could not find attribute") -> int:
+        """Return the vertex attribute location ``name``, querying GL once and caching it in ``cache_attr``."""
+        return self._cached_location(cache_attr, gl.glGetAttribLocation, name, message)
+
+    def _cached_uniform_location(self, cache_attr: str, name: str,
+                                 message: str = "Could not find attribute") -> int:
+        """Return the uniform location ``name``, querying GL once and caching it in ``cache_attr``."""
+        return self._cached_location(cache_attr, gl.glGetUniformLocation, name, message)
+
+    def _cached_location(self, cache_attr: str, query: Callable[[int, str], int], name: str,
+                         message: str) -> int:
+        """Shared body of the lazy location properties.
+
+        The result is cached before the -1 check, so a missing name raises ValueError(message)
+        on the first access only and later accesses return the cached -1.  ``self.program`` is
+        read only on a cache miss (OverlayShader clears its caches from there on a context switch).
+        """
+        location = getattr(self, cache_attr)
+        if location is None:
+            location = query(self.program, name)
+            setattr(self, cache_attr, location)
+            if location == -1:
+                raise ValueError(message)
+        return location
+
     @property
     def vertex_shader(self) -> VertexShader:
         if self._vertex_shader is None:
@@ -116,4 +167,7 @@ class BaseShader(ABC):
 
     def __del__(self):
         if self._program is not None:
-            gl.glDeleteProgram(self._program)
+            program = self._program
+            delete_gl_object_on_teardown(
+                lambda: gl.glDeleteProgram(program), f"shader program {program}")
+            self._program = None

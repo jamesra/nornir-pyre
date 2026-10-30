@@ -13,27 +13,31 @@ class MosaicView(imagetransformview.ImageTransformView):
 
     @property
     def width(self):
-        if self.FixedImageArray is None:
+        fixed = self.FixedImageArray  # type: ignore[attr-defined]
+        if fixed is None:
             return None
-        return self.FixedImageArray.width
+        return fixed.width
 
     @property
     def height(self):
-        if self.FixedImageArray is None:
+        fixed = self.FixedImageArray  # type: ignore[attr-defined]
+        if fixed is None:
             return None
-        return self.FixedImageArray.height
+        return fixed.height
 
     @property
     def fixedwidth(self):
-        if self.FixedImageArray is None:
+        fixed = self.FixedImageArray  # type: ignore[attr-defined]
+        if fixed is None:
             return None
-        return self.FixedImageArray.width
+        return fixed.width
 
     @property
     def fixedheight(self):
-        if self.FixedImageArray is None:
+        fixed = self.FixedImageArray  # type: ignore[attr-defined]
+        if fixed is None:
             return None
-        return self.FixedImageArray.height
+        return fixed.height
 
     @property
     def Tiles(self):
@@ -47,5 +51,5 @@ class MosaicView(imagetransformview.ImageTransformView):
         '''
         Constructor
         '''
-        super(imagegridtransformview.ImageTransformView, self).__init__()
+        super(imagetransformview.ImageTransformView, self).__init__()
         self._tiles = {}

@@ -1,0 +1,358 @@
+"""Headless tests for STOS Manual override path helpers."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+
+_PYRE_ROOT = Path(__file__).resolve().parents[1]
+_PYRE_PACKAGE = _PYRE_ROOT / "pyre"
+
+
+def _load_stos_manual_paths_module():
+    """Load stos_manual_paths without importing pyre package __init__ (Qt/OpenGL)."""
+    if "pyre" not in sys.modules:
+        stub = types.ModuleType("pyre")
+        stub.__path__ = [str(_PYRE_PACKAGE)]
+        sys.modules["pyre"] = stub
+
+    spec = importlib.util.spec_from_file_location(
+        "pyre.stos_manual_paths",
+        _PYRE_PACKAGE / "stos_manual_paths.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["pyre.stos_manual_paths"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_smp = _load_stos_manual_paths_module()
+BrowseMode = _smp.BrowseMode
+ensure_manual_directory = _smp.ensure_manual_directory
+is_manual_input_directory = _smp.is_manual_input_directory
+manual_directory = _smp.manual_directory
+parent_stos_group_folder = _smp.parent_stos_group_folder
+path_to_input_transform = _smp.path_to_input_transform
+path_to_manual_transform = _smp.path_to_manual_transform
+resolve_default_load_path = _smp.resolve_default_load_path
+resolve_load_path = _smp.resolve_load_path
+resolve_stos_path_in_group = _smp.resolve_stos_path_in_group
+resolve_stos_restore_path = _smp.resolve_stos_restore_path
+refresh_browser_row = _smp.refresh_browser_row
+expected_stos_path_for_source = _smp.expected_stos_path_for_source
+StosBrowserRow = _smp.StosBrowserRow
+StosFileSource = _smp.StosFileSource
+scan_stos_browser_rows = _smp.scan_stos_browser_rows
+
+
+class TestManualDirectoryHelpers(unittest.TestCase):
+    def test_manual_directory_and_ensure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manual = ensure_manual_directory(tmp)
+            self.assertEqual(manual, os.path.join(tmp, "Manual"))
+            self.assertTrue(os.path.isdir(manual))
+
+    def test_path_to_manual_transform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manual = ensure_manual_directory(tmp)
+            stos_path = os.path.join(manual, "33-34.stos")
+            with open(stos_path, "w", encoding="utf-8") as handle:
+                handle.write("x")
+            found = path_to_manual_transform(tmp, "33-34.stos")
+            self.assertEqual(found, stos_path)
+            self.assertIsNone(path_to_manual_transform(tmp, "missing.stos"))
+
+    def test_path_to_input_transform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            automatic = os.path.join(tmp, "Automatic")
+            os.makedirs(automatic)
+            stos_path = os.path.join(automatic, "33-34.stos")
+            with open(stos_path, "w", encoding="utf-8") as handle:
+                handle.write("x")
+            found = path_to_input_transform(tmp, "33-34.stos")
+            self.assertEqual(found, stos_path)
+            self.assertIsNone(path_to_input_transform(tmp, "missing.stos"))
+
+    def test_is_manual_input_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manual = os.path.join(tmp, "Manual")
+            os.makedirs(manual)
+            self.assertTrue(is_manual_input_directory(manual))
+            self.assertFalse(is_manual_input_directory(tmp))
+
+    def test_parent_stos_group_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            group = os.path.join(tmp, "Grid32")
+            manual = os.path.join(group, "Manual")
+            os.makedirs(manual)
+            self.assertEqual(parent_stos_group_folder(manual), group)
+
+
+class TestResolveDefaultLoadPath(unittest.TestCase):
+    def test_prefers_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            os.makedirs(os.path.dirname(manual), exist_ok=True)
+            open(auto, "w", encoding="utf-8").close()
+            open(manual, "w", encoding="utf-8").close()
+            self.assertEqual(resolve_default_load_path(auto, manual), manual)
+
+    def test_falls_back_to_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            open(auto, "w", encoding="utf-8").close()
+            self.assertEqual(resolve_default_load_path(auto, None), auto)
+
+
+class TestResolveLoadPath(unittest.TestCase):
+    def _touch(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("stub")
+
+    def test_auto_prefers_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(auto)
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.auto),
+                manual,
+            )
+
+    def test_original_uses_auto_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(auto)
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.original),
+                auto,
+            )
+
+    def test_manual_uses_manual_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(auto)
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.manual),
+                manual,
+            )
+
+    def test_manual_missing_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            self._touch(auto)
+            self.assertIsNone(resolve_load_path(auto, None, StosFileSource.manual))
+
+    def test_auto_with_manual_only_returns_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(None, manual, StosFileSource.auto),
+                manual,
+            )
+            self.assertIsNone(resolve_load_path(None, manual, StosFileSource.original))
+
+    def test_input_uses_automatic_folder_not_group_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            auto = os.path.join(tmp, "a.stos")
+            input_stos = os.path.join(tmp, "Automatic", "a.stos")
+            manual = os.path.join(tmp, "Manual", "a.stos")
+            self._touch(auto)
+            self._touch(input_stos)
+            self._touch(manual)
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.input, input_path=input_stos),
+                input_stos,
+            )
+            self.assertEqual(
+                resolve_load_path(auto, manual, StosFileSource.original, input_path=input_stos),
+                auto,
+            )
+            self.assertIsNone(resolve_load_path(auto, manual, StosFileSource.input))
+
+
+class TestResolveStosRestorePath(unittest.TestCase):
+    def _touch(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("stub")
+
+    def test_startup_auto_prefers_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            basename = "10-11.stos"
+            auto = os.path.join(tmp, basename)
+            manual = os.path.join(tmp, "Manual", basename)
+            self._touch(auto)
+            self._touch(manual)
+            resolved = resolve_stos_restore_path(
+                auto,
+                stos_group_folder=tmp,
+                stos_browser_basename=basename,
+                stos_file_source="auto",
+                flat_manual=False,
+            )
+            self.assertEqual(resolved, manual)
+
+    def test_startup_input_restores_automatic_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            basename = "10-11.stos"
+            auto = os.path.join(tmp, basename)
+            input_stos = os.path.join(tmp, "Automatic", basename)
+            self._touch(auto)
+            self._touch(input_stos)
+            resolved = resolve_stos_restore_path(
+                auto,
+                stos_group_folder=tmp,
+                stos_browser_basename=basename,
+                stos_file_source="input",
+                flat_manual=False,
+            )
+            self.assertEqual(resolved, input_stos)
+
+
+class TestScanStosBrowserRows(unittest.TestCase):
+    def _touch(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("stub")
+
+    def test_group_mode_merges_auto_and_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._touch(os.path.join(tmp, "10-11.stos"))
+            self._touch(os.path.join(tmp, "Manual", "10-11.stos"))
+            self._touch(os.path.join(tmp, "20-21.stos"))
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 2)
+            by_name = {row.basename: row for row in rows}
+            merged = by_name["10-11.stos"]
+            self.assertTrue(merged.has_manual_override)
+            self.assertEqual(merged.default_load_path, merged.manual_path)
+            self.assertIsNotNone(by_name["20-21.stos"].auto_path)
+
+    def test_group_mode_merges_automatic_input(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "945-943.stos")
+            automatic = os.path.join(tmp, "Automatic", "945-943.stos")
+            self._touch(output)
+            self._touch(automatic)
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row.auto_path, output)
+            self.assertEqual(row.input_path, automatic)
+            self.assertTrue(row.has_input_transform)
+            self.assertEqual(
+                row.load_path_for_source(StosFileSource.input),
+                automatic,
+            )
+            self.assertEqual(
+                row.load_path_for_source(StosFileSource.original),
+                output,
+            )
+
+    def test_group_mode_input_only_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            automatic = os.path.join(tmp, "Automatic", "05-06.stos")
+            self._touch(automatic)
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0].auto_path)
+            self.assertEqual(rows[0].input_path, automatic)
+            self.assertTrue(rows[0].has_input_transform)
+
+    def test_group_mode_manual_only_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._touch(os.path.join(tmp, "Manual", "05-06.stos"))
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            self.assertIsNone(rows[0].auto_path)
+            self.assertTrue(rows[0].has_manual_override)
+            self.assertTrue(rows[0].is_manual_only)
+            self.assertEqual(rows[0].default_load_path, rows[0].manual_path)
+
+    def test_group_mode_manual_override_not_manual_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._touch(os.path.join(tmp, "10-11.stos"))
+            self._touch(os.path.join(tmp, "Manual", "10-11.stos"))
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0].has_manual_override)
+            self.assertFalse(rows[0].is_manual_only)
+
+    def test_flat_manual_mode_no_nested_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manual_root = os.path.join(tmp, "Grid32", "Manual")
+            self._touch(os.path.join(manual_root, "01-02.stos"))
+            os.makedirs(os.path.join(manual_root, "Manual"), exist_ok=True)
+            self._touch(os.path.join(manual_root, "Manual", "nested.stos"))
+            rows = scan_stos_browser_rows(manual_root, BrowseMode.flat_manual)
+            names = {row.basename for row in rows}
+            self.assertEqual(names, {"01-02.stos"})
+            self.assertIsNone(rows[0].auto_path)
+
+    def test_sort_order_by_section_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._touch(os.path.join(tmp, "100-101.stos"))
+            self._touch(os.path.join(tmp, "02-03.stos"))
+            rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual([row.basename for row in rows], ["02-03.stos", "100-101.stos"])
+
+
+class TestRefreshBrowserRow(unittest.TestCase):
+    def _touch(self, path: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("stub")
+
+    def test_picks_up_output_created_after_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            basename = "1133-1130.stos"
+            input_stos = os.path.join(tmp, "Automatic", basename)
+            output = os.path.join(tmp, basename)
+            self._touch(input_stos)
+            stale = StosBrowserRow(
+                basename=basename, auto_path=None, manual_path=None, input_path=input_stos)
+            self.assertIsNone(stale.load_path_for_source(StosFileSource.original))
+            self._touch(output)
+            refreshed = refresh_browser_row(tmp, stale, BrowseMode.stos_group)
+            self.assertEqual(refreshed.auto_path, output)
+            self.assertEqual(refreshed.input_path, input_stos)
+            self.assertEqual(
+                refreshed.load_path_for_source(StosFileSource.original), output)
+
+    def test_keeps_cached_path_when_folder_does_not_contain_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cached = os.path.join(tmp, "elsewhere.stos")
+            self._touch(cached)
+            row = StosBrowserRow(
+                basename="elsewhere.stos", auto_path=cached, manual_path=None)
+            refreshed = refresh_browser_row("/no/such/group", row, BrowseMode.stos_group)
+            self.assertEqual(refreshed.auto_path, cached)
+
+    def test_expected_original_path(self) -> None:
+        expected = expected_stos_path_for_source(
+            r"Y:\Volumes\RC2\TEM\Grid16",
+            "1133-1130.stos",
+            StosFileSource.original,
+        )
+        self.assertEqual(
+            expected,
+            os.path.join(r"Y:\Volumes\RC2\TEM\Grid16", "1133-1130.stos"))
+
+
+if __name__ == "__main__":
+    unittest.main()

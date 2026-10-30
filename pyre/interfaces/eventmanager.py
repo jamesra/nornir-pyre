@@ -7,7 +7,7 @@ from typing import Callable, Generic, TypeVar
 EventCallbackType = TypeVar('EventCallbackType', bound=Callable)
 
 
-class IEventManager(ABC, Generic[EventCallbackType]):
+class IEventManager(Generic[EventCallbackType]):
     """Interface for an event manager"""
 
     @abc.abstractmethod

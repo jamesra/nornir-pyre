@@ -1,0 +1,262 @@
+"""Tabbed dialog for editing per-transform registration defaults in AppSettings."""
+
+from __future__ import annotations
+
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from nornir_imageregistration.settings import SliceToSliceMethod
+from nornir_imageregistration.settings.stos_brute import StosBruteSettings
+
+from pyre.settings.app import (
+    AngleSearchRange,
+    AppSettings,
+    GridRefineDefaults,
+    PointRegistrationSettings,
+    UISettings,
+)
+from pyre.settings.persistence import save_app_settings
+
+
+class TransformsSettingsDialog(QDialog):
+    """Edit Rigid, Grid, and Point/Mesh registration defaults on AppSettings."""
+
+    _CELL_SIZES: list[int] = [256, 512, 1024]
+    _CELL_SPACINGS: list[int] = [128, 192, 256, 384, 512, 768]
+    _ALIGNMENT_AREAS: list[int] = [64, 128, 256, 512]
+
+    def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._settings = settings
+        self.setWindowTitle("Transform Settings")
+        self.setMinimumWidth(420)
+
+        tabs = QTabWidget(self)
+        tabs.addTab(self._build_rigid_tab(settings.stos.brute_registration), "Rigid")
+        tabs.addTab(self._build_grid_tab(settings.stos.grid_refine), "Grid")
+        tabs.addTab(self._build_point_tab(settings.stos.point_registration), "Point / Mesh")
+        tabs.addTab(self._build_debug_tab(settings.ui), "Debug")
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(tabs)
+        layout.addWidget(buttons)
+
+    def _build_rigid_tab(self, brute: StosBruteSettings) -> QWidget:
+        """Build controls for stos.brute_registration."""
+        page = QWidget(self)
+        form = QFormLayout(page)
+
+        self._try_flipped = QCheckBox("Check for flipped sections", page)
+        self._try_flipped.setChecked(bool(brute.try_flipped))
+        form.addRow(self._try_flipped)
+
+        self._method = QComboBox(page)
+        self._method.addItem("Log Polar", SliceToSliceMethod.LogPolar)
+        self._method.addItem("Brute Force", SliceToSliceMethod.BruteForce)
+        method_index = 0 if brute.method == SliceToSliceMethod.LogPolar else 1
+        self._method.setCurrentIndex(method_index)
+        form.addRow("Default method", self._method)
+
+        self._min_overlap = QDoubleSpinBox(page)
+        self._min_overlap.setRange(0.05, 1.0)
+        self._min_overlap.setSingleStep(0.05)
+        self._min_overlap.setDecimals(2)
+        self._min_overlap.setValue(float(brute.min_overlap))
+        form.addRow("Min overlap", self._min_overlap)
+
+        self._largest_dimension = QSpinBox(page)
+        self._largest_dimension.setRange(64, 8192)
+        self._largest_dimension.setSingleStep(64)
+        largest = brute.larget_dimension if brute.larget_dimension is not None else 1024
+        self._largest_dimension.setValue(int(largest))
+        form.addRow("Largest dimension", self._largest_dimension)
+
+        return page
+
+    def _build_grid_tab(self, defaults: GridRefineDefaults) -> QWidget:
+        """Build controls for stos.grid_refine."""
+        page = QWidget(self)
+        form = QFormLayout(page)
+
+        self._cell_size = QComboBox(page)
+        for size in self._CELL_SIZES:
+            self._cell_size.addItem(str(size))
+        self._set_combo_value(self._cell_size, defaults.cell_size)
+
+        self._grid_spacing = QComboBox(page)
+        for spacing in self._CELL_SPACINGS:
+            self._grid_spacing.addItem(str(spacing))
+        self._set_combo_value(self._grid_spacing, defaults.grid_spacing)
+
+        self._num_iterations = QSpinBox(page)
+        self._num_iterations.setMinimum(2)
+        self._num_iterations.setMaximum(100)
+        self._num_iterations.setValue(defaults.num_iterations)
+
+        self._grid_max_angle = QDoubleSpinBox(page)
+        self._grid_max_angle.setRange(0.0, 180.0)
+        self._grid_max_angle.setSingleStep(2.0)
+        self._grid_max_angle.setValue(defaults.max_angle)
+
+        self._grid_angle_step = QDoubleSpinBox(page)
+        self._grid_angle_step.setRange(0.5, 180.0)
+        self._grid_angle_step.setSingleStep(0.5)
+        self._grid_angle_step.setValue(defaults.angle_step_size)
+
+        self._preview_pass_transforms = QCheckBox(page)
+        self._preview_pass_transforms.setChecked(bool(defaults.preview_pass_transforms))
+        self._preview_pass_transforms.setToolTip(
+            "Update the view after each refine pass. Off by default because "
+            "resampling the mesh onto the STOS grid is expensive.")
+
+        self._gpu_preview_grid_convert = QCheckBox(page)
+        self._gpu_preview_grid_convert.setChecked(bool(defaults.gpu_preview_grid_convert))
+        self._gpu_preview_grid_convert.setToolTip(
+            "Use the GPU when converting pass previews to a grid. Has no effect "
+            "unless pass previews are on. The final result is always converted.")
+        self._gpu_preview_grid_convert.setEnabled(
+            self._preview_pass_transforms.isChecked())
+        self._preview_pass_transforms.toggled.connect(
+            self._gpu_preview_grid_convert.setEnabled)
+
+        self._masked_relax_min_unmasked = QDoubleSpinBox(page)
+        self._masked_relax_min_unmasked.setRange(0.0, 100.0)
+        self._masked_relax_min_unmasked.setSingleStep(5.0)
+        self._masked_relax_min_unmasked.setDecimals(0)
+        self._masked_relax_min_unmasked.setSuffix("%")
+        self._masked_relax_min_unmasked.setValue(
+            float(defaults.masked_relax_min_unmasked) * 100.0)
+        self._masked_relax_min_unmasked.setToolTip(
+            "Grid control points with at least this much unmasked tissue in both "
+            "source and target cells stay fixed. Masked neighbors relax toward them "
+            "after a point is moved or registered.")
+
+        form.addRow("Cell size", self._cell_size)
+        form.addRow("Grid spacing", self._grid_spacing)
+        form.addRow("Maximum passes", self._num_iterations)
+        form.addRow("Max angle (± degrees)", self._grid_max_angle)
+        form.addRow("Angle step (degrees)", self._grid_angle_step)
+        form.addRow("Preview pass transforms", self._preview_pass_transforms)
+        form.addRow("GPU preview grid convert", self._gpu_preview_grid_convert)
+        form.addRow("Min unmasked to pin", self._masked_relax_min_unmasked)
+        return page
+
+    def _build_point_tab(self, point: PointRegistrationSettings) -> QWidget:
+        """Build controls for stos.point_registration."""
+        page = QWidget(self)
+        form = QFormLayout(page)
+
+        self._alignment_area = QComboBox(page)
+        for size in self._ALIGNMENT_AREAS:
+            self._alignment_area.addItem(str(size))
+        self._set_combo_value(self._alignment_area, point.alignment_area)
+
+        angle = point.angle_search_range
+        self._point_max_angle = QDoubleSpinBox(page)
+        self._point_max_angle.setRange(0.0, 180.0)
+        self._point_max_angle.setSingleStep(1.0)
+        self._point_max_angle.setValue(float(angle.max_angle))
+
+        self._point_angle_step = QDoubleSpinBox(page)
+        self._point_angle_step.setRange(0.5, 180.0)
+        self._point_angle_step.setSingleStep(0.5)
+        self._point_angle_step.setValue(float(angle.angle_step_size))
+
+        self._point_estimate_angle = QCheckBox(page)
+        self._point_estimate_angle.setChecked(bool(point.estimate_angle))
+        self._point_estimate_angle.setToolTip(
+            "Add a log-polar angle estimate to the angles searched above.")
+
+        self._show_mesh_lines = QCheckBox(page)
+        self._show_mesh_lines.setChecked(bool(self._settings.ui.show_mesh_lines))
+        self._show_mesh_lines.setToolTip(
+            "Show mesh/grid triangulation lines and control point glyphs "
+            "on the Source and Target image panels.")
+
+        form.addRow("Alignment area", self._alignment_area)
+        form.addRow("Max angle (± degrees)", self._point_max_angle)
+        form.addRow("Angle step (degrees)", self._point_angle_step)
+        form.addRow("Estimate angle", self._point_estimate_angle)
+        form.addRow("Show mesh lines", self._show_mesh_lines)
+        return page
+
+    def _build_debug_tab(self, ui: UISettings) -> QWidget:
+        """Build controls for ui debug/diagnostic display options."""
+        page = QWidget(self)
+        form = QFormLayout(page)
+
+        self._show_control_point_ids = QCheckBox(page)
+        self._show_control_point_ids.setChecked(bool(ui.show_control_point_ids))
+        self._show_control_point_ids.setToolTip(
+            "Draw each control point's session ID next to its glyph in the Source "
+            "and Target image windows, to confirm which point on screen is which.")
+        form.addRow("Show control point IDs", self._show_control_point_ids)
+        return page
+
+    @staticmethod
+    def _set_combo_value(combo: QComboBox, value: int) -> None:
+        """Select *value* in *combo*, inserting it when missing."""
+        text = str(value)
+        index = combo.findText(text)
+        if index < 0:
+            combo.addItem(text)
+            index = combo.findText(text)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def apply_to_settings(self) -> None:
+        """Write dialog values into the live AppSettings object."""
+        brute = self._settings.stos.brute_registration
+        brute.try_flipped = self._try_flipped.isChecked()
+        brute.method = self._method.currentData()
+        brute.min_overlap = float(self._min_overlap.value())
+        brute.larget_dimension = int(self._largest_dimension.value())
+
+        self._settings.stos.grid_refine = GridRefineDefaults(
+            cell_size=int(self._cell_size.currentText()),
+            grid_spacing=int(self._grid_spacing.currentText()),
+            num_iterations=int(self._num_iterations.value()),
+            max_angle=float(self._grid_max_angle.value()),
+            angle_step_size=float(self._grid_angle_step.value()),
+            preview_pass_transforms=self._preview_pass_transforms.isChecked(),
+            gpu_preview_grid_convert=self._gpu_preview_grid_convert.isChecked(),
+            masked_relax_min_unmasked=float(self._masked_relax_min_unmasked.value()) / 100.0,
+        )
+
+        self._settings.stos.point_registration = PointRegistrationSettings(
+            alignment_area=int(self._alignment_area.currentText()),
+            angle_search_range=AngleSearchRange(
+                max_angle=float(self._point_max_angle.value()),
+                angle_step_size=float(self._point_angle_step.value()),
+            ),
+            estimate_angle=self._point_estimate_angle.isChecked(),
+        )
+
+        self._settings.ui.show_control_point_ids = self._show_control_point_ids.isChecked()
+        self._settings.ui.show_mesh_lines = self._show_mesh_lines.isChecked()
+
+    @staticmethod
+    def edit_settings(settings: AppSettings, parent: QWidget | None = None) -> bool:
+        """Show the dialog; return True if the user accepted and settings were applied."""
+        dlg = TransformsSettingsDialog(settings, parent)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        dlg.apply_to_settings()
+        save_app_settings(settings)
+        return True

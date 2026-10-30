@@ -24,8 +24,8 @@ class AngleSearchRange(BaseModel):
         return AngleSearchRange(max_angle=0, angle_step_size=1)
 
     @property
-    def angle_range(self) -> NDArray[float]:
-        angles = np.arange(start=-self.max_angle,
+    def angle_range(self) -> NDArray[np.floating]:
+        angles = np.arange(-self.max_angle,
                            stop=self.max_angle + self.angle_step_size,
                            step=self.angle_step_size)  # numpy.linspace(-7.5, 7.5, 11)
         angles = np.union1d(angles, [0])
@@ -38,23 +38,50 @@ class AngleSearchRange(BaseModel):
 class PointRegistrationSettings(BaseModel):
     alignment_area: int = 128
     angle_search_range: AngleSearchRange = AngleSearchRange.zero()  # field(default_factory=AngleSearchRange)
+    # When True a log-polar estimate appends an angle to angle_search_range, so the
+    # search is no longer limited to the angles configured above. Off by default:
+    # single-point registration must search only the angles configured here.
+    estimate_angle: bool = False
 
-    def __init__(self, alignment_area: int = 256, angle_search_range: AngleSearchRange = AngleSearchRange.zero()):
-        super().__init__(alignment_area=alignment_area, angle_search_range=angle_search_range)
+    def __init__(self, alignment_area: int = 256, angle_search_range: AngleSearchRange = AngleSearchRange.zero(),
+                 estimate_angle: bool = False):
+        super().__init__(alignment_area=alignment_area, angle_search_range=angle_search_range,
+                         estimate_angle=estimate_angle)
 
     @property
-    def alignment_area_shape(self) -> NDArray[int]:
+    def alignment_area_shape(self) -> NDArray[np.integer]:
         side = self.alignment_area
         return np.array([side, side], dtype=np.int32)
 
     @property
-    def angles_to_search(self) -> NDArray[float]:
+    def angles_to_search(self) -> NDArray[np.floating]:
         return self.angle_search_range.angle_range
 
 
 class ImageAndMaskPath(BaseModel):
     image_fullpath: str  # Full path to the image or None if it doesn't exist
     mask_fullpath: str | None  # Full path to the mask or None if it doesn't exist
+
+
+class GridRefineDefaults(BaseModel):
+    """Persisted defaults for Convert to refined grid."""
+
+    cell_size: int = 256
+    grid_spacing: int = 192
+    num_iterations: int = 5
+    max_angle: float = 0.0
+    angle_step_size: float = 3.0
+    # Off: skip per-pass UI updates (ConvertTransformToGridTransform is expensive).
+    preview_pass_transforms: bool = False
+    # Off: CPU convert when pass previews are on. Final result is still converted.
+    gpu_preview_grid_convert: bool = False
+    # Min unmasked fraction (source AND target cell) to pin a grid point during
+    # masked-neighbor spring relaxation. Default 25%.
+    masked_relax_min_unmasked: float = 0.25
+
+    def to_angle_search_range(self) -> AngleSearchRange:
+        """Build an AngleSearchRange from the stored angle fields."""
+        return AngleSearchRange(max_angle=self.max_angle, angle_step_size=self.angle_step_size)
 
 
 class StosSettings(BaseModel):
@@ -66,8 +93,13 @@ class StosSettings(BaseModel):
     brute_registration: StosBruteSettings = StosBruteSettings(
         method=nornir_imageregistration.settings.SliceToSliceMethod.LogPolar)  # field(default_factory=StosBruteSettings)
     point_registration: PointRegistrationSettings = PointRegistrationSettings()  # Used when the user selects a single point to register
+    grid_refine: GridRefineDefaults = GridRefineDefaults()
     source_image: ImageAndMaskPath | None = None  # The last source image loaded by the user
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
+    stos_opened_from_browser_folder: str | None = None
+    stos_browser_flat_manual: bool = False
+    stos_file_source: str = "auto"
+    stos_browser_basename: str | None = None
 
     @property
     def stos_fullpath(self) -> str | None:
@@ -82,12 +114,36 @@ class FloatRange(BaseModel):
     min: float
 
 
+class WindowGeometry(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+    visible: bool = True
+
+
+class ImageDisplayContrast(BaseModel):
+    """Per-image display/registration levels (texture units 0–255)."""
+
+    min: float = 0.0
+    max: float = 255.0
+    gamma: float = 1.0
+
+
 class UISettings(BaseModel):
     zoom_limits: FloatRange = FloatRange(min=0.00390625, max=16)  # Maximum and minimum zoom levels
     control_point_search_radius: float = 10.0  # Radius in pixels to search for control points
+    # Draws each control point's session ID next to its glyph in the Source/Target image
+    # windows. A debug aid for confirming which point is which without hover-guessing.
+    show_control_point_ids: bool = False
+    show_mesh_lines: bool = False
     image_search_paths: list[str] = []  # field(default_factory=list)  # Paths to search for images
     replacement_paths: dict[
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files
+    stos_browser_folder: str | None = None  # Last folder opened in the Stos File Browser
+    window_geometry: dict[str, WindowGeometry] = {}
+    source_contrast: ImageDisplayContrast = ImageDisplayContrast()
+    target_contrast: ImageDisplayContrast = ImageDisplayContrast()
 
 
 class AppSettings(BaseModel):
@@ -96,3 +152,4 @@ class AppSettings(BaseModel):
 
     ui: UISettings = UISettings()  # field(default_factory=UISettings)
     stos: StosSettings = StosSettings()  # field(default_factory=StosSettings)
+

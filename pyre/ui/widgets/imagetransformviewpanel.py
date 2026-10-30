@@ -5,40 +5,94 @@ Created on Oct 16, 2012
 """
 from __future__ import annotations
 from dataclasses import dataclass
+import time
 import warnings
+
+import PyQt6.QtGui
 import numpy as np
+from numpy.typing import NDArray
 
 import OpenGL.GL as gl
-import wx
+from PyQt6.QtWidgets import QWidget, QLabel
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QWheelEvent, QMouseEvent, QResizeEvent
 
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 from dependency_injector.providers import Factory, Dict
 import nornir_imageregistration
 from nornir_imageregistration import ITransform
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces import ControlPointAction
 
 from pyre.observable import ObservableSet
 from pyre.interfaces.action import Action
 from pyre.interfaces.managers import ICommandQueue, IGLContextManager
 from pyre.interfaces.managers.image_viewmodel_manager import IImageViewModelManager
-from pyre.interfaces.managers.transformcontroller_glbuffer_manager import ITransformControllerGLBufferManager, \
+from pyre.interfaces.managers.transform_controller_glbuffer_manager import ITransformControllerGLBufferManager, \
     BufferType
 import pyre.interfaces.managers.gl_context_manager
 from pyre.settings import AppSettings
 from pyre.space import Space
-from pyre.state import ViewType
 from pyre.state.managers.command_queue import CommandQueue
 
+from pyre.ui.escape_claim import EscapeClaimFilter
 from pyre.ui.widgets import imagetransformpanelbase
 from pyre.controllers.transformcontroller import TransformController
+from pyre.gl_engine import FrameBuffer
+from pyre.gl_engine.framebuffer import blit_framebuffer_color
 from pyre.views import (ClearDrawTextureState, CompositeTransformView, PointView, ImageTransformView,
                         SetDrawTextureState)
 from pyre.views.interfaces import IImageTransformView
 from pyre.container import IContainer
 from nornir_imageregistration.transforms.transform_type import TransformType
 from pyre.interfaces.viewtype import ViewType
-from pyre.views.transformcontrollerview import BinarySelectionMapper, TransformControllerView
+from pyre.views.transformcontrollerview import (
+    BinarySelectionMapper,
+    TransformControllerView,
+    selected_blink_phase,
+)
+from pyre.viewmodels.controlpointmap import ControlPointMap
+from pyre.transform_edit_policy import source_panel_hint_message, rigid_rotation_locked
+from pyre.views.composite_display import (
+    camera_lookat_from_target_space,
+    composite_control_point_draw_rows,
+    composite_legend_rich_text,
+    display_lookat_for_composite,
+    rebase_composite_camera_to_display,
+    resolve_composite_display_draw_params,
+)
+from pyre.views.registration_roi_overlay import (
+    RegistrationRoiFadeTracker,
+    draw_registration_roi_overlays,
+    phase_correlation_roi_overlays,
+    should_draw_registration_roi,
+)
+
+
+GLYPH_TIMER_IDLE_MS = 100
+# While a registration is in flight: 5 Hz. Selected blink is wall-clock 2 Hz;
+# the busy comet is 1 rev/s (5 samples/rev). 33 ms was smoother spin, not blink.
+GLYPH_TIMER_REGISTRATION_MS = 200
+
+
+def glyph_timer_interval_ms(*, point_queue_busy: bool, job_busy: bool) -> int:
+    """Return the glyph-paint interval; slower while any registration is running."""
+    if point_queue_busy or job_busy:
+        return GLYPH_TIMER_REGISTRATION_MS
+    return GLYPH_TIMER_IDLE_MS
+
+
+def glyph_timer_needs_paint(*, has_selection: bool, blink_phase_changed: bool,
+                            point_queue_busy: bool, job_busy: bool) -> bool:
+    """True when a glyph-timer tick would change what the panel shows.
+
+    The busy comet and running jobs animate on every tick. A selection only needs a
+    paint when its blink phase has flipped since the last one. Anything else that
+    changes the picture requests its own repaint.
+    """
+    if point_queue_busy or job_busy:
+        return True
+    return has_selection and blink_phase_changed
 
 
 @dataclass
@@ -62,27 +116,33 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     _space: pyre.Space
     _image_transform_view: IImageTransformView | None = None  # The transformed image
     _show_lines: bool = False
+    _image_layer_dirty: bool = True
+    _retained_image_buffer: FrameBuffer | None = None
     _config: ImageTransformPanelConfig
 
-    _command: ICommand
+    _command: ICommand | None
     _command_queue: CommandQueue
     _transform_controller: TransformController
 
-    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.imageviewmodel_manager]
+    _imageviewmodel_manager: IImageViewModelManager = Provide[IContainer.image_viewmodel_manager]
     _glcontext_manager: IGLContextManager = Provide[IContainer.glcontext_manager]
-    _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_glbuffermanager]
+    _transformglbuffer_manager: ITransformControllerGLBufferManager = Provide[IContainer.transform_gl_buffer_manager]
 
     _view_type: ViewType
-    _transform_type_to_command_action_map: Dict[TransformType, Dict[ControlPointAction, Factory]] = Provide[
+    _transform_type_to_command_action_map: dict[TransformType, dict[ControlPointAction, Factory]] = Provide[  # type: ignore[assignment]
         IContainer.action_command_map]
-
-    # _action_command_map: Dict[ControlPointAction, Factory] = Provide[IContainer.action_command_map]
 
     _imagename_space_mapping: dict[str, Space]  # Maps an image name to a space
 
-    _transform_controller_view: TransformControllerView
+    _transform_controller_view: TransformControllerView | None
+
+    _fixed_layer_hint: QLabel | None = None
+    _composite_legend: QLabel | None = None
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
+    _painted_blink_phase: int | None = None  # Selected-glyph blink phase in the last paint
+    _registration_roi_fade: RegistrationRoiFadeTracker
+    _escape_claim_filter: EscapeClaimFilter
 
     @property
     def control_point_scale(self) -> float:
@@ -104,7 +164,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @show_lines.setter
     def show_lines(self, value: bool):
+        if self._show_lines == value:
+            return
         self._show_lines = value
+        self.mark_image_layer_dirty()
 
     @property
     def space(self) -> pyre.Space:
@@ -122,7 +185,6 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @SelectedPointIndex.setter
     def SelectedPointIndex(self, value: int | None):
-
         ImageTransformViewPanel._CurrentDragPoint = value
 
         if value is not None:
@@ -133,34 +195,27 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     @property
     def transform(self) -> nornir_imageregistration.ITransform:
-        return self._config.transform_controller.TransformModel
+        return self._transform_controller.TransformModel
 
     @property
     def transform_controller(self) -> TransformController:
         return self._transform_controller
 
     @property
-    def image_transform_view(self) -> IImageTransformView:
+    def image_transform_view(self) -> IImageTransformView | None:
         return self._image_transform_view
 
     @image_transform_view.setter
     def image_transform_view(self, value: IImageTransformView):
         self._image_transform_view = value
 
-        if value is None:
-            return
-        else:
-            assert (isinstance(value, ImageTransformView))
-
-        # (self.width, self.height) = self.canvas.GetSize()
-
     @property
     def max_image_dimension(self):
-        return max([self.image_transform_view.width, self.image_transform_view.height])
+        assert self.image_transform_view is not None
+        return max([self.image_transform_view.width, self.image_transform_view.height])  # type: ignore[arg-type]
 
-    @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  space: Space,
                  view_type: ViewType,
                  transform_controller: TransformController,
@@ -172,52 +227,132 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         :param space:
         """
         self._selected_points = selected_points
-        self._command = None
-        self._transform_controller_view = None
+        self._registration_roi_fade = RegistrationRoiFadeTracker()
+        self._command = None  # type: ignore[assignment]
+        self._transform_controller_view = None  # type: ignore[assignment]
         self._imagename_space_mapping = imagename_space_mapping
         self._view_type = view_type
         self._transform_controller = transform_controller
         self._space = space
-        self._command_queue: ICommandQueue = CommandQueue()
-        # self._transform_type_to_command_action_map = pyre.commands.container_overrides.action_command_map
+        self._command_queue = CommandQueue()  # type: ignore[assignment]
+
         super().__init__(parent=parent,
                          transform_controller=transform_controller,
                          **kwargs)
 
-        # self._config.imageviewmodel_manager.add_change_event_listener(self.OnImageViewModelChanged)
+        # Commands that use Escape themselves keep it from the window's
+        # "Cancel registration" shortcut while they are active.
+        self._escape_claim_filter = EscapeClaimFilter(lambda: self._command, self)
+        self._glpanel.installEventFilter(self._escape_claim_filter)
+        self.installEventFilter(self._escape_claim_filter)
 
-        # self.schedule = clock.schedule_interval(func = self.update, interval = 1 / 2.)
-        self.timer = wx.Timer(self._glpanel)
-        self.glcanvas.Bind(wx.EVT_TIMER, self.on_timer)
-
-        # wx.EVT_TIMER(self, -1, self.on_timer)
+        # Create a timer for periodic updates
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.on_timer)
 
         self.ShowWarped = False
-
         self.glFunc = gl.GL_FUNC_ADD
-
         self.LastDrawnBoundingBox = None
 
-        # self._bind_mouse_events()
-        # self.glcanvas.Bind(wx.EVT_KEY_DOWN, self.on_key_press)
-
         self._image_transform_view = None
-        # self._image_transform_view = ImageTransformView(space=self.space,
-        #                                                 activate_context=self.activate_context,
-        #                                                 image_view_model=None,
-        #                                                 transform_controller=state.currentStosConfig.transform_controller)
+        self._image_layer_dirty = True
+        self._retained_image_buffer = None
 
         self.DebugTickCounter = 0
-        self.timer.Start(100)
+        # Use singleShot timer that reschedules itself instead of repeating timer
+        # This works around a Qt issue where repeating timers stop firing
+        QTimer.singleShot(GLYPH_TIMER_IDLE_MS, self.on_timer_singleshot)
 
         self.statusbar.space = self.space
 
+        self._glpanel._overlay_paint_method = self._paint_control_point_id_overlay
+        self._glpanel._overlay_paint_enabled = lambda: self._settings.ui.show_control_point_ids
+
         self._imageviewmodel_manager.add_change_event_listener(self.on_imageviewmodelmanager_change)
 
-        # wx.CallAfter(self.create_objects)
-        wx.CallAfter(self.subscribe_context_activation, self._glcontext_manager)
+        # Subscribe directly to context activation events
+        self.subscribe_context_activation(self._glcontext_manager)
 
         transform_controller.AddOnModelReplacedEventListener(self._on_transform_model_changed)
+        transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
+        transform_controller.AddOnBusyPointsChanged(self._on_busy_points_changed)
+
+        if self._view_type == ViewType.Source and self._space == Space.Source:
+            self._fixed_layer_hint = QLabel(self)
+            self._fixed_layer_hint.setStyleSheet(
+                "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
+            self._fixed_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._fixed_layer_hint.hide()
+            self._update_layer_policy_hints()
+        elif self._view_type == ViewType.Target and self._space == Space.Target:
+            self._warped_layer_hint = QLabel(self)
+            self._warped_layer_hint.setText(
+                "Rigid transform — translate here; rotate in Composite view (Ctrl+scroll)")
+            self._warped_layer_hint.setStyleSheet(
+                "QLabel { background-color: rgba(255, 255, 255, 210); color: black; padding: 4px 8px; }")
+            self._warped_layer_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._warped_layer_hint.hide()
+            self._update_layer_policy_hints()
+        elif self._view_type == ViewType.Composite:
+            self._composite_legend = QLabel(self)
+            self._composite_legend.setTextFormat(Qt.TextFormat.RichText)
+            self._composite_legend.setText(composite_legend_rich_text())
+            self._composite_legend.setStyleSheet(
+                "QLabel { background-color: rgba(0, 0, 0, 160); padding: 4px 8px; }")
+            self._composite_legend.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            self._composite_legend.adjustSize()
+            self._position_composite_legend()
+            self._composite_legend.show()
+            self._composite_legend.raise_()
+
+    def _update_layer_policy_hints(self) -> None:
+        """Show corner hints when transform-edit policy blocks actions in this panel."""
+        if getattr(self, '_fixed_layer_hint', None) is not None:
+            msg = source_panel_hint_message(
+                self._transform_controller.TransformModel,
+                self._transform_controller.type,
+                self._space,
+                self._view_type)
+            if msg is not None:
+                self._fixed_layer_hint.setText(msg)
+                self._fixed_layer_hint.adjustSize()
+                self._fixed_layer_hint.move(8, 8)
+                self._fixed_layer_hint.show()
+                self._fixed_layer_hint.raise_()
+            else:
+                self._fixed_layer_hint.hide()
+        if getattr(self, '_warped_layer_hint', None) is not None:
+            if rigid_rotation_locked(self._transform_controller.type, self._view_type):
+                self._warped_layer_hint.adjustSize()
+                self._warped_layer_hint.move(8, 8)
+                self._warped_layer_hint.show()
+                self._warped_layer_hint.raise_()
+            else:
+                self._warped_layer_hint.hide()
+
+    def _update_fixed_layer_hint(self) -> None:
+        """Backward-compatible alias for layer policy hint refresh."""
+        self._update_layer_policy_hints()
+
+    def _position_composite_legend(self) -> None:
+        """Anchor the composite source/target legend in the top-right corner."""
+        if self._composite_legend is None:
+            return
+        self._composite_legend.adjustSize()
+        margin = 8
+        self._composite_legend.move(
+            max(margin, self.width() - self._composite_legend.width() - margin),
+            margin,
+        )
+
+    def on_resize(self, event: QResizeEvent) -> None:
+        """Handle resize and keep overlay hints anchored."""
+        super().on_resize(event)
+        if getattr(self, '_fixed_layer_hint', None) is not None and self._fixed_layer_hint.isVisible():
+            self._fixed_layer_hint.move(8, 8)
+        if getattr(self, '_warped_layer_hint', None) is not None and self._warped_layer_hint.isVisible():
+            self._warped_layer_hint.move(8, 8)
+        self._position_composite_legend()
 
     def __del__(self):
         try:
@@ -230,30 +365,110 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         except ValueError:
             pass
 
+        try:
+            self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
+        except ValueError:
+            pass
+
+        try:
+            self._transform_controller.RemoveOnBusyPointsChanged(self._on_busy_points_changed)
+        except ValueError:
+            pass
+
+    def _composite_deferred_redraw(self) -> None:
+        """Refill composite overlay FBOs after sub-view GL objects catch up."""
+        self.mark_image_layer_dirty()
+        self._glpanel.update()
+
+    def mark_image_layer_dirty(self) -> None:
+        """Request a full texture-layer redraw on the next paint."""
+        self._image_layer_dirty = True
+
+    def _ensure_retained_image_buffer(self) -> FrameBuffer:
+        """Return the Source/Target panel background FBO, creating it on first use."""
+        if self._retained_image_buffer is None:
+            self._retained_image_buffer = FrameBuffer(self._glpanel.gl_funcs)
+        return self._retained_image_buffer
+
+    def _draw_retained_image_layer(
+            self,
+            view_proj: np.ndarray,
+            draw_kwargs: dict[str, object],
+            default_fbo: int,
+            ov_w: int,
+            ov_h: int,
+            refill: bool) -> None:
+        """Draw or blit the retained Source/Target image background."""
+        if self._image_transform_view is None:
+            return
+        fbo_size = (ov_h, ov_w)
+        buffer = self._ensure_retained_image_buffer()
+        layer_fbo = buffer.get_or_create_fbo(fbo_size)
+        if refill or not buffer.color_valid:
+            gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, int(layer_fbo))
+            gl.glViewport(0, 0, ov_w, ov_h)
+            gl.glClearColor(0, 0.1, 0, 1)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+            self._image_transform_view.draw(view_proj, **draw_kwargs)
+            buffer.mark_color_valid()
+        blit_framebuffer_color(int(layer_fbo), int(default_fbo), ov_w, ov_h)
+        gl.glViewport(0, 0, ov_w, ov_h)
+
+    def _image_layer_dirty_for_transform(self, _controller: TransformController) -> bool:
+        """True when a transform change alters visible image pixels in this panel."""
+        if self.view_type == ViewType.Composite:
+            return True
+        return self.show_lines
+
+    def _on_transform_controller_changed(self, controller: TransformController) -> None:
+        """Repaint when registration or display overlays change in another STOS view."""
+        if self._view_type == ViewType.Composite:
+            pending = controller.consume_pending_composite_display_preserve()
+            if pending is not None:
+                rebase_composite_camera_to_display(self.camera, controller, pending)
+        if self._image_layer_dirty_for_transform(controller):
+            self.mark_image_layer_dirty()
+        self._glpanel.update()
+
     def _on_transform_model_changed(self,
                                     controller: TransformController,
                                     old: ITransform | None,
                                     new: ITransform):
         """Called when the model in the transform controller changes.  This is not called when the
         transform is modified, only when the model is replaced"""
-        # Cancel the active command
+        self._update_fixed_layer_hint()
+        # Force tile/control-point redraw even if a coalesced OnChange was dropped.
+        image_view = self._image_transform_view
+        if image_view is not None:
+            on_changed = getattr(image_view, "OnTransformChanged", None)
+            if callable(on_changed):
+                on_changed(controller)
+        if self._transform_controller_view is not None:
+            self._transform_controller_view._sync_control_points_from_controller()
+        self.mark_image_layer_dirty()
+        self._glpanel.update()
+
+        # Cancel in-progress commands when the model is replaced externally.
         if self._command is None:
             return
 
-        if old != new:
-            self._command.cancel()
-        elif old.type != new.type:
+        if self._command.status == pyre.CommandStatus.Completed:
+            return
+
+        if old is not new or (old is not None and new is not None and old.type != new.type):
             self._command.cancel()
 
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):
         glcontext_manager.add_glcontext_added_event_listener(self.create_objects)
 
     def activate_command(self, previous_command=None):
-        command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]
+        command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]  # type: ignore[index]
         self._command = self._command_queue.get()
         if self._command is None:
-            bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (self.width, self.height))
-            self._command = command_factory[ControlPointAction.NONE](parent=self.glcanvas,
+            # Use GL panel as parent so mouse events and resize use GL viewport coordinates
+            gl_w, gl_h = self._glpanel.width(), self._glpanel.height()
+            bounds = nornir_imageregistration.Rectangle.CreateFromPointAndArea((0, 0), (gl_w, gl_h))
+            self._command = command_factory[ControlPointAction.NONE](parent=self._glpanel,  # type: ignore[index]
                                                                      completed_func=None,
                                                                      commandqueue=self._command_queue,
                                                                      camera=self.camera,
@@ -262,9 +477,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
                                                                      selected_points=self._selected_points)
 
         # Ensure we load the next command when this command finishes
+        assert self._command is not None
         self._command.add_completed_callback(self.activate_command)
-        print(f'Activating command: {self._command}')
+        # Do not print here (e.g. "Activating command: ...") - reduces console noise
         self._command.activate()
+        self._update_fixed_layer_hint()
 
     def on_imageviewmodelmanager_change(self,
                                         name: str,
@@ -286,361 +503,403 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _handle_add_imageviewmodel_event(self, name: str, image: pyre.viewmodels.ImageViewModel):
         """Process an add event from the imageviewmodel manager"""
-        # self._image_transform_view.image_view_model = image
         if self.view_type == ViewType.Composite:
             if self._image_transform_view is None:
                 print('\tAdding CompositeTransformView')
                 self._image_transform_view = CompositeTransformView(display_space=Space.Target,
                                                                     activate_context=self.glcanvas.activate_context,
-                                                                    source_image_name=ViewType.Source,
-                                                                    target_image_name=ViewType.Target,
-                                                                    transform_controller=self.transform_controller)
+                                                                    source_image_name=ViewType.Source.value,
+                                                                    target_image_name=ViewType.Target.value,
+                                                                    transform_controller=self.transform_controller,
+                                                                    gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
+                self._wire_tile_mesh_repaint(self._image_transform_view)
+                # First paintGL can run before sub-view GL meshes exist; dirty so
+                # deferred updates refill both overlay FBOs instead of reusing empty ones.
+                QTimer.singleShot(50, self._composite_deferred_redraw)
+                QTimer.singleShot(150, self._composite_deferred_redraw)
             else:
-                # The CompositeTransformView should exist and be subscribed so this ViewModel should be added by the View
-                pass
+                # Second add (Target) - drop the source-only retained overlay and redraw.
+                self.mark_image_layer_dirty()
+                self._glpanel.update()
         else:
             print(f'\tAdding ImageTransformView {name} in space {self.space.value}')
             self._image_transform_view = ImageTransformView(space=self.space,
                                                             activate_context=self.glcanvas.activate_context,
                                                             image_view_model=image,
-                                                            transform_controller=self.transform_controller)
+                                                            transform_controller=self.transform_controller,
+                                                            gl_funcs=self._glpanel._gl_funcs)  # type: ignore[arg-type]
+            self._wire_tile_mesh_repaint(self._image_transform_view)
+            self.mark_image_layer_dirty()
+            if self._retained_image_buffer is not None:
+                self._retained_image_buffer.invalidate_color()
             print(f'Added image view model {name} to {self.view_type.value} view')
 
-        wx.CallAfter(self.center_camera)
+        # Use QTimer to call center_camera after the widget is fully initialized
+        QTimer.singleShot(0, self.center_camera)
 
     def _handle_remove_imageviewmodel_event(self, name: str):
         """Process a remove event from the imageviewmodel manager"""
-        # if not self._image_transform_view is None:
-        #    self._image_transform_view.
         self._image_transform_view = None
 
-    def create_objects(self, context):
-        """create opengl objects when opengl is initialized"""
-        # self.activate_context() Context should be set by parent class
-        # load_point_textures() Textures should be loaded already by registration with context manager
-
+    def create_objects(self, context: PyQt6.QtGui.QOpenGLContext):
+        """create opengl objects when opengl is initialized
+        
+        Args:
+            context: The OpenGL context that was just created and is now current
+        """
         if self._image_transform_view is not None:
-            self._image_transform_view.create_objects()
+            self._image_transform_view.create_objects()  # type: ignore[attr-defined]
 
         if self._transform_controller_view is None:
             self._transform_controller_view = TransformControllerView(transform_controller=self.transform_controller)
             BinarySelectionMapper(self._selected_points,
                                   lambda: getattr(self._transform_controller_view, 'selected'),
-                                  lambda value: setattr(self._transform_controller_view, 'selected', value))
-            wx.CallAfter(self.activate_command)
+                                  lambda value: setattr(self._transform_controller_view, 'selected', value),
+                                  point_count=lambda: len(self.transform_controller.points),
+                                  repaint=lambda: self._glpanel.update())
+            # Activate command directly - no need to defer as context is already active
+            self.activate_command()
+            if self.view_type == ViewType.Composite:
+                QTimer.singleShot(0, self._glpanel.update)
 
-    def on_timer(self, e):
-        #        DebugStr = '%d' % self.DebugTickCounter
-        #        DebugStr = DebugStr + '\b' * len(DebugStr)
-        #        print DebugStr
-        # print(f'{self.view_type}')
+    def _glyph_timer_busy(self) -> tuple[bool, bool]:
+        """Return whether a point queue and a registration job are busy."""
+        from pyre.registration_job import get_registration_job_runner
+
+        return bool(self._transform_controller.busy_point_ids), get_registration_job_runner().busy
+
+    def _on_busy_points_changed(self, controller: TransformController, ids: frozenset[int]) -> None:
+        """Repaint immediately so busy glyphs appear without waiting for the blink timer."""
+        self._registration_roi_fade.sync(ids, time.monotonic())
+        self.glcanvas.update()
+
+    def _draw_registration_roi_overlay(self, view_proj: NDArray[np.floating]) -> None:
+        """Draw fading phase-correlation cells on composite for queued busy points."""
+        controller = self.transform_controller
+        if controller is None:
+            return
+        now = time.monotonic()
+        busy_ids = controller.busy_point_ids
+        self._registration_roi_fade.sync(busy_ids, now)
+        alignment_area = controller.registration_alignment_area
+        if alignment_area is None:
+            alignment_area = self._settings.stos.point_registration.alignment_area_shape
+        overlays = phase_correlation_roi_overlays(
+            busy_ids=busy_ids,
+            started_at=self._registration_roi_fade.started_at,
+            index_for_id=controller.index_for_point_id,
+            target_points_yx=controller.TargetPoints,
+            alignment_area_yx_shape=alignment_area,
+            now=now,
+        )
+        draw_registration_roi_overlays(view_proj, overlays)
+
+    def on_timer_singleshot(self):
+        """Timer callback that reschedules itself - workaround for repeating timer issues"""
+        try:
+            self.DebugTickCounter += 1
+            point_queue_busy, job_busy = self._glyph_timer_busy()
+            if glyph_timer_needs_paint(
+                    has_selection=bool(self._selected_points),
+                    blink_phase_changed=selected_blink_phase() != self._painted_blink_phase,
+                    point_queue_busy=point_queue_busy,
+                    job_busy=job_busy):
+                # Blink only control-point glyphs; reuse the retained texture background.
+                self.glcanvas.update()
+            QTimer.singleShot(
+                glyph_timer_interval_ms(point_queue_busy=point_queue_busy, job_busy=job_busy),
+                self.on_timer_singleshot)
+        except Exception as e:
+            print(f"ERROR in on_timer_singleshot for {self.view_type.value}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def on_timer(self):
+        """Legacy timer callback - kept for compatibility"""
         self.DebugTickCounter += 1
-        self.glcanvas.Refresh()
+        self.glcanvas.update()
         return
 
     def center_camera(self):
         """
         Center the camera at whatever interesting thing this class displays
         """
-
+        if self.camera is None:
+            return
         if self._image_transform_view is None or self._image_transform_view.width is None:
             self.camera.lookat = (0, 0)
             self.camera.scale = 1.0
             return
 
-        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)
+        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)  # type: ignore[operator]
         self.camera.lookat = center
 
-        width_scale = self.width / self._image_transform_view.width
-        height_scale = self.height / self._image_transform_view.height
+        width_scale = self.width() / self._image_transform_view.width  # type: ignore[operator]
+        height_scale = self.height() / self._image_transform_view.height  # type: ignore[operator]
 
         self.camera.scale = min(width_scale, height_scale)
 
     def _LabelPreamble(self) -> str:
-        return "Fixed: " if self.FixedSpace else "Warping: "
+        return "Source: " if self.space == Space.Source else "Target: "
 
     def OnImageViewModelChanged(self, space: pyre.Space):
         """Called when the image view model changes"""
-        if space == self.space:
-            imageviewmodel = self._imageviewmodel_manager[space]
-            self.image_transform_view.image_view_model = imageviewmodel
-        else:
+        if space != self.space:
             return
-
-        #
-        # if self.composite:
-        #     self.UpdateRawImageWindow()
-        # elif self.FixedSpace and space == pyre.Space.Source:
-        #     self.UpdateRawImageWindow()
-        #     if self.image_transform_view.image_view_model is not None:
-        #         self.TopLevelParent.Label = self._LabelPreamble() + os.path.basename(
-        #             self.image_transform_view.image_view_model.ImageFilename)
-        #
-        # # self.lookatfixedpoint((0,0), 1.0)
+        imageviewmodel = self._imageviewmodel_manager[space]
+        self.image_transform_view.image_view_model = imageviewmodel  # type: ignore[attr-defined, union-attr]
 
         self.center_camera()
-        self.glcanvas.Refresh()
+        self.mark_image_layer_dirty()
+        self.glcanvas.update()
 
-    # def UpdateRawImageWindow(self):
-    #     """Update the control that displays images"""
-    #     if self.composite:
-    #         if not (
-    #                 state.currentStosConfig.FixedImageViewModel is None or state.currentStosConfig.WarpedImageViewModel is None):
-    #             self.image_transform_view = CompositeTransformView(self._glcontextmanager,
-    #                                                                  state.currentStosConfig.FixedImageViewModel,
-    #                                                                  state.currentStosConfig.WarpedImageViewModel,
-    #                                                                  state.currentStosConfig.transform_controller)
-    #     elif self.space == pyre.Space.Target:
-    #         self.image_transform_view = ImageTransformView(space=self.space,
-    #                                                          glcontexmanager=self._glcontextmanager,
-    #                                                          ImageViewModel=state.currentStosConfig.WarpedImageViewModel,
-    #                                                          transform_controller=state.currentStosConfig.transform_controller)
-    #     else:
-    #         self.image_transform_view = ImageTransformView(space=self.space,
-    #                                                          glcontexmanager=self._glcontextmanager,
-    #                                                          ImageViewModel=state.currentStosConfig.FixedImageViewModel,
-    #                                                          transform_controller=state.currentStosConfig.transform_controller)
+    def onTransformChanged(self):
+        """Handle transform changes and prefetch visible tile meshes."""
+        super().onTransformChanged()
+        # Composite sub-views rebuild via their own OnTransformChanged (source is eager
+        # full-grid). Avoid a second full mesh rebuild here.
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            return
+        self._update_visible_tile_meshes()
+
+    def onCameraChanged(self):
+        """Handle camera changes and prefetch visible tile meshes."""
+        self.mark_image_layer_dirty()
+        super().onCameraChanged()
+        # Composite FBO meshes are not view-dependent (full grid); skip on pan/zoom.
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            return
+        self._update_visible_tile_meshes()
+
+    def _mesh_visible_bounds(self) -> nornir_imageregistration.Rectangle | None:
+        """Return the viewport rectangle used for lazy tile mesh builds."""
+        if self.camera is None:
+            return None
+        gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+        if gl_w <= 0 or gl_h <= 0:
+            return None
+        self.camera.focus(gl_w, gl_h)
+        bounding_box = self.camera.VisibleImageBoundingBox
+        if self.view_type == ViewType.Composite and self.transform_controller is not None:
+            _, bounding_box = resolve_composite_display_draw_params(
+                self.camera,
+                self.transform_controller,
+                (gl_h, gl_w),
+            )
+        return bounding_box
+
+    def _request_image_repaint(self) -> None:
+        """Mark the texture layer dirty and request a GL update."""
+        self.mark_image_layer_dirty()
+        self._glpanel.update()
+
+    def _wire_tile_mesh_repaint(self, view: object) -> None:
+        """Connect lazy mesh continuation callbacks to this panel's repaint."""
+        repaint = self._request_image_repaint
+        # CompositeTransformView fans the assignment out to its sub-views itself, so this
+        # no longer reaches into their private attributes to repair a stale capture. (#167)
+        if hasattr(view, 'repaint_callback'):
+            view.repaint_callback = repaint  # type: ignore[attr-defined]
+
+    def _update_visible_tile_meshes(self) -> None:
+        """Prefetch tile meshes for the current camera viewport."""
+        bounds = self._mesh_visible_bounds()
+        if bounds is None or self._image_transform_view is None:
+            return
+        if isinstance(self._image_transform_view, CompositeTransformView):
+            # Full-grid budgeted builds: display-space bounds are not a reliable cull for
+            # warped composite source tiles (and incorrectly crop the target layer).
+            for sub_view in (
+                    self._image_transform_view._source_image_view,
+                    self._image_transform_view._target_image_view,
+            ):
+                if sub_view is not None:
+                    sub_view.update_visible_tile_meshes(None, margin_tiles=1)  # type: ignore[attr-defined]
+        else:
+            self._image_transform_view.update_visible_tile_meshes(bounds, margin_tiles=1)  # type: ignore[union-attr]
 
     def lookatfixedpoint(self, point, scale):
-        """specify a point to look at in fixed space"""
+        """Look at a point specified in Target (control / fixed) space.
 
-        if not self.FixedSpace:
-            if not self.ShowWarped:
-                if self.transform_controller is not None:
-                    point = self.transform_controller.InverseTransform([point]).flat
+        Source and Composite cameras store lookat in Source space, so the point
+        is InverseTransformed before applying. Target cameras use the point as-is.
+        """
+        point = camera_lookat_from_target_space(
+            self.transform_controller, point, self.space)
 
-        super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)
+        super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)  # type: ignore[arg-type]
+
+    def _paint_control_point_id_overlay(self, painter: PyQt6.QtGui.QPainter) -> None:
+        """Debug aid: draw each control point's session ID next to its glyph.
+
+        Gated behind settings.ui.show_control_point_ids.
+
+        Points array layout: [[TargetY, TargetX, SourceY, SourceX], ...]
+        GL shader selects: tween=0 → point_source_offset (cols 2,3) for Source panel,
+                           tween=1 → point_target_offset (cols 0,1) for Target panel.
+        Composite panel draws glyphs at Target coords (cols 0,1) via
+        composite_control_point_draw_rows, using a display-space lookat.
+        """
+        if not self._settings.ui.show_control_point_ids:
+            return
+        if self.camera is None or self._transform_controller is None:
+            return
+
+        points = self._transform_controller.points  # Nx4: TargetY, TargetX, SourceY, SourceX
+        if points.shape[0] == 0:
+            return
+
+        # Match the GL shader's tween: Source panel → SourcePoints (cols 2,3),
+        # Target panel → TargetPoints (cols 0,1).
+        # Composite → TargetPoints (cols 0,1), same as composite_control_point_draw_rows.
+        if self._view_type == ViewType.Composite or self.space == Space.Target:
+            column_offset = 0
+        else:
+            column_offset = 2
+
+        window_height = int(self.camera.window_size[0])
+
+        # For the Composite panel the camera lookat is in source space but the glyphs
+        # are placed in target/display space, so we need the composite display lookat
+        # to compute correct screen positions.
+        composite_min_world = None
+        if self._view_type == ViewType.Composite:
+            try:
+                composite_lookat = display_lookat_for_composite(
+                    self.camera, self._transform_controller)
+                composite_min_world = np.asarray(composite_lookat, dtype=np.float64) \
+                    - np.asarray(self.camera.visible_world_size, dtype=np.float64) / 2.0
+            except Exception as _exc:
+                return
+
+        font = PyQt6.QtGui.QFont(painter.font())
+        font.setBold(True)
+        font.setPointSize(max(font.pointSize(), 10))
+        painter.setFont(font)
+
+        LEADER = 4
+        cam_visible = self.camera.visible_world_size
+        cam_window = self.camera.window_size
+        for row_index in range(points.shape[0]):
+            point_id = self._transform_controller.point_id_for_index(row_index)
+            if point_id is None:
+                continue
+            y, x = float(points[row_index, column_offset]), float(points[row_index, column_offset + 1])
+
+            if composite_min_world is not None:
+                offset = np.array((y, x)) - composite_min_world
+                screen_yx = (offset / cam_visible) * cam_window
+                screen_y, screen_x = float(screen_yx[0]), float(screen_yx[1])
+            else:
+                screen_y, screen_x = self.camera.screen_coords_for_world(y, x)
+
+            qt_x, qt_y = int(screen_x) + LEADER, int(window_height - screen_y) - LEADER
+            text = str(point_id)
+            painter.setPen(PyQt6.QtGui.QColor(0, 0, 0))
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                painter.drawText(qt_x + dx, qt_y + dy, text)
+            painter.setPen(PyQt6.QtGui.QColor(255, 255, 0))
+            painter.drawText(qt_x, qt_y, text)
 
     def draw(self):
         """Region is [x,y,TextureWidth,TextureHeight] indicating where the image should be drawn on the window"""
         if self.camera is None:
             return
 
-        if self.width == 0 or self.height == 0:
+        if self.width() == 0 or self.height() == 0:
             return
 
-        self.camera.focus(self.width, self.height)
+        self.camera.focus(self._glpanel.width(), self._glpanel.height())
 
+        self._glpanel.activate_context()
+
+        composite_view_proj = None
         if self._image_transform_view is not None:
+            gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
             bounding_box = self.camera.VisibleImageBoundingBox
+            view_proj = self.camera.view_proj
+            draw_space = self.space
+            ratio = self._glpanel.devicePixelRatio()
+            overlay_viewport_size = (int(gl_w * ratio), int(gl_h * ratio))
+            if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                # Use logical GL size for view_proj so mouse pan stays 1:1 with on-screen motion.
+                # Physical pixels are only for FBO/viewport fill via overlay_viewport_size.
+                view_proj, bounding_box = resolve_composite_display_draw_params(
+                    self.camera,
+                    self.transform_controller,
+                    (gl_h, gl_w),
+                )
+                composite_view_proj = view_proj
+                draw_space = Space.Target
 
-            SetDrawTextureState()
+            SetDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
-            # Draw an image if we can
-            self._image_transform_view.draw(self.camera.view_proj,
-                                            space=self.space,
-                                            client_size=(self.height, self.width),
-                                            bounding_box=bounding_box)
+            # Use GL panel size so viewport/FBO match the actual drawing surface.
+            # Pass the widget's default FBO so composite overlay draws to the widget (QOpenGLWidget uses an internal FBO, not 0).
+            # Pass physical viewport size so composite overlay fills the widget after resize/hi-DPI (resizeGL uses physical pixels).
+            default_fbo = self._glpanel.defaultFramebufferObject()
+            ov_w, ov_h = overlay_viewport_size
+            draw_kwargs: dict[str, object] = {
+                "space": draw_space,
+                "client_size": (gl_h, gl_w),
+                "bounding_box": bounding_box,
+                "default_fbo": default_fbo,
+                "overlay_viewport_size": overlay_viewport_size,
+                "show_mesh_lines": self.show_lines,
+                "view_type": self.view_type,
+            }
+            refill_source = self._image_layer_dirty
+            refill_target = self._image_layer_dirty
+            if (
+                    self.view_type == ViewType.Composite
+                    and self.transform_controller is not None
+                    and self.transform_controller.freeze_composite_display_during_point_drag()
+                    and not self._image_layer_dirty
+            ):
+                # Glyph-timer paints must not refill FBOs (avoids UI-thread Transform
+                # while a worker owns CUDA). Camera pan sets _image_layer_dirty and
+                # must still refill so the images follow the view.
+                refill_target = False
+                if (
+                        self.transform_controller.busy_point_ids
+                        or self.transform_controller.registration_apply_in_progress
+                ):
+                    refill_source = False
+            if isinstance(self._image_transform_view, CompositeTransformView):
+                draw_kwargs["refill_source_layer"] = refill_source
+                draw_kwargs["refill_target_layer"] = refill_target
+                self._image_transform_view.draw(view_proj, **draw_kwargs)
+                self._image_layer_dirty = False
+            else:
+                self._draw_retained_image_layer(
+                    view_proj, draw_kwargs, default_fbo, ov_w, ov_h, refill_source)
+                self._image_layer_dirty = False
 
-            ClearDrawTextureState()
+            ClearDrawTextureState(self._glpanel._gl_funcs)  # type: ignore[arg-type]
 
-        # FixedSpacePoints = self.FixedSpace
-        # FixedSpaceLines = FixedSpacePoints
-        # if self.composite:
-        #     FixedSpacePoints = False
-        #     FixedSpaceLines = True
-        # else:
-        #     # This looks backwards, and it is.  The transform object itself refers to warped and fixed space.  Depending on how warped is interpreted it means
-        #     # the points that are warped or the points that have been warped.  It needs to be refactored to make the names unabiguous
-        #     FixedSpacePoints = self.FixedSpace or self.ShowWarped
-        #     FixedSpaceLines = self.FixedSpace or self.ShowWarped
-        #
-        # if self.show_lines:
-        #     self._ImageTransformView.draw_lines(draw_in_fixed_space=FixedSpaceLines)
-
-        # self._ImageTransformView.draw(view_proj=self.camera.view_proj, space=self.space)
         if self._transform_controller_view is not None:
-            tween = 0 if self.space == pyre.Space.Source else 1
-            # print(f"Drawing {self.space.value} control points tween: {tween}")
             point_scale = (1 / self.camera.scale) * self.control_point_scale
-            self._transform_controller_view.draw(self.camera.view_proj, tween=tween, scale_factor=point_scale)
-
-        # pointScale = (bounding_box[3] * bounding_box[2]) / (self.height * self.width)
-        # pointScale = self.camera.scale / self.height
-        # self._ImageTransformView.draw_points(SelectedIndex=self.HighlightedPointIndex, bounding_box=bounding_box,
-        #                                     FixedSpace=FixedSpacePoints, ScaleFactor=pointScale)
-
-    #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 0, 10)))
-    #       graphics.draw(2, gl.GL_LINES, ('v2i', (0, 0, 100, 0)))
-
-    # if not self.LastMousePosition is None and len(self.LastMousePosition) > 0:
-
-    #            fontsize = 16 * (self.camera.scale / self.height)
-    #            labelx, labely = self.ImageCoordsForMouse(0, 0)
-    #            l = text.Label(text = mousePosStr, x = labelx, y = labely,
-    #                            width = fontsize * len(mousePosStr),
-    #                            anchor_y = 'bottom',
-    #                            font_size = fontsize,
-    #                            dpi = 300,
-    #                            font_name = 'Times New Roman')
-    #            l.draw()
-    #
-    # def on_mouse_motion(self, x, y, dx, dy):
-    #     self.LastMousePosition = [y, x]
-    #
-    #     self.statusBar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
-    #
-    # def on_mouse_scroll(self, e):
-    #
-    #     if self.camera is None:
-    #         return
-    #
-    #     scroll_y = e.GetWheelRotation() / 120.0
-    #
-    #     if e.CmdDown() and e.AltDown() and isinstance(self.transform_controller.TransformModel,
-    #                                                   nornir_imageregistration.ITransformRelativeScaling):
-    #         scale_delta = (1.0 + (-scroll_y / 50.0))
-    #         self.transform_controller.TransformModel.ScaleWarped(scale_delta)
-    #     elif e.CmdDown():  # We rotate when command is down
-    #         angle = float(abs(scroll_y) * 2) ** 2.0
-    #         if e.ShiftDown():
-    #             angle = float(abs(scroll_y) / 2) ** 2.0
-    #
-    #         rangle = (angle / 180.0) * 3.14159
-    #         if scroll_y < 0:
-    #             rangle = -rangle
-    #
-    #         # print "Angle: " + str(angle)
-    #         try:
-    #             self.transform_controller.Rotate(rangle, np.array(
-    #                 pyre.state.currentStosConfig.WarpedImageViewModel.Image.shape) / 2.0)
-    #         except NotImplementedError:
-    #             print("Current transform does not support rotation")
-    #             pass
-    #
-    #         # if isinstance(self._transform_controller.TransformModel, nornir_imageregistration.ITransformTargetRotation):
-    #         #     self._transform_controller.TransformModel.RotateTargetPoints(-rangle,
-    #         #                                       (state.currentStosConfig.FixedImageMaskViewModel.RawImageSize[0] / 2.0,
-    #         #                                        state.currentStosConfig.FixedImageMaskViewModel.RawImageSize[1] / 2.0))
-    #         # elif isinstance(self._transform_controller.TransformModel, nornir_imageregistration.ITransformSourceRotation):
-    #         #     self._transform_controller.TransformModel.RotateSourcePoints(rangle,
-    #         #                                           (state.currentStosConfig.WarpedImageViewModel.RawImageSize[
-    #         #                                                0] / 2.0,
-    #         #                                            state.currentStosConfig.WarpedImageViewModel.RawImageSize[
-    #         #                                                1] / 2.0))
-    #
-    #     elif self.image_transform_view is not None:
-    #         zdelta = (1 + (-scroll_y / 20))
-    #
-    #         new_scale = self.camera.scale * zdelta
-    #         max_image_dimension_value = self.max_image_dimension
-    #         if self.transform_controller.width is not None:
-    #             max_transform_dimension = max(self.transform_controller.width, self.transform_controller.height)
-    #             max_image_dimension_value = max(max_image_dimension_value, max_transform_dimension)
-    #
-    #         if new_scale > max_image_dimension_value * 2.0:
-    #             new_scale = max_image_dimension_value * 2.0
-    #
-    #         if new_scale < 0.5:
-    #             new_scale = 0.5
-    #
-    #         self.camera.scale = new_scale
-    #
-    #         scrolling_at = e.X, e.Y
-    #         world_coordinates = np.array(self.camera.ImageCoordsForMouse(x=e.X, y=e.Y))
-    #
-    #         # self.camera.lookat = scrolling_at_position[:2]
-    #         print(f'Scrolling at {scrolling_at} position {world_coordinates[:2]}')
-    #
-    #     self.statusbar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
-
-    #
-    # def on_mouse_release(self, e):
-    #     self.SelectedPointIndex = None
-    #
-    # def on_mouse_press(self, e):
-    #     (y, x) = self.GetCorrectedMousePosition(e)
-    #     ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
-    #
-    #     if ImageX is None or ImageY is None:
-    #         return
-    #
-    #     self.LastMousePosition = (y, x)
-    #
-    #     if self.transform_controller is None:
-    #         return
-    #
-    #     if e.MiddleIsDown():
-    #         self.center_camera()
-    #
-    #     if not isinstance(self.transform_controller.TransformModel, nornir_imageregistration.transforms.IControlPoints):
-    #         # The remaining functions require control points
-    #         return
-    #
-    #     if e.ShiftDown():
-    #         if e.LeftDown() and self.SelectedPointIndex is None:
-    #             self.SelectedPointIndex = self.transform_controller.TryAddPoint(ImageX, ImageY,
-    #                                                                             space=self.space)
-    #             if e.AltDown():
-    #                 self.transform_controller.AutoAlignPoints(self.SelectedPointIndex)
-    #
-    #             history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
-    #         elif e.RightDown():
-    #             self.transform_controller.TryDeletePoint(ImageX, ImageY, self.SelectionMaxDistance,
-    #                                                      space=self.space)
-    #             if self.SelectedPointIndex is not None:
-    #                 if self.SelectedPointIndex > self.transform_controller.NumPoints:
-    #                     self.SelectedPointIndex = self.transform_controller.NumPoints - 1
-    #
-    #             history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
-    #
-    #     elif e.LeftDown():
-    #         if e.AltDown() and not self.HighlightedPointIndex is None:
-    #             self.transform_controller.SetPoint(self.HighlightedPointIndex, ImageX, ImageY,
-    #                                                space=self.space)
-    #             history.SaveState(self.transform_controller.SetPoints, self.transform_controller.points)
-    #         else:
-    #             distance, index = (None, None)
-    #             if not self.composite:
-    #                 distance, index = self.transform_controller.NearestPoint((ImageY, ImageX),
-    #                                                                          space=self.space)
-    #             else:
-    #                 distance, index = self.transform_controller.NearestPoint((ImageY, ImageX), space=self.space)
-    #
-    #             if distance is None:
-    #                 return
-    #
-    #             print("d: " + str(distance) + " to p# " + str(index) + " max d: " + str(self.SelectionMaxDistance))
-    #             self.SelectedPointIndex = index if distance < self.SelectionMaxDistance else None
-    #
-    # def on_mouse_drag(self, e):
-    #
-    #     (y, x) = self.GetCorrectedMousePosition(e)
-    #
-    #     if self.LastMousePosition is None:
-    #         self.LastMousePosition = (y, x)
-    #         return
-    #
-    #     dx = x - self.LastMousePosition[nornir_imageregistration.iPoint.X]
-    #     dy = (y - self.LastMousePosition[nornir_imageregistration.iPoint.Y])
-    #
-    #     self.LastMousePosition = (y, x)
-    #
-    #     ImageY, ImageX = self.camera.ImageCoordsForMouse(y, x)
-    #     if ImageX is None:
-    #         return
-    #
-    #     ImageDX = (float(dx) / self.width) * self.camera.visible_world_width
-    #     ImageDY = (float(dy) / self.height) * self.camera.visible_world_height
-    #
-    #     if e.RightIsDown():
-    #         self.camera.lookat = (self.camera.y - ImageDY, self.camera.x - ImageDX)
-    #
-    #     if e.LeftIsDown():
-    #         if e.CmdDown():
-    #             # Translate all points
-    #             self.transform_controller.TranslateFixed((ImageDY, ImageDX))
-    #         else:
-    #             # Create a point or drag a point
-    #             if self.SelectedPointIndex is not None:
-    #                 self.SelectedPointIndex = self.transform_controller.MovePoint(self.SelectedPointIndex, ImageDX,
-    #                                                                               ImageDY, space=self.space)
-    #             elif e.ShiftDown():  # The shift key is selected and we do not have a last point dragged
-    #                 return
-    #             else:
-    #                 # find nearest point
-    #                 self.SelectedPointIndex = self.transform_controller.TryDrag(ImageX, ImageY, ImageDX, ImageDY,
-    #                                                                             self.SelectionMaxDistance,
-    #                                                                             space=self.space)
-    #
-    #     self.statusbar.update_status_bar(self.LastMousePosition, in_target_space=self.FixedSpace)
+            cp_view_proj = self.camera.view_proj
+            if self.view_type == ViewType.Composite and self.transform_controller is not None:
+                if composite_view_proj is not None:
+                    cp_view_proj = composite_view_proj
+                else:
+                    gl_h, gl_w = self._glpanel.height(), self._glpanel.width()
+                    cp_view_proj, _ = resolve_composite_display_draw_params(
+                        self.camera,
+                        self.transform_controller,
+                        (gl_h, gl_w),
+                    )
+            if should_draw_registration_roi(self.view_type):
+                self._draw_registration_roi_overlay(cp_view_proj)
+            self._painted_blink_phase = selected_blink_phase()
+            self._transform_controller_view.draw(
+                cp_view_proj,
+                tween=ControlPointMap.draw_tween_for_pyre_space(self.space),
+                scale_factor=point_scale,
+                blink_phase=self._painted_blink_phase,
+                display_point_rows=composite_control_point_draw_rows(
+                    self.transform_controller, self.space)
+                if self.view_type == ViewType.Composite and self.transform_controller is not None
+                else None,
+            )

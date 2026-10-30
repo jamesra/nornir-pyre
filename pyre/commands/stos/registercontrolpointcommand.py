@@ -1,45 +1,49 @@
 from __future__ import annotations
-from typing import Sequence, Iterable
+
 from dependency_injector.wiring import inject, Provide
 from dependency_injector.providers import Configuration
+import logging
 import numpy as np
 from numpy._typing import NDArray
-import wx
-from pyre.observable import ObservableSet, ObservedAction
+from pyre.observable import ObservableSet
 from nornir_imageregistration import ImagePermutationHelper
-import nornir_pools as pools
-import math
 
-import nornir_imageregistration
 import pyre
-from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
-from pyre.commands import InstantCommandBase, NavigationCommandBase
-from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, IImageManager
-from pyre.interfaces.controlpointselection import SetSelectionCallable
+from pyre.image_contrast import contrasted_permutation_helper
+from pyre.interfaces import StatusChangeCallback
+from pyre.commands import InstantCommandBase
+from pyre.interfaces.managers import IImageManager
 from pyre.container import IContainer
 from pyre.commands.commandexceptions import RequiresSelectionError
-from pyre.settings import AppSettings, UISettings, PointRegistrationSettings
+from pyre.settings import AppSettings, PointRegistrationSettings
+
+_logger = logging.getLogger(__name__)
 
 
 class RegisterControlPointCommand(InstantCommandBase):
-    """Automatically register selected control points"""
+    """Enqueue automatic registration for selected control points."""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
-    _original_points: NDArray[[2, ], np.floating]
-    _transform_controller: pyre.viewmodels.TransformController
+    _points_to_register: set[int]  # Selection plus the hovered point not yet registered this Space hold
+    _original_points: NDArray[np.floating]
+    _transform_controller: pyre.viewmodels.TransformController  # type: ignore[attr-defined]
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _source_image: str
     _target_image: str
+    _app_settings: AppSettings
     _settings: PointRegistrationSettings
 
     @property
-    def alignment_area(self) -> NDArray[int]:
+    def alignment_area(self) -> NDArray[np.integer]:
         return self._settings.alignment_area_shape
 
     @property
-    def angles_to_search(self) -> NDArray[float]:
+    def angles_to_search(self) -> NDArray[np.floating]:
         return self._settings.angles_to_search
+
+    @property
+    def estimate_angle(self) -> bool:
+        return self._settings.estimate_angle
 
     @inject
     def __init__(self,
@@ -47,9 +51,9 @@ class RegisterControlPointCommand(InstantCommandBase):
                  command_points: set[int],  # Points under mouse when command was triggered
                  source_image: str,
                  target_image: str,
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,  # type: ignore[assignment]
                  register_all: bool = False,  # If True, register all points in the transform
-                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],
+                 transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
                  config: Configuration = Provide[IContainer.config],
                  settings: AppSettings = Provide[IContainer.settings],
                  **kwargs):
@@ -71,18 +75,41 @@ class RegisterControlPointCommand(InstantCommandBase):
         self._source_image = source_image
         self._target_image = target_image
         self._selected_points = selected_points
+        self._app_settings = settings
         self._settings = settings.stos.point_registration
 
         if register_all:
-            self._selected_points.update(range(transform_controller.NumPoints))
+            requested = set(range(transform_controller.NumPoints))
         else:
-            self._selected_points.update(command_points)
+            # The hovered point is registered but not added to the shared selection.
+            # Selected points are re-selected once the queue goes idle, so adding the
+            # hovered point there made every later hover-and-Space press register all
+            # earlier presses' points again (press N aligned N points).
+            requested = set(self._selected_points) | set(command_points)
+        self._original_points = transform_controller.points
 
-        if len(self._selected_points) == 0:
+        if len(requested) == 0:
             raise RequiresSelectionError('No points selected')
 
-        self._original_points = transform_controller.points
         self._transform_controller = transform_controller
+        # Space auto-repeat: only points this hold has not registered yet.
+        self._points_to_register = self._unregistered_in_space_hold(requested)
+        if register_all and self._points_to_register:
+            self._selected_points.update(range(transform_controller.NumPoints))
+
+    def _unregistered_in_space_hold(self, indices: set[int]) -> set[int]:
+        """Drop indices already registered during the current Space hold."""
+        controller = self._transform_controller
+        index_by_id: dict[int, int] = {}
+        without_id: set[int] = set()
+        for index in indices:
+            point_id = controller.point_id_for_index(index)
+            if point_id is None:
+                without_id.add(index)
+            else:
+                index_by_id[point_id] = index
+        fresh = controller.space_hold.claim(index_by_id.keys())
+        return without_id | {index_by_id[point_id] for point_id in fresh}
 
     def __str__(self):
         return "RegisterControlPointCommand"
@@ -95,14 +122,42 @@ class RegisterControlPointCommand(InstantCommandBase):
         return
 
     def execute(self):
-        source = self._image_manager[self._source_image]
-        target = self._image_manager[self._target_image]
-
-        indicies_to_register = list(self._selected_points)
-        # self.SelectedPointIndex = self._transform_controller.AutoAlignPoints(self.indicies_to_register)
-        self.align_points(source, target, self._selected_points)
-
-        # Do not clear the selected indicies in case we want to re-run
+        if not self._points_to_register:
+            # A Space repeat over points this hold already registered.
+            super().execute()
+            return
+        queued = sorted(self._points_to_register)
+        # Images published to shared memory at load (and on contrast settle) are
+        # already the arrays the pool workers attach to; re-wrapping them here
+        # would build a helper the controller cannot match to a publication.
+        published = bool(getattr(
+            self._transform_controller, "registration_images_published", False)
+            or getattr(
+            self._transform_controller, "registration_publish_pending", False))
+        source = None
+        target = None
+        if not published:
+            source = contrasted_permutation_helper(
+                self._image_manager[self._source_image],
+                self._app_settings.ui.source_contrast,
+            )
+            target = contrasted_permutation_helper(
+                self._image_manager[self._target_image],
+                self._app_settings.ui.target_contrast,
+            )
+        self._transform_controller.enqueue_point_registrations(
+            queued,
+            source_image=source,
+            target_image=target,
+            alignment_area=self.alignment_area,
+            angles_to_search=self.angles_to_search,
+            estimate_angle=self.estimate_angle,
+        )
+        # Enumerates every index actually queued (not just the count) plus its session ID,
+        # to check whether _selected_points has accumulated stale entries from earlier
+        # selections instead of holding only the point the user just clicked.
+        queued_ids = [(index, self._transform_controller.point_id_for_index(index)) for index in queued]
+        _logger.info("RegisterControlPointCommand queued %s selected point(s): %s", len(queued), queued_ids)
         super().execute()
 
     def activate(self):
@@ -112,128 +167,13 @@ class RegisterControlPointCommand(InstantCommandBase):
     def align_points(self,
                      sourceimage: ImagePermutationHelper,
                      targetimage: ImagePermutationHelper,
-                     i_points: Sequence[int]) -> None:
-        """Attemps to align the specified point indicies"""
-        # from pyre.state import currentStosConfig
-
-        # if (currentStosConfig.FixedImageViewModel is None or
-        #         currentStosConfig.WarpedImageViewModel is None):
-        #     return
-
-        if isinstance(i_points, range):
-            i_points = list(i_points)
-        elif isinstance(i_points, Iterable) and not isinstance(i_points, Sequence):
-            i_points = [*i_points]
-        elif not isinstance(i_points, Iterable):
-            i_points = [i_points]
-
-        offsets = np.zeros((self._transform_controller.NumPoints, 2))
-
-        indextotask = {}
-        invalid_points = []
-        if len(i_points) > 1:
-            pool = pools.GetGlobalLocalMachinePool()
-
-            for i_point in i_points:
-                fixed = self._transform_controller.GetFixedPoint(i_point)
-                warped = self._transform_controller.GetWarpedPoint(i_point)
-
-                task = pyre.common.StartAttemptAlignPoint(pool=pool,
-                                                          task_description=f"Align Pyre Point {i_point}",
-                                                          transform=self._transform_controller.TransformModel,
-                                                          target_image=targetimage.ImageWithMaskAsNoise,
-                                                          source_image=sourceimage.ImageWithMaskAsNoise,
-                                                          target_mask=targetimage.BlendedMask,
-                                                          source_mask=sourceimage.BlendedMask,
-                                                          target_image_stats=sourceimage.Stats,
-                                                          source_image_stats=targetimage.Stats,
-                                                          target_controlpoint=fixed,
-                                                          alignmentArea=self.alignment_area,
-                                                          anglesToSearch=self.angles_to_search)
-
-                if task is not None:
-                    indextotask[i_point] = task
-                else:
-                    invalid_points.append(i_point)
-
-            for i_point in sorted(indextotask.keys()):
-                task = indextotask[i_point]
-
-                record = None
-                try:
-                    record = task.wait_return()
-                except Exception as e:
-                    print(f"Exception aligning point {i_point}:\n{e}")
-                    return
-
-                if record is None:
-                    print("point #" + str(i_point) + " returned None for alignment")
-                    continue
-
-                if record.weight == 0:
-                    print("point #" + str(i_point) + " returned weight 0 for alignment, ignoring")
-                    continue
-
-                (dy, dx) = record.peak
-
-                if math.isnan(dx) or math.isnan(dy):
-                    continue
-
-                offsets[i_point, :] = np.array([dy, dx])
-                del indextotask[i_point]
-
-        else:
-            i_point = i_points
-            fixed = self._transform_controller.GetFixedPoint(i_point)
-            warped = self._transform_controller.GetWarpedPoint(i_point)
-            task = pyre.common.StartAttemptAlignPoint(pool=None,
-                                                      task_description=f"Align Pyre Point {i_point}",
-                                                      transform=self._transform_controller.TransformModel,
-                                                      target_image=targetimage.ImageWithMaskAsNoise,
-                                                      source_image=sourceimage.ImageWithMaskAsNoise,
-                                                      target_mask=targetimage.BlendedMask,
-                                                      source_mask=sourceimage.BlendedMask,
-                                                      target_image_stats=sourceimage.Stats,
-                                                      source_image_stats=targetimage.Stats,
-                                                      target_controlpoint=fixed,
-                                                      alignmentArea=self.alignment_area,
-                                                      anglesToSearch=self.angles_to_search)
-
-            if task is None:
-                print("point #" + str(i_point) + " had no texture for alignment")
-                return
-
-            record = None
-            try:
-                record = task.wait_return()
-            except Exception as e:
-                print(f"Exception aligning point {i_point}:\n{e}")
-                return
-
-            if record is None:
-                print("point #" + str(i_point) + " returned None for alignment")
-                return
-
-            if record.weight == 0:
-                print("point #" + str(i_point) + " returned weight 0 for alignment, ignoring")
-                return
-
-            (dy, dx) = record.peak
-
-            if math.isnan(dx) or math.isnan(dy):
-                return
-
-            print(f"Adjusting point {i_point} by x: {dx} y: {dy}")
-            offsets[i_point, :] = np.array([dy, dx])
-
-        # Translate all points
-        self._transform_controller.TranslateFixed(offsets)
-
-        # If we aligned all points, remove the ones we couldn't register
-        try:
-            self._transform_controller.RemovePoints(invalid_points)
-        except ValueError:
-            print("Unable to remove unmappable points from the transform")
-            pass
-
-        # return self._transform_controller.MovePoint(i_point, dx, dy, FixedSpace = self.FixedSpace)
+                     i_points: list[int]) -> None:
+        """Enqueue alignments for *i_points* using the provided images."""
+        self._transform_controller.enqueue_point_registrations(
+            i_points,
+            source_image=sourceimage,
+            target_image=targetimage,
+            alignment_area=self.alignment_area,
+            angles_to_search=self.angles_to_search,
+            estimate_angle=self.estimate_angle,
+        )

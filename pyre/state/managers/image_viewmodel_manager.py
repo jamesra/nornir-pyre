@@ -7,7 +7,7 @@ from threading import Lock
 import numpy as np
 from numpy.typing import NDArray
 
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces.eventmanager import IEventManager
 from pyre.interfaces.managers import IImageViewModelManager, ImageViewModelManagerChangeCallback
 from pyre.interfaces.action import Action
@@ -16,7 +16,7 @@ from pyre.viewmodels.imageviewmodel import ImageViewModel
 
 
 class ImageViewModelManager(IImageViewModelManager):
-    _models = dict[str, ImageViewModel]
+    _models: dict[str, ImageViewModel]
     # _glcontext_manager: IGLContextManager
     _change_event_manager: IEventManager[ImageViewModelManagerChangeCallback]
     _lock: Lock
@@ -25,7 +25,7 @@ class ImageViewModelManager(IImageViewModelManager):
         self._models = {}
         self._change_event_listeners = []
         self._lock = Lock()
-        self._change_event_manager = wxEventManager[ImageViewModelManagerChangeCallback]()
+        self._change_event_manager = QtEventManager[ImageViewModelManagerChangeCallback]()
         # self._glcontext_manager = glcontext_manager
         # self._glcontext_manager.add_glcontext_added_event_listener(self._on_glcontext_added)
 
@@ -78,6 +78,20 @@ class ImageViewModelManager(IImageViewModelManager):
             return self._models[key]
 
         return self.add(key, image)
+
+    def assign_slot(self, name: str | Enum, viewmodel: ImageViewModel) -> ImageViewModel:
+        """Bind a slot name to an existing viewmodel, firing events only when the instance changes."""
+        key = convert_to_key(name)
+        with self._lock:
+            current = self._models.get(key)
+            if current is viewmodel:
+                return viewmodel
+            if current is not None:
+                del self._models[key]
+                self._fire_change_event(key, Action.REMOVE, current)
+            self._models[key] = viewmodel
+            self._fire_change_event(key, Action.ADD, viewmodel)
+        return viewmodel
 
     def remove(self, name: str | Enum) -> None:
         key = convert_to_key(name)

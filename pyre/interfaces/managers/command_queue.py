@@ -1,6 +1,6 @@
 import threading
 import abc
-from pyre.command_interfaces import ICommand, IInstantCommand
+from pyre.interfaces import ICommand, IInstantCommand
 
 
 class ICommandQueue(abc.ABC):

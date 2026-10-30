@@ -3,22 +3,60 @@ from __future__ import annotations
 import enum
 
 from dependency_injector.providers import Provider, Configuration
-from dependency_injector.wiring import inject, Provide
+from dependency_injector.wiring import Provide
 import numpy as np
-from numpy._typing import NDArray
-import wx
+from numpy.typing import NDArray
+from PyQt6.QtWidgets import QWidget
 from pyre.observable import ObservableSet, ObservedAction
 from pyre.observable import SetOperation
 
 import nornir_imageregistration
 import pyre
 from pyre import Space
-from pyre.command_interfaces import StatusChangeCallback
+from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, UICommandBase, NavigationCommandBase
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ControlPointManagerKey, \
     IControlPointMapManager
 from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
+
+
+def apply_shift_region_selection(
+        selection_set: ObservableSet[int],
+        hits: set[int] | None,
+) -> None:
+    """Shift+region: add hits unless every hit is already selected, then remove that group."""
+    points = set() if hits is None else set(hits)
+    if not points:
+        return
+    if points <= selection_set:
+        apply_selection_set_operation(selection_set, points, SetOperation.Difference)
+        return
+    apply_selection_set_operation(selection_set, points, SetOperation.Union)
+
+
+def apply_selection_set_operation(
+        selection_set: ObservableSet[int],
+        command_points: set[int] | None,
+        set_operation: SetOperation,
+) -> None:
+    """Apply ``set_operation`` between ``selection_set`` and ``command_points`` in place."""
+    points = set() if command_points is None else set(command_points)
+    if set_operation == SetOperation.Union:
+        selection_set.update(points)
+    elif set_operation == SetOperation.Replace:
+        selection_set.clear()
+        selection_set.update(points)
+    elif set_operation == SetOperation.SymmetricDifference:
+        selection_set ^= points
+    elif set_operation == SetOperation.Intersection:
+        selection_set.intersection_update(points)
+    elif set_operation == SetOperation.Difference:
+        selection_set.difference_update(points)
+    elif set_operation == SetOperation.AddOrRemoveGroup:
+        apply_shift_region_selection(selection_set, points)
+    else:
+        raise ValueError(f"Unknown SetOperation {set_operation}")
 
 
 class ToggleControlPointSelectionCommand(InstantCommandBase):
@@ -28,20 +66,19 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
     """
     _selection_set: ObservableSet[int]  # The indices of the selected points
 
-    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.controlpointmap_manager]
+    # _controlpointmap_manager: IControlPointMapManager = Provide[IContainer.control_point_map_manager]
     # _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     # _config: Configuration = Provide[IContainer.config]
     _command_action_points: set[int]
     _set_operation: SetOperation
 
-    @inject
     def __init__(self,
-                 parent: wx.Window,
+                 parent: QWidget,
                  selected_points: ObservableSet[int],  # The indices of the selected points
                  command_points: set[int],  # Points under mouse when command was triggered
                  space: Space,  # Space we are moving the points in, source or target side
                  set_operation: SetOperation,
-                 completed_func: StatusChangeCallback = None,
+                 completed_func: StatusChangeCallback | None = None,
 
                  **kwargs):
         """
@@ -80,27 +117,7 @@ class ToggleControlPointSelectionCommand(InstantCommandBase):
         return
 
     def execute(self):
-        # Check if shift is pressed to add to a selection
-
-        if self._set_operation == SetOperation.Union:
-            self._selection_set.update(self._command_points)
-        elif self._set_operation == SetOperation.Replace:
-            self._selection_set.clear()
-            self._selection_set.update(self._command_points)
-        elif self._set_operation == SetOperation.SymmetricDifference:
-            self._selection_set ^= self._command_points
-        elif self._set_operation == SetOperation.Intersection:
-            self._selection_set.intersection_update(self._command_points)
-        else:
-            raise ValueError(f"Unknown SetOperation {self._set_operation}")
-
-        # if selection_event_data.IsShiftPressed:
-        #     self._selection_set ^= self._command_action_points
-        # else:
-        #     # Clear the existing selection and set the new selection
-        #     self._selection_set.clear()
-        #     self._selection_set.update(self._command_action_points)
-
+        apply_selection_set_operation(self._selection_set, self._command_points, self._set_operation)
         super().execute()
 
     def activate(self):

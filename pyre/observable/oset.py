@@ -12,21 +12,22 @@ SetObserverCallable = Callable[['ObservableSet[T]', ObservedAction, AbstractSet[
 
 class SetOperation(enum.IntEnum):
     """Helper enum to indicate to a function the type of set operation to be performed"""
-    Replace = 0,  # Replace the current set with the new set
-    Union = 1,  # Return a new set with elements from the set and all others.
-    Intersection = 2,  # Return a new set with elements common to the set and all others.
-    Difference = 3,  # Return a new set with elements in the set that are not in the others.
+    Replace = 0  # Replace the current set with the new set
+    Union = 1  # Return a new set with elements from the set and all others.
+    Intersection = 2  # Return a new set with elements common to the set and all others.
+    Difference = 3  # Return a new set with elements in the set that are not in the others.
     SymmetricDifference = 4  # Return a new set with elements in either the set or other but not both.
+    AddOrRemoveGroup = 5  # Union unless every incoming element is already present, then difference.
 
 
 class ObservableSet(set, Generic[T]):
     """A python set that notifies observers when it is modified"""
-    _call_wrapper: Callable = None
+    _call_wrapper: Callable | None = None
 
-    def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable = None):
+    def __init__(self, initial_set: Iterable[T] | None = None, call_wrapper: Callable | None = None):
         """
         :param initial_set:
-        :param call_wrapper: Used when we can notification callbacks to go through an event loop such as wx.CallAfter, can also be used to launch callbacks on a thread
+        :param call_wrapper: Used when notification callbacks need to go through an event loop or be launched on a thread
         """
 
         super(ObservableSet, self).__init__(initial_set if initial_set is not None else [])
@@ -69,18 +70,15 @@ class ObservableSet(set, Generic[T]):
 
     def update(self, *others: Iterable[T] | AbstractSet[T]):
         """Update the set, adding elements from all others."""
-        if isinstance(*others, int):
-            pass
-
-        if not isinstance(*others, Iterable):
-            others = frozenset([*others])
-        else:
-            others = frozenset(*others)
-            # intersection = frozenset([others]) - self
-
-        intersection = others - self
-        super().update(others)
-        self._notify_observers(ObservedAction.ADD, intersection)
+        combined: list[T] = []
+        for other in others:
+            if hasattr(other, '__iter__'):
+                combined.extend(other)  # type: ignore[arg-type]
+            else:
+                combined.append(other)  # type: ignore[arg-type]
+        adding = frozenset(combined) - self
+        super().update(combined)
+        self._notify_observers(ObservedAction.ADD, adding)
 
     def intersection_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, keeping only elements found in it and all others."""
@@ -94,9 +92,8 @@ class ObservableSet(set, Generic[T]):
     def difference_update(self, *s: Iterable[T] | AbstractSet[T]):
         """Update the set, removing elements found in others."""
         in_value = frozenset(*s)
-        not_removing = self & in_value
-        removing = self - not_removing
-        self.difference_update(in_value)
+        removing = self & in_value
+        super().difference_update(in_value)
         if len(removing) > 0:
             self._notify_observers(ObservedAction.REMOVE, removing)
 

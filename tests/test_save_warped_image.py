@@ -1,0 +1,198 @@
+"""Tests for registered warped image save and composite display helpers."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+from types import SimpleNamespace
+from typing import Any
+
+import numpy as np
+from nornir_imageregistration.transforms import Rigid
+from PIL import Image
+
+import nornir_imageregistration
+from nornir_imageregistration.assemble import transform_for_host_assembly
+from pyre.common import (
+    AssembleHugeRegisteredWarpedImage,
+    SaveRegisteredWarpedImage,
+    image_file_bpp,
+    warped_image_export,
+    warped_image_export_bpp,
+)
+from pyre.views.composite_display import apply_rigid_yx, transform_visible_rectangle
+
+
+class TestSaveRegisteredWarpedImage(unittest.TestCase):
+    """Registered image export accepts ndarray shape tuples."""
+
+    def test_assemble_accepts_image_shape_tuple(self) -> None:
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        warped = np.zeros((8, 12), dtype=np.uint8)
+        result = AssembleHugeRegisteredWarpedImage(transform, (16, 20), warped)
+        self.assertEqual(result.shape, (16, 20))
+
+    def test_export_fills_unmapped_regions_with_black(self) -> None:
+        """Regions outside the warped footprint should export as zero (black), not extrapolated fill."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        warped = np.full((4, 4), 200, dtype=np.uint8)
+        result = AssembleHugeRegisteredWarpedImage(transform, (8, 8), warped)
+        np.testing.assert_array_equal(result[:4, :4], 200)
+        np.testing.assert_array_equal(result[4:, :], 0)
+        np.testing.assert_array_equal(result[:, 4:], 0)
+
+    def test_save_registered_warped_image_writes_png(self) -> None:
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        warped = np.arange(64, dtype=np.uint8).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "registered.png")
+            SaveRegisteredWarpedImage(out_path, transform, (8, 8), warped)
+            self.assertTrue(os.path.isfile(out_path))
+
+    def test_save_registered_warped_image_float16_png(self) -> None:
+        """float16 warped inputs must export without Pillow dtype errors."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        warped = np.linspace(0.0, 1.0, 64, dtype=np.float16).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "registered_f16.png")
+            SaveRegisteredWarpedImage(out_path, transform, (8, 8), warped)
+            self.assertTrue(os.path.isfile(out_path))
+
+    def test_save_registered_warped_image_wide_int_png(self) -> None:
+        """uint16/int32/uint32 inputs export as 16-bit PNG without Pillow mode errors."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        for dtype in (np.uint16, np.int32, np.uint32):
+            warped = np.array([[0, 1000], [2500, 4000]], dtype=dtype)
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = os.path.join(tmp, "registered_int.png")
+                SaveRegisteredWarpedImage(out_path, transform, (2, 2), warped)
+                self.assertTrue(os.path.isfile(out_path), dtype)
+
+    def test_save_registered_warped_image_8bit_png(self) -> None:
+        """bpp=8 writes an 8-bit greyscale PNG regardless of input dtype."""
+        from PIL import Image
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        for dtype in (np.uint8, np.uint16, np.int32, np.float32):
+            warped = np.linspace(0, 1 if dtype == np.float32 else 200, 64).astype(dtype).reshape(8, 8)
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = os.path.join(tmp, "registered_8.png")
+                SaveRegisteredWarpedImage(out_path, transform, (8, 8), warped, bpp=8)
+                with Image.open(out_path) as im:
+                    self.assertEqual(im.mode, "L", dtype)
+
+    def test_save_registered_warped_image_float16_raw_intensity_png(self) -> None:
+        """float16 EM-style intensities (not 0..1) should not be scaled by 2**32-1."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        warped = np.array([[0.0, 1000.0], [2500.0, 4000.0]], dtype=np.float16)
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "registered_raw_f16.png")
+            SaveRegisteredWarpedImage(out_path, transform, (2, 2), warped)
+            loaded = nornir_imageregistration.EnsureNumpyArray(
+                nornir_imageregistration.LoadImage(out_path, dtype=np.uint16))
+            np.testing.assert_array_equal(loaded, np.array([[0, 1000], [2500, 4000]], dtype=np.uint16))
+
+
+class TestWarpedImageExportInputs(unittest.TestCase):
+    """Save Warped Image warps the source into target space and never deepens 8-bit sources."""
+
+    def test_image_file_bpp_reads_the_file_header(self) -> None:
+        ramp = np.linspace(0, 1, 64).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            files = {
+                "l.png": (Image.fromarray((ramp * 255).astype(np.uint8)), 8),
+                "rgb.png": (Image.fromarray((ramp * 255).astype(np.uint8)).convert("RGB"), 8),
+                "i16.png": (Image.fromarray((ramp * 65535).astype(np.uint16)), 16),
+                "i32.tif": (Image.fromarray((ramp * 65535).astype(np.int32), mode="I"), 32),
+            }
+            for name, (image, expected) in files.items():
+                path = os.path.join(tmp, name)
+                image.save(path)
+                self.assertEqual(image_file_bpp(path), expected, name)
+            self.assertIsNone(image_file_bpp(os.path.join(tmp, "missing.png")))
+        self.assertIsNone(image_file_bpp(None))
+
+    def test_8bit_source_is_never_exported_as_16bit(self) -> None:
+        self.assertEqual(warped_image_export_bpp(None, 8), 8)
+        self.assertEqual(warped_image_export_bpp(8, 8), 8)
+        self.assertIsNone(warped_image_export_bpp(None, 16))
+        self.assertEqual(warped_image_export_bpp(8, 16), 8)
+        self.assertIsNone(warped_image_export_bpp(None, None))
+
+    def test_source_image_is_warped_onto_a_target_sized_canvas(self) -> None:
+        """Transform maps source to target, so the canvas is the target shape (as TransformStos)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = os.path.join(tmp, "source.png")
+            Image.fromarray(np.zeros((6, 9), dtype=np.uint8)).save(source_path)
+            source: Any = SimpleNamespace(Image=np.zeros((6, 9), dtype=np.float16), ImageFilename=source_path)
+            target: Any = SimpleNamespace(Image=np.zeros((10, 4), dtype=np.float16), ImageFilename=None)
+            export = warped_image_export(source, target)
+        self.assertEqual(export.target_shape, (10, 4))
+        self.assertIs(export.source_image, source.Image)
+        self.assertEqual(export.source_bpp, 8)
+
+    def test_8bit_source_held_as_float_saves_as_8bit_png(self) -> None:
+        """Pyre holds images as float16 0..1; an 8-bit source must still save as mode L."""
+        transform = Rigid(target_offset=(0.0, 0.0), source_rotation_center=(0.0, 0.0), angle=0.0)
+        held = np.linspace(0.0, 1.0, 64, dtype=np.float16).reshape(8, 8)
+        with tempfile.TemporaryDirectory() as tmp:
+            out_path = os.path.join(tmp, "registered.png")
+            SaveRegisteredWarpedImage(out_path, transform, (8, 8), held,
+                                      bpp=warped_image_export_bpp(None, 8))
+            with Image.open(out_path) as written:
+                self.assertEqual(written.mode, "L")
+
+
+class TestTransformForHostAssembly(unittest.TestCase):
+    """GPU grid transforms must convert to CPU before tiled export."""
+
+    def test_grid_gpu_component_converts_to_cpu_grid(self) -> None:
+        try:
+            from nornir_imageregistration.transforms.gridwithrbffallback import (
+                GridWithRBFFallback,
+                GridWithRBFFallback_GPUComponent,
+            )
+        except ImportError:
+            self.skipTest("Grid transform modules unavailable")
+
+        if not nornir_imageregistration.HasCupy():
+            self.skipTest("CuPy not available")
+
+        grid = nornir_imageregistration.ITKGridDivision((32, 32), cell_size=(16, 16))
+        rigid = Rigid(target_offset=(1.0, 2.0), source_rotation_center=(8.0, 8.0), angle=0.1)
+        grid.PopulateTargetPoints(rigid)
+        gpu = GridWithRBFFallback_GPUComponent(grid)
+        host = transform_for_host_assembly(gpu)
+        self.assertIsInstance(host, GridWithRBFFallback)
+        self.assertFalse(type(host).__name__.endswith('_GPUComponent'))
+
+
+class TestCompositeDisplay(unittest.TestCase):
+    """Composite draw helpers map source-space camera bounds to target space."""
+
+    def test_identity_transform_preserves_rectangle(self) -> None:
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds((10.0, 20.0, 30.0, 40.0))
+        identity = np.eye(3, dtype=np.float32)
+        mapped = transform_visible_rectangle(rect, identity)
+        self.assertAlmostEqual(float(mapped.BottomLeft[0]), 10.0)
+        self.assertAlmostEqual(float(mapped.BottomLeft[1]), 20.0)
+        self.assertAlmostEqual(float(mapped.TopRight[0]), 30.0)
+        self.assertAlmostEqual(float(mapped.TopRight[1]), 40.0)
+
+    def test_translation_shifts_visible_bounds(self) -> None:
+        rect = nornir_imageregistration.Rectangle.CreateFromBounds((0.0, 0.0, 10.0, 10.0))
+        translate = np.array([
+            [1.0, 0.0, 5.0],
+            [0.0, 1.0, 7.0],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float32)
+        point = apply_rigid_yx(translate, np.array([0.0, 0.0]))
+        self.assertAlmostEqual(float(point[0]), 5.0)
+        self.assertAlmostEqual(float(point[1]), 7.0)
+        mapped = transform_visible_rectangle(rect, translate)
+        self.assertAlmostEqual(float(mapped.BottomLeft[0]), 5.0)
+        self.assertAlmostEqual(float(mapped.BottomLeft[1]), 7.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,7 +1,7 @@
-from dependency_injector.wiring import Provide, inject
+from dependency_injector.wiring import Provide
 import logging
 import threading
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces.managers.command_queue import ICommandQueue
 from pyre.container import IContainer
 
@@ -12,7 +12,6 @@ class CommandQueue(ICommandQueue):
     _event: threading.Event
     _logger: logging.Logger
 
-    @inject
     def __init__(self):
         self._queue = []
         self._lock = threading.Lock()

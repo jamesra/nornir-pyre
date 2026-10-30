@@ -1,0 +1,154 @@
+"""Tests for control-point hit testing during drag and zoom."""
+
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+from PyQt6.QtWidgets import QApplication
+
+from pyre.commands.stos.actionmaphelpers import (
+    drag_translate_interactions,
+    find_control_point_interactions,
+)
+from pyre.controllers.transformcontroller import TransformController
+from pyre.selection_event_data import InputEvent, SelectionEventData
+from pyre.space import Space
+from pyre.viewmodels.controlpointmap import ControlPointMap
+
+
+def _mesh() -> MeshWithRBFFallback:
+    points = np.array([
+        [10.0, 20.0, 100.0, 200.0],
+        [30.0, 40.0, 300.0, 400.0],
+        [50.0, 60.0, 500.0, 600.0],
+        [70.0, 80.0, 700.0, 800.0],
+    ], dtype=np.float32)
+    return MeshWithRBFFallback(points)
+
+
+def _flush_coalesced_change() -> None:
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+
+
+class TestControlPointPick(unittest.TestCase):
+  """Nearest-point pick and drag selection retention."""
+
+  def test_find_nearest_within_returns_single_point(self) -> None:
+      cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
+      hits = cmap.find_nearest_within(np.array([100.5, 200.5]), 5.0)
+      self.assertEqual(hits, {0})
+
+  def test_pick_radius_matches_glyph_half_extent(self) -> None:
+      cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
+      inside = np.array([100.0, 204.0])
+      outside = np.array([100.0, 211.0])
+      self.assertEqual(find_control_point_interactions(cmap, inside, 10.0, 1.0), {0})
+      self.assertEqual(find_control_point_interactions(cmap, outside, 10.0, 1.0), set())
+
+  def test_find_nearest_within_rejects_non_finite_query(self) -> None:
+      cmap = ControlPointMap(TransformController(_mesh()), Space.Source)
+      self.assertEqual(cmap.find_nearest_within(np.array([np.nan, 0.0]), 5.0), set())
+      self.assertEqual(cmap.find_nearest_within(np.array([np.inf, 1.0]), 5.0), set())
+
+  def test_target_map_rebuilds_after_inplace_target_point_move(self) -> None:
+      """In-place TargetPoints edits must refresh Target-view hit testing."""
+      controller = TransformController(_mesh())
+      cmap = ControlPointMap(controller, Space.Target)
+      original = np.array(controller.TargetPoints[0], copy=True)
+      self.assertEqual(cmap.find_nearest_within(original, 1.0), {0})
+      controller.MovePoint(0, ImageDX=50.0, ImageDY=40.0, space=Space.Target)
+      _flush_coalesced_change()
+      self.assertEqual(cmap.find_nearest_within(original, 1.0), set())
+      moved = np.array(controller.TargetPoints[0], copy=True)
+      self.assertEqual(cmap.find_nearest_within(moved, 1.0), {0})
+
+  def test_interactive_drag_skips_kdtree_and_picks_live_points(self) -> None:
+      """Mouse-move during CP drag must not rebuild the KD-tree; pick uses live points."""
+      controller = TransformController(_mesh())
+      cmap = ControlPointMap(controller, Space.Target)
+      original = np.array(controller.TargetPoints[0], copy=True)
+      controller.begin_interactive_edit(Space.Target)
+      try:
+          with patch("pyre.viewmodels.controlpointmap.scipy.spatial.KDTree") as mock_tree:
+              controller.MovePoint(0, ImageDX=50.0, ImageDY=40.0, space=Space.Target)
+              mock_tree.assert_not_called()
+          moved = np.array(controller.TargetPoints[0], copy=True)
+          self.assertTrue(cmap._kdtree_stale)
+          self.assertEqual(cmap.find_nearest_within(original, 1.0), set())
+          self.assertEqual(cmap.find_nearest_within(moved, 1.0), {0})
+          self.assertEqual(cmap.find_in_rect(moved - 1.0, moved + 1.0), {0})
+      finally:
+          if controller.interactive_edit_in_progress:
+              controller.end_interactive_edit()
+
+  def test_kdtree_rebuilds_on_pick_after_interactive_drag(self) -> None:
+      """After mouse-up, OnChange rebuilds the tree so the next pick uses live points."""
+      controller = TransformController(_mesh())
+      cmap = ControlPointMap(controller, Space.Target)
+      original = np.array(controller.TargetPoints[0], copy=True)
+      controller.begin_interactive_edit(Space.Target)
+      try:
+          controller.MovePoint(0, ImageDX=50.0, ImageDY=40.0, space=Space.Target)
+          self.assertTrue(cmap._kdtree_stale)
+      finally:
+          if controller.interactive_edit_in_progress:
+              controller.end_interactive_edit()
+      moved = np.array(controller.TargetPoints[0], copy=True)
+      self.assertEqual(cmap.find_nearest_within(moved, 1.0), {0})
+      self.assertFalse(cmap._kdtree_stale)
+      self.assertEqual(cmap.find_nearest_within(original, 1.0), set())
+
+  def test_drag_on_empty_space_does_not_reuse_selection(self) -> None:
+      event = SelectionEventData(
+          camera=None,  # type: ignore[arg-type]
+          source=None,  # type: ignore[arg-type]
+          input=InputEvent.Drag,
+          modifiers=0,
+          position=np.array([0.0, 0.0]),
+          existing_selections={2, 5},
+      )
+      self.assertEqual(drag_translate_interactions(event, set()), set())
+
+  def test_find_nearest_within_skips_busy_point(self) -> None:
+      controller = TransformController(_mesh())
+      point_id = controller.point_id_for_index(0)
+      assert point_id is not None
+      controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      self.assertEqual(cmap.find_nearest_within(np.array([100.0, 200.0]), 5.0), set())
+      self.assertEqual(cmap.find_nearest_within(np.array([300.0, 400.0]), 5.0), {1})
+
+  def test_find_in_rect_skips_busy_rows(self) -> None:
+      controller = TransformController(_mesh())
+      point_id = controller.point_id_for_index(0)
+      assert point_id is not None
+      controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      self.assertEqual(
+          cmap.find_in_rect((100.0, 200.0), (300.0, 400.0)),
+          {1},
+      )
+
+  @given(busy=st.lists(st.integers(min_value=0, max_value=3), unique=True, max_size=4))
+  @settings(max_examples=20, deadline=None)
+  def test_find_in_rect_excludes_busy_subset(self, busy: list[int]) -> None:
+      controller = TransformController(_mesh())
+      for index in busy:
+          point_id = controller.point_id_for_index(index)
+          assert point_id is not None
+          controller.mark_busy_points("register", [point_id])
+      cmap = ControlPointMap(controller, Space.Source)
+      hits = cmap.find_in_rect((0.0, 0.0), (1000.0, 1000.0))
+      self.assertEqual(hits, {0, 1, 2, 3} - set(busy))
+
+
+if __name__ == "__main__":
+    unittest.main()

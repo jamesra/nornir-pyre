@@ -1,5 +1,6 @@
-"""Tracks selectable objects in a view
+"""Region manager module: tracks selectable objects in a view.
 
+The filename "region_manager" refers to this module's role; the main implementation class is RegionMap (implements IRegionMap).
 A manager contains objects that listen to input events in a specific region.
 The manager will identify the objects with a possible user interaction when an event occurs in their region.
 objects report the distance to the input event, and the manager will select the object with the smallest distance.
@@ -10,13 +11,13 @@ a new command for the input.  The first object to return a command is selected a
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import numpy as np
 import rtree
 
 import nornir_imageregistration
-from pyre.command_interfaces import ICommand
+from pyre.interfaces import ICommand
 from pyre.interfaces.managers.region_manager import IRegion, IRegionMap
 from pyre.selection_event_data import SelectionEventData
 from pyre.interfaces.managers.command_manager import IControlPointActionMap
@@ -39,23 +40,30 @@ class RegionMap(IRegionMap, IControlPointActionMap):
 
     def __init__(self):
         self._index = rtree.index.Index(interleaved=True)
+        self.object_to_key = {}
+        self.key_to_object = {}
 
     def add(self, obj: IRegion) -> int:
         if obj in self.object_to_key:
             raise KeyError("Object already in manager")
 
-        bounds = obj.bounding_box.ToTuple()
+        bbox = obj.bounding_box
+        assert bbox is not None
+        bounds = bbox.ToTuple()
         key = id(obj)
+        self.object_to_key[obj] = key
         self.key_to_object[key] = obj
-        self._index.insert(key, bounds)
+        self._index.insert(key, cast(tuple[float, float, float, float], bounds))
         return key
 
     def tryremove(self, key: int) -> bool:
         if key in self.key_to_object:
             obj = self.key_to_object[key]
+            bbox = obj.bounding_box
+            coords = bbox.ToTuple() if bbox is not None else (0, 0, 0, 0)
             del self.key_to_object[key]
             del self.object_to_key[obj]
-            self._index.delete(key)
+            self._index.delete(key, cast(tuple[float, float, float, float], coords))
             return True
         return False
 
@@ -70,10 +78,10 @@ class RegionMap(IRegionMap, IControlPointActionMap):
     def find_potential_interactions(self, event: SelectionEventData) -> list[InteractionCandidate]:
         """Determine the list of possible interactions for the event at a world position.
         First checks the bounding box, then invokes interaction_distance on the object"""
-        world_position = event.world_position
+        world_position = event.position
         bounds = nornir_imageregistration.Rectangle.CreateFromBounds(
             np.array((world_position[0], world_position[1], world_position[0], world_position[1])))
-        keys = list(self._index.intersection(bounds.ToTuple()))
+        keys = list(self._index.intersection(cast(tuple[float, float, float, float], bounds.ToTuple())))
         objects = [self.key_to_object[key] for key in keys]
         candidates = []  # type: list[InteractionCandidate]
         for obj in objects:

@@ -37,3 +37,10 @@ nosetests.xml
 .pydevproject
 /Logs/
 /__pycache__/
+
+# Logs
+pyre-console*.log
+
+
+# Hypothesis example database (local test cache)
+.hypothesis/

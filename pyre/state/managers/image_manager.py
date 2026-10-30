@@ -4,7 +4,7 @@ import nornir_imageregistration
 
 from numpy.typing import NDArray
 from pyre.interfaces.eventmanager import IEventManager
-from pyre.eventmanager import wxEventManager
+from pyre.qt_eventmanager import QtEventManager
 from pyre.interfaces.managers.image_manager import IImageManager, ImageManagerChangeCallback
 
 from pyre.interfaces.action import Action
@@ -17,7 +17,7 @@ class ImageManager(IImageManager):
 
     def __init__(self):
         self._images = {}
-        self._change_event_manager = wxEventManager[ImageManagerChangeCallback](self.__class__.__name__)
+        self._change_event_manager = QtEventManager[ImageManagerChangeCallback](self.__class__.__name__)
 
     def add(self,
             key: str | Enum,

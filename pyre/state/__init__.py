@@ -1,12 +1,15 @@
 import nornir_imageregistration.transforms
+from nornir_imageregistration.files.stosfile import StosFile
 import pyre.settings
+import logging
 import os
 
 from dependency_injector.wiring import Provide, inject
 
 from pyre.state.managers.image_manager import ImageManager
 from pyre.state.managers.image_viewmodel_manager import ImageViewModelManager
-from pyre.state.managers.transformcontroller_glbuffer_manager import TransformControllerGLBufferManager
+from pyre.controllers import TransformController
+from pyre.state.managers.transform_controller_glbuffer_manager import TransformControllerGLBufferManager
 from .events import *
 from .imageloader import ImageLoader
 from .managers import *
@@ -15,38 +18,144 @@ from .stos import StosState, StosWindowConfig
 from pyre.interfaces.viewtype import ViewType
 from ..container import IContainer
 import pyre.interfaces.managers
-from ..settings import ImageAndMaskPath
+from ..settings import ImageAndMaskPath, AppSettings
+from pyre.stos_registration import (
+    try_resolve_source_and_target_image_data,
+    sync_stos_registration_roles,
+    apply_stos_transform_to_controller,
+    wire_stos_state_after_load,
+    ensure_mask_viewmodels_from_load,
+)
+from pyre.stos_manual_paths import resolve_stos_restore_path
 
 # The global gl_context_manager
 
+# Module-level state; prefer get_current_stos_config/set_current_stos_config (and mosaic) for testability.
+currentStosConfig: StosState | None = None
+currentMosaicConfig: MosaicState | None = None
 
-currentStosConfig = None  # type: StosState
-currentMosaicConfig = None  # type: MosaicState
+
+def get_current_stos_config() -> StosState | None:
+    """Return the current STOS config. Use set_current_stos_config() in tests to inject a mock."""
+    return currentStosConfig
+
+
+def set_current_stos_config(config: StosState | None) -> None:
+    """Set the current STOS config. Used by launcher and tests."""
+    global currentStosConfig
+    currentStosConfig = config
+
+
+def get_current_mosaic_config() -> MosaicState | None:
+    """Return the current mosaic config. Use set_current_mosaic_config() in tests to inject a mock."""
+    return currentMosaicConfig
+
+
+def set_current_mosaic_config(config: MosaicState | None) -> None:
+    """Set the current mosaic config. Used by launcher and tests."""
+    global currentMosaicConfig
+    currentMosaicConfig = config
 
 
 def init():
     global currentStosConfig
-    currentStosConfig = StosState()
+    # StosState requires DI (image_loader, etc.); use set_current_stos_config from launcher/tests.
+    currentStosConfig = None
 
     global currentMosaicConfig
-    currentMosaicConfig = MosaicState()
+    currentMosaicConfig = MosaicState()  # type: ignore[call-arg, arg-type]
+
+
+def _clear_stale_stos_restore_settings(settings: AppSettings) -> None:
+    """Drop persisted STOS paths so the next launch does not retry a dead restore."""
+    import logging
+    logging.getLogger(__name__).info("Clearing stale STOS restore paths from settings")
+    settings.stos.stos_filename = None
+    settings.stos.stos_dirname = None
+    settings.stos.source_image = None
+    settings.stos.target_image = None
+
+
+def _sync_registration_roles_from_manager(
+        stos_config: StosState,
+        image_manager: ImageManager,
+        *,
+        stos_filename: str | None,
+        stos: StosFile | None = None,
+        settings_source_image_path: str | None,
+        settings_target_image_path: str | None,
+) -> None:
+    """Update StosState source/target registration roles when both image slots are loaded."""
+    resolved = try_resolve_source_and_target_image_data(
+        image_manager,
+        ViewType.Source.value,
+        ViewType.Target.value,
+        stos_filename=stos_filename,
+        stos=stos,
+        settings_source_image_path=settings_source_image_path,
+        settings_target_image_path=settings_target_image_path,
+    )
+    if resolved is not None:
+        warped, fixed = resolved
+        sync_stos_registration_roles(stos_config, warped, fixed)
+
+
+def _saved_image_fullpath(saved: ImageAndMaskPath | None) -> str | None:
+    """Return the persisted image path of a settings image slot, or None if the slot is empty."""
+    return saved.image_fullpath if saved is not None else None
+
+
+def _restore_saved_image(image_loader: ImageLoader,
+                         view_type: ViewType,
+                         saved: ImageAndMaskPath | None,
+                         label: str) -> None:
+    """Load a saved image (and mask) into its view slot and create its viewmodel.
+
+    A missing slot or image path is skipped. FileNotFoundError and ValueError are logged
+    as a warning so startup continues without that image; other errors propagate.
+    """
+    if saved is None or saved.image_fullpath is None:
+        return
+    try:
+        result = image_loader.load_image_into_manager(
+            key=view_type.value,
+            image_fullpath=saved.image_fullpath,
+            mask_fullpath=saved.mask_fullpath,
+        )
+        image_loader.create_image_viewmodel(load_result=result)
+    except (FileNotFoundError, ValueError) as e:
+        logging.getLogger(__name__).warning(
+            "Saved %s image not found — starting without it: %s", label, e)
 
 
 @inject
 def UpdateSettingsFromArguments(arg_values,
-                                image_loader: pyre.settings.AppSettings = Provide[
-                                    IContainer.image_loader],
-                                settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+                                settings: AppSettings = Provide[IContainer.settings]):
+    """Record ``-stos`` / ``-Source`` / ``-Target`` in settings; InitializeStateFromSettings loads them."""
+    import logging
+    _log = logging.getLogger(__name__)
+
     if 'stosFullPath' in arg_values and arg_values.stosFullPath is not None:
         settings.stos.stos_filename = arg_values.stosFullPath
+        _log.info("STOS argument provided: %s", arg_values.stosFullPath)
 
     else:
-        if 'SourceImageFullPath' in arg_values and arg_values.SourceImageFullPath is not None:
-            settings.stos.source_image_filename = arg_values.SourceImageFullPath
-            image_loader.load_image_into_manager(ViewType.Target, arg_values.WarpedImageFullPath)
-        if 'TargetImageFullPath' in arg_values and arg_values.TargetImageFullPath is not None:
-            settings.stos.target_image_filename = arg_values.TargetImageFullPath
-            image_loader.load_image_into_manager(ViewType.Source, arg_values.FixedImageFullPath)
+        _log.info("No STOS argument provided at startup")
+        target_arg = arg_values.TargetImageFullPath
+        source_arg = arg_values.SourceImageFullPath
+        if target_arg is not None or source_arg is not None:
+            # Images named on the command line replace the previous session's STOS.
+            # These used to be loaded here and then InitializeStateFromSettings restored
+            # the saved STOS over them; now only the settings change and that restore
+            # loads the images once and wires them into StosState.
+            settings.stos.stos_filename = None
+            settings.stos.stos_opened_from_browser_folder = None
+        if target_arg is not None:
+            settings.stos.target_image = ImageAndMaskPath(
+                image_fullpath=os.path.abspath(target_arg), mask_fullpath=None)
+        if source_arg is not None:
+            settings.stos.source_image = ImageAndMaskPath(
+                image_fullpath=os.path.abspath(source_arg), mask_fullpath=None)
 
     # if 'mosaicFullPath' in arg_values and arg_values.mosaicFullPath is not None:
     #     tiles_path = os.path.dirname(arg_values.mosaicFullPath)
@@ -58,21 +167,87 @@ def UpdateSettingsFromArguments(arg_values,
 
 @inject
 def InitializeStateFromSettings(stos_transform_controller: TransformController,
-                                image_loader: pyre.settings.AppSettings = Provide[IContainer.image_loader],
-                                settings: pyre.settings.AppSettings = Provide[IContainer.settings]):
+                                image_loader: ImageLoader = Provide[IContainer.image_loader],
+                                settings: AppSettings = Provide[IContainer.settings]):
+    """Load the saved STOS or individual images from settings.
+
+    Raises:
+        FileNotFoundError: If the saved STOS file path does not exist on disk.
+        ValueError: If the STOS file exists but its transform cannot be parsed.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    image_manager: ImageManager = image_loader._image_manager  # type: ignore[attr-defined]
+
     if settings.stos.stos_filename is not None:
-        load_result = image_loader.load_stos(settings.stos.stos_filename)
-        transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)
-        stos_transform_controller.TransformModel = transform
+        restore_path = resolve_stos_restore_path(
+            settings.stos.stos_filename,
+            stos_group_folder=settings.stos.stos_opened_from_browser_folder,
+            stos_browser_basename=settings.stos.stos_browser_basename,
+            stos_file_source=settings.stos.stos_file_source,
+            flat_manual=settings.stos.stos_browser_flat_manual,
+        )
+        _log.info("Attempting to load STOS from settings: %s (resolved: %s)",
+                  settings.stos.stos_filename, restore_path)
+        try:
+            load_result = image_loader.load_stos(restore_path)
+        except FileNotFoundError:
+            _log.error("STOS load failed (file not found): %s", restore_path)
+            _clear_stale_stos_restore_settings(settings)
+            raise
+        except ValueError as e:
+            _log.error("STOS load failed (invalid data or missing linked image): %s | %s",
+                       restore_path, e)
+            _clear_stale_stos_restore_settings(settings)
+            raise
+        image_loader.create_image_viewmodel(load_result=load_result.source)
+        image_loader.create_image_viewmodel(load_result=load_result.target)
+        try:
+            apply_stos_transform_to_controller(stos_transform_controller, load_result.stos.Transform)  # type: ignore[arg-type]
+        except Exception as e:
+            _log.error("STOS transform parse failed for %s: %s", restore_path, e)
+            _clear_stale_stos_restore_settings(settings)
+            raise ValueError(
+                f"Could not parse the transform in '{restore_path}':\n{e}") from e
+        settings.stos.stos_filename = restore_path
 
         settings.stos.source_image = ImageAndMaskPath(image_fullpath=load_result.source.image_fullpath,
                                                       mask_fullpath=load_result.source.mask_fullpath)
         settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                       mask_fullpath=load_result.target.mask_fullpath)
+        stos_config = get_current_stos_config()
+        if stos_config is not None:
+            wire_stos_state_after_load(
+                stos_config,
+                image_loader._image_viewmodel_manager,  # type: ignore[attr-defined]
+                image_manager=image_manager,
+            )
+            ensure_mask_viewmodels_from_load(stos_config, load_result)
+            _sync_registration_roles_from_manager(
+                stos_config,
+                image_manager,
+                stos_filename=restore_path,
+                stos=load_result.stos,
+                settings_source_image_path=settings.stos.source_image.image_fullpath,
+                settings_target_image_path=settings.stos.target_image.image_fullpath,
+            )
     else:
-        if settings.stos.target_image is not None and settings.stos.target_image.image_fullpath is not None:
-            image_loader.load_image_into_manager(ViewType.Target, settings.stos.target_image.image_fullpath,
-                                                 mask_path=settings.stos.target_image.mask_fullpath)
-        if settings.stos.source_image is not None and settings.stos.source_image.image_fullpath is not None:
-            image_loader.load_image_into_manager(ViewType.Source, settings.stos.source_image.image_fullpath,
-                                                 mask_path=settings.stos.source_image.mask_fullpath)
+        _restore_saved_image(image_loader, ViewType.Target, settings.stos.target_image, "target")
+        _restore_saved_image(image_loader, ViewType.Source, settings.stos.source_image, "source")
+        stos_config = get_current_stos_config()
+        if stos_config is not None:
+            # Same wiring as the STOS restore above. Without it the panels showed both
+            # images while StosState had no view models, so Save Warped Image asked for
+            # images that were already loaded.
+            wire_stos_state_after_load(
+                stos_config,
+                image_loader._image_viewmodel_manager,  # type: ignore[attr-defined]
+                image_manager=image_manager,
+            )
+            _sync_registration_roles_from_manager(
+                stos_config,
+                image_manager,
+                stos_filename=settings.stos.stos_filename,
+                settings_source_image_path=_saved_image_fullpath(settings.stos.source_image),
+                settings_target_image_path=_saved_image_fullpath(settings.stos.target_image),
+            )

@@ -7,18 +7,30 @@ Created on Oct 17, 2012
 import logging
 import math
 import sys
-from typing import Generator
+from typing import Generator, cast
 
 import OpenGL.GL as gl
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 import scipy.ndimage
 
 import nornir_imageregistration
+from nornir_imageregistration.core._core import RgbLikeToGrayscaleLuminance
 from nornir_shared.mathhelper import NearestPowerOfTwo
 import pyre.gl_engine as gl_engine
+from pyre.gl_engine.helpers import check_for_error, raise_on_error
+from pyre.perf_debug import timed
 
 Logger = logging.getLogger("ImageArray")
+
+
+def working_float_dtype(source_dtype: DTypeLike) -> type[np.floating]:
+    """Return the float type Pyre holds an image in, given the dtype it was stored as.
+
+    float16 represents every 8-bit level exactly but keeps only 11 significant bits, so
+    images deeper than 8 bits are held as float32 to keep their precision.
+    """
+    return np.float16 if np.dtype(source_dtype).itemsize <= 1 else np.float32
 
 
 class ImageViewModel:
@@ -34,8 +46,10 @@ class ImageViewModel:
     _height: int
     _width: int
     _ImageFilename: str | None = None
-    _image_stats: nornir_imageregistration.ImageStats
+    _image_stats: nornir_imageregistration.ImageStats | None
     RawImageSize: NDArray[np.integer]
+    _rgb_like_converted_to_grayscale: bool
+    _managed_by_filepath_cache: bool = False
 
     # The largest dimension we allow a texture to have
     MaxTextureDimension: int = int(4096)
@@ -46,16 +60,24 @@ class ImageViewModel:
 
     @property
     def Stats(self) -> nornir_imageregistration.ImageStats:
+        """Image statistics; computed lazily on first access."""
+        if self._image_stats is None:
+            self._image_stats = nornir_imageregistration.ImageStats.Create(self._Image)
         return self._image_stats
 
     @property
+    def rgb_like_converted_to_grayscale(self) -> bool:
+        """True if the image had RGB/RGBA (or LA) layout and was reduced to one plane via luminance."""
+        return self._rgb_like_converted_to_grayscale
+
+    @property
     def width(self) -> int:
-        """Size of the full image"""
+        """Raw image width in pixels (unpadded)."""
         return self._Image.shape[1]
 
     @property
     def height(self) -> int:
-        """Size of the full image"""
+        """Raw image height in pixels (unpadded)."""
         return self._Image.shape[0]
 
     @property
@@ -70,19 +92,36 @@ class ImageViewModel:
 
     @property
     def size(self) -> tuple[int, int]:
-        """Size of the full image"""
+        """Padded texture-grid size (height, width) in pixels."""
         return self._height, self._width
 
     @property
     def shape(self) -> tuple[int, int]:
-        """Size of the full image"""
+        """Padded texture-grid shape (height, width); same as :attr:`size`."""
         return self._height, self._width
 
     @property
     def ImageArray(self) -> list[list[int]]:
         """Array of textures for the full image"""
         if self._ImageArray is None:
-            self._ImageArray = self.CreateImageArray()
+            try:
+                self._ImageArray = self.CreateImageArray()
+            except RuntimeError as e:
+                if "No valid OpenGL context" in str(e):
+                    # Context not ready yet - return empty array
+                    # Textures will be created when context becomes available
+                    self._ImageArray = []
+                    return []
+                raise
+        # If ImageArray was set to empty list due to context not being ready, try again
+        if self._ImageArray == []:
+            try:
+                self._ImageArray = self.CreateImageArray()
+            except RuntimeError as e:
+                if "No valid OpenGL context" in str(e):
+                    # Still not ready
+                    return []
+                raise
         return self._ImageArray
 
     @property
@@ -91,7 +130,7 @@ class ImageViewModel:
         return self._TextureSize
 
     @property
-    def ImageFilename(self) -> str:
+    def ImageFilename(self) -> str | None:
         """Filename we loaded"""
         return self._ImageFilename
 
@@ -107,28 +146,41 @@ class ImageViewModel:
 
         return _TextureSize
 
-    def __init__(self, input_image: str | NDArray):
+    def __init__(
+            self,
+            input_image: str | NDArray,
+            image_filename: str | None = None,
+            managed_by_filepath_cache: bool = False,
+    ):
         """
         Constructor, _Image is either path to file or a numpy array
         """
 
         '''Convert the passed _Image to a Luminance Texture, cutting the image into smaller images as necessary'''
+        self._managed_by_filepath_cache = managed_by_filepath_cache
+        # Accept CuPy arrays from image loader (convert to numpy for viewmodel/tiling)
+        get_fn = getattr(input_image, "get", None)
+        if callable(get_fn):
+            input_image = cast(str | NDArray, get_fn())
         if isinstance(input_image, str):
 
             Logger.info("Loading image: " + input_image)
             self._ImageFilename = input_image
 
-            self._Image = nornir_imageregistration.LoadImage(input_image, dtype=np.float16) * 255  # //
+            float_dtype = working_float_dtype(nornir_imageregistration.get_image_file_dtype(input_image))
+            self._Image = nornir_imageregistration.LoadImage(input_image, dtype=float_dtype) * 255  # //
 
-            # Old volumes, such as RC1, have RGB images instead of grayscale.
-            self._Image = nornir_imageregistration.ForceGrayscale(self._Image)
+            self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(self._Image)
             Logger.info("Loading done")
         elif isinstance(input_image, np.ndarray):
-            self._Image = input_image
+            self._Image, self._rgb_like_converted_to_grayscale = RgbLikeToGrayscaleLuminance(input_image)
+            if image_filename is not None:
+                self._ImageFilename = image_filename
         else:
             raise TypeError("Expected a path to an image file or a numpy ndarray")
 
-        self._image_stats = nornir_imageregistration.ImageStats.Create(self._Image)
+        # Defer full-image stats until registration or other callers need them.
+        self._image_stats = None
 
         # Images are read only, create a memory mapped file for the image for use with multithreading
         # self._Image = core.npArrayToReadOnlySharedArray(self._Image)
@@ -145,20 +197,22 @@ class ImageViewModel:
     def ResizeToPowerOfTwo(self, InputImage: str, tilesize: nornir_imageregistration.ShapeLike | None = None) -> \
             NDArray[np.floating]:
         if tilesize is None:
-            tilesize = self._TileSize
+            tilesize = self.TextureSize
 
-        Resize = scipy.ndimage.imread(InputImage, flatten=True)
+        tile_height = int(tilesize[0])
+        tile_width = int(tilesize[1])
+        Resize = nornir_imageregistration.LoadImage(InputImage, dtype=np.float32)
 
         height = Resize.shape[0]
         width = Resize.shape[1]
 
-        NumCols = math.ceil(width / float(tilesize[0]))
-        NumRows = math.ceil(height / float(tilesize[1]))
+        NumCols = math.ceil(width / float(tile_width))
+        NumRows = math.ceil(height / float(tile_height))
 
-        newwidth = NumCols * tilesize[0]
-        newheight = NumRows * tilesize[1]
+        newwidth = NumCols * tile_height
+        newheight = NumRows * tile_width
 
-        newImage = np.zeros((newheight, newwidth), dtype=Resize.dtype)
+        newImage = np.zeros((int(newheight), int(newwidth)), dtype=Resize.dtype)
 
         newImage[0:Resize.shape[0], 0:Resize.shape[1]] = Resize
 
@@ -174,63 +228,62 @@ class ImageViewModel:
         Logger.info("CreateImageArray")
         # Round up size to nearest power of 2
 
-        texture_grid = list()  # type: list[list[int]]
+        with timed(
+            f'CreateImageArray {self.ImageFilename or "array"} '
+            f'{self.NumCols}x{self.NumRows} tiles'
+        ):
+            texture_grid = list()  # type: list[list[int]]
 
-        print_output = self.NumCols > 1 and self.NumRows > 1
+            for iX in range(0, self.width, self.TextureSize[nornir_imageregistration.iPoint.X]):
+                columnTextures = list()  # type: list[int]
+                lastCol = iX + self.TextureSize[nornir_imageregistration.iPoint.X] > self.width
 
-        if print_output:
-            print('\nConverting image to ' + str(self.NumCols) + "x" + str(self.NumRows) + ' grid of OpenGL textures')
-
-        for iX in range(0, self.width, self.TextureSize[nornir_imageregistration.iPoint.X]):
-            columnTextures = list()  # type: list[int]
-            lastCol = iX + self.TextureSize[nornir_imageregistration.iPoint.X] > self.width
-
-            end_iX = iX + self.TextureSize[nornir_imageregistration.iPoint.X]
-            pad_image = end_iX > self.Image.shape[1]
-            if pad_image:
-                end_iX = self.Image.shape[1]
-
-            if print_output:
-                sys.stdout.write('\n')
-
-            # print "ix " + str(iX)
-            for iY in range(0, self.height, self.TextureSize[nornir_imageregistration.iPoint.Y]):
-
-                if print_output:
-                    sys.stdout.write('.')
-                lastRow = iY + self.TextureSize[nornir_imageregistration.iPoint.Y] > self.height
-
-                end_iY = iY + self.TextureSize[nornir_imageregistration.iPoint.Y]
-                if end_iY > self.Image.shape[0]:
-                    end_iY = self.Image.shape[0]
-                    pad_image = True
-
-                # temp = _Image[iX:iX + self.TextureSize[0], iY:iY + self.TextureSize[1]]
-
-                # if not lastRow:
-
-                temp = None
+                end_iX = iX + self.TextureSize[nornir_imageregistration.iPoint.X]
+                pad_image = end_iX > self.Image.shape[1]
                 if pad_image:
-                    paddedImage = np.zeros(self.TextureSize)
-                    paddedImage[0:end_iY - iY, 0:end_iX - iX] = self.Image[iY:end_iY, iX:end_iX]
-                    temp = paddedImage
-                else:
-                    temp = self.Image[iY:end_iY, iX:end_iX]
+                    end_iX = self.Image.shape[1]
 
-                texture = gl_engine.textures.create_grayscale_texture(temp)
-                del temp
-                columnTextures.append(texture)
+                for iY in range(0, self.height, self.TextureSize[nornir_imageregistration.iPoint.Y]):
+                    lastRow = iY + self.TextureSize[nornir_imageregistration.iPoint.Y] > self.height
 
-            texture_grid.append(columnTextures)
+                    end_iY = iY + self.TextureSize[nornir_imageregistration.iPoint.Y]
+                    if end_iY > self.Image.shape[0]:
+                        end_iY = self.Image.shape[0]
+                        pad_image = True
 
-        if print_output:
-            print('\nTexture creation complete\n')
+                    # temp = _Image[iX:iX + self.TextureSize[0], iY:iY + self.TextureSize[1]]
 
-        Logger.info("Completed CreateImageArray")
-        return texture_grid
+                    # if not lastRow:
+
+                    temp = None
+                    if pad_image:
+                        paddedImage = np.zeros(self.TextureSize)
+                        paddedImage[0:end_iY - iY, 0:end_iX - iX] = self.Image[iY:end_iY, iX:end_iX]
+                        temp = paddedImage
+                    else:
+                        temp = self.Image[iY:end_iY, iX:end_iX]
+
+                    try:
+                        texture_input = cast(NDArray[np.uint8], nornir_imageregistration.image_to_uint8(temp))
+                        texture = gl_engine.textures.create_grayscale_texture(texture_input)
+                        del temp
+                        columnTextures.append(texture)
+                    except RuntimeError as e:
+                        if "No valid OpenGL context" in str(e):
+                            # Context not ready yet - return empty array, will be created later
+                            Logger.warning(
+                                f"OpenGL context not available when creating textures, deferring creation: {e}")
+                            return []  # Return empty array - textures will be created when context is available
+                        raise
+
+                texture_grid.append(columnTextures)
+
+            Logger.info("Completed CreateImageArray")
+            raise_on_error("after CreateImageArray")
+            return texture_grid
 
     def generate_grid_indicies(self) -> Generator[tuple[int, int], None, None]:
-        """Yields all of the grid indicies that cover the image"""
+        """Yields all of the grid indices that cover the image"""
         for ix in range(0, self.NumCols):
             for iy in range(0, self.NumRows):
                 yield ix, iy
@@ -239,10 +292,29 @@ class ImageViewModel:
         """Returns True if the grid index is within the image grid bounds"""
         return 0 <= ix < self.NumCols and 0 <= iy < self.NumRows
 
-    def __del__(self):
-        """Free the GL Texture array"""
-        if self._ImageArray is None:
+    @property
+    def managed_by_filepath_cache(self) -> bool:
+        """True when lifetime is owned by ImageLoader filepath cache (not slot delete)."""
+        return self._managed_by_filepath_cache
+
+    def mark_managed_by_filepath_cache(self) -> None:
+        """Mark this viewmodel as session-cached; defer GL cleanup until explicit release."""
+        self._managed_by_filepath_cache = True
+
+    def release_gpu_resources(self) -> None:
+        """Delete uploaded GL textures and clear the texture grid."""
+        if self._ImageArray is None or self._ImageArray == []:
+            self._ImageArray = None
             return
 
         textures = [texture for row in self._ImageArray for texture in row]
-        gl.glDeleteTextures(textures)
+        if textures:
+            gl.glDeleteTextures(len(textures), textures)
+            check_for_error("after glDeleteTextures in ImageViewModel.release_gpu_resources")
+        self._ImageArray = None
+
+    def __del__(self):
+        """Free the GL Texture array when not retained by the filepath cache."""
+        if self._managed_by_filepath_cache:
+            return
+        self.release_gpu_resources()
