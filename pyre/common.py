@@ -251,9 +251,9 @@ def repaint_peer_stos_gl_panels(
         app.processEvents()
 
 
-REFINE_ANGLE_HALF_WIDTH_DEG: float = 5.0
+REFINE_ANGLE_HALF_WIDTH_DEG: float = 7.5
 REFINE_ANGLE_STEP_DEG: float = 1.0
-REFINE_RIGID_LARGEST_DIMENSION: int = 818
+REFINE_RIGID_LARGEST_DIMENSION: int = 1024
 
 
 def build_refine_angle_grid_deg(
@@ -273,10 +273,8 @@ def build_refine_angle_grid_deg(
 def _preserve_rigid_refine_attributes(
         result: ITransform,
         current: ITransform,
-        *,
-        lock_scale: bool,
 ) -> ITransform:
-    """Normalize result for editing and optionally lock scale / flip from current."""
+    """Normalize result for editing; keep the current flip and rotation pivot."""
     result = normalize_rigid_transform_for_pyre_editing(result)
     current = normalize_rigid_transform_for_pyre_editing(current)
     if not isinstance(result, nornir_imageregistration.transforms.CenteredSimilarity2DTransform):
@@ -288,24 +286,23 @@ def _preserve_rigid_refine_attributes(
     # Local refine disables try_flipped; keep the user's flip unless brute changed it.
     if result_flip == current_flip or not result_flip:
         result._flip_ud = current_flip  # type: ignore[attr-defined]
+    result._update_transform_matrix()  # type: ignore[attr-defined]
 
-    if lock_scale:
-        result._scalar = float(getattr(current, "scalar", 1.0))  # type: ignore[attr-defined]
-
-    # Keep the current interactive pivot when present; offset/angle come from brute.
+    # Move the pivot back to the user's interactive pivot without moving the mapping:
+    # a bare pivot swap shifts the result by (I - R*s)(c_new - c_old).
     current_center = getattr(current, "source_space_center_of_rotation", None)
     if current_center is not None:
-        result._source_space_center_of_rotation = numpy.asarray(  # type: ignore[attr-defined]
-            current_center, dtype=numpy.float32).copy()
-    result._update_transform_matrix()  # type: ignore[attr-defined]
-    result.OnTransformChanged()  # type: ignore[attr-defined]
+        result._pin_source_point_under_mutation(  # type: ignore[attr-defined]
+            numpy.asarray(current_center, dtype=numpy.float32), lambda: None)
+    else:
+        result.OnTransformChanged()  # type: ignore[attr-defined]
     return result
 
 
 @inject
 def RefineRigidTransformLocal(
         current_transform: ITransform,
-        refine_scale: bool = False,
+        search_angle: bool = False,
         source_image_key: str = "Source",
         target_image_key: str = "Target",
         image_manager: IImageManager = Provide[IContainer.image_manager],
@@ -313,10 +310,12 @@ def RefineRigidTransformLocal(
         cancel_event: threading.Event | None = None,
         progress_callback=None,
 ) -> ITransform | None:
-    """Local BruteForce rigid refine around the current angle (±5° at 1° steps).
+    """BruteForce rigid refine of the whole section, seeded from the current transform.
 
-    When ``refine_scale`` is False, the current isotropic scale is preserved.
-    When True, scale is refined using the current scalar as ``initial_scale_hint``.
+    Images are downsampled so the largest dimension is ``REFINE_RIGID_LARGEST_DIMENSION``.
+    Translation is searched over the whole section and scale is refined around the current
+    scalar. When ``search_angle`` is False only the current angle is scored; when True the
+    current angle ±``REFINE_ANGLE_HALF_WIDTH_DEG`` is searched.
     """
     if not isinstance(current_transform, nornir_imageregistration.IRigidTransform):
         raise TypeError("Local rigid refinement requires a rigid transform")
@@ -349,14 +348,15 @@ def RefineRigidTransformLocal(
     fixed_image = contrasted_permutation_helper(fixed_image, app_settings.ui.target_contrast)
 
     center_deg = float(numpy.degrees(getattr(current_transform, "angle", 0.0)))
-    angle_grid = build_refine_angle_grid_deg(center_deg)
+    angles = build_refine_angle_grid_deg(center_deg) if search_angle else [center_deg]
     current_scale = float(getattr(current_transform, "scalar", 1.0))
 
     working_settings = copy.copy(stos_settings.brute_registration)
     working_settings.method = SliceToSliceMethod.BruteForce
-    working_settings.angles = [float(a) for a in angle_grid]
+    working_settings.angles = [float(a) for a in angles]
     working_settings.larget_dimension = REFINE_RIGID_LARGEST_DIMENSION
     working_settings.try_flipped = False
+    working_settings.search_scale = True
     working_settings.initial_scale_hint = current_scale
     working_settings.estimated_scale_hint = None
 
@@ -374,8 +374,7 @@ def RefineRigidTransformLocal(
         source_image_shape=warped_image.shape,
         target_image_shape=fixed_image.shape,
     )
-    return _preserve_rigid_refine_attributes(
-        transform, current_transform, lock_scale=not refine_scale)
+    return _preserve_rigid_refine_attributes(transform, current_transform)
 
 
 @inject

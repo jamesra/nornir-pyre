@@ -24,8 +24,8 @@ class ControlPointAction(enum.Flag):
     APPEND_SELECTION = 1 << 11  # Add the control points to the selection
     TOGGLE_SELECTION = 1 << 12  # Toggle the selection of the control points
     CALL_TO_MOUSE = 1 << 13  # Call the selected control point to the mouse cursor
-    REFINE_RIGID_ANGLE = 1 << 14  # Local rigid angle refine around current transform
-    REFINE_RIGID_ANGLE_SCALE = 1 << 15  # Local rigid angle + scale refine around current transform
+    REFINE_RIGID = 1 << 14  # Whole-section rigid refine at the current angle (translation + scale)
+    REFINE_RIGID_ANGLE_SEARCH = 1 << 15  # Whole-section rigid refine searching angles around the current one
     BOX_SELECT = 1 << 16  # Marquee-select control points in a rectangle
     LASSO_SELECT = 1 << 17  # Freehand polygon select control points
 

@@ -144,8 +144,8 @@ class StosWindow(PyreWindowBase):
     _image_manager: IImageManager = Provide[IContainer.image_manager]
     _menu_workarounds: QMenu
     _action_reverse_angle: QAction
-    _action_refine_rigid_angle: QAction
-    _action_refine_rigid_angle_scale: QAction
+    _action_refine_rigid: QAction
+    _action_refine_rigid_angle_search: QAction
     _action_refine_grid: QAction
     _action_rotate_log_polar: QAction
     _action_rotate_brute: QAction
@@ -430,15 +430,15 @@ class StosWindow(PyreWindowBase):
 
         # Rigid-only refines are hidden for other transform types
         # (_update_refinement_menu_state). Space / Shift+Space run them from a view.
-        self._action_refine_rigid_angle = menu.addAction("Refine &Angle (±5°)\tSpace")
-        assert self._action_refine_rigid_angle is not None
-        self._action_refine_rigid_angle.triggered.connect(  # type: ignore[union-attr]
-            self.onRefineRigidAngle)
-        self._action_refine_rigid_angle_scale = menu.addAction(
-            "Refine Angle and &Scale\tShift+Space")
-        assert self._action_refine_rigid_angle_scale is not None
-        self._action_refine_rigid_angle_scale.triggered.connect(  # type: ignore[union-attr]
-            self.onRefineRigidAngleScale)
+        self._action_refine_rigid = menu.addAction("Refine Translation and &Scale\tSpace")
+        assert self._action_refine_rigid is not None
+        self._action_refine_rigid.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigid)
+        self._action_refine_rigid_angle_search = menu.addAction(
+            "Refine &Angle (±7.5°), Translation and Scale\tShift+Space")
+        assert self._action_refine_rigid_angle_search is not None
+        self._action_refine_rigid_angle_search.triggered.connect(  # type: ignore[union-attr]
+            self.onRefineRigidAngleSearch)
         self._action_refine_grid = menu.addAction("Refine w/ &Grid…")
         assert self._action_refine_grid is not None
         self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
@@ -446,8 +446,8 @@ class StosWindow(PyreWindowBase):
         self._registration_actions = [
             self._action_rotate_log_polar,
             self._action_rotate_brute,
-            self._action_refine_rigid_angle,
-            self._action_refine_rigid_angle_scale,
+            self._action_refine_rigid,
+            self._action_refine_rigid_angle_search,
             self._action_refine_grid,
         ]
 
@@ -831,8 +831,8 @@ class StosWindow(PyreWindowBase):
         is_rigid = isinstance(
             self._transform_controller.TransformModel,
             nornir_imageregistration.IRigidTransform)
-        self._action_refine_rigid_angle.setVisible(is_rigid)
-        self._action_refine_rigid_angle_scale.setVisible(is_rigid)
+        self._action_refine_rigid.setVisible(is_rigid)
+        self._action_refine_rigid_angle_search.setVisible(is_rigid)
 
     def cancel_all_long_running(self) -> None:
         """Cancel queued control-point alignments and the running refine/rotate job.
@@ -891,31 +891,31 @@ class StosWindow(PyreWindowBase):
                 "Another registration job is already running. Cancel it or wait for it to finish.",
             )
 
-    def onRefineRigidAngle(self) -> None:
-        """Local BruteForce refine of angle (±5°) keeping current scale."""
-        self._run_local_rigid_refine(refine_scale=False)
+    def onRefineRigid(self) -> None:
+        """BruteForce refine of translation and scale at the current angle."""
+        self.start_rigid_refine_job(search_angle=False)
 
-    def onRefineRigidAngleScale(self) -> None:
-        """Local BruteForce refine of angle (±5°) and scale."""
-        self._run_local_rigid_refine(refine_scale=True)
+    def onRefineRigidAngleSearch(self) -> None:
+        """BruteForce refine of angle (±7.5°), translation and scale."""
+        self.start_rigid_refine_job(search_angle=True)
 
-    def _run_local_rigid_refine(self, refine_scale: bool) -> None:
-        """Run local rigid refine and replace the transform model on success."""
+    def start_rigid_refine_job(self, search_angle: bool) -> None:
+        """Run rigid refine as a cancellable background job; install the result on success."""
         current_transform = self._transform_controller.TransformModel
         if not isinstance(current_transform, nornir_imageregistration.IRigidTransform):
             QMessageBox.warning(
                 self,
                 "Refine rigid transform",
-                "Local angle/scale refinement requires a rigid transform.",
+                "Rigid refinement requires a rigid transform.",
             )
             return
 
-        title = "Refine angle and scale" if refine_scale else "Refine angle"
+        title = "Refine angle, translation and scale" if search_angle else "Refine translation and scale"
 
         def _worker(cancel_event, progress_callback):
             return pyre.common.RefineRigidTransformLocal(
                 current_transform=current_transform,
-                refine_scale=refine_scale,
+                search_angle=search_angle,
                 source_image_key=Space.Source,  # type: ignore[arg-type]
                 target_image_key=Space.Target,  # type: ignore[arg-type]
                 cancel_event=cancel_event,
