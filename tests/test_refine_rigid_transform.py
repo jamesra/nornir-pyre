@@ -1,4 +1,4 @@
-"""Tests for local rigid refine helpers, action maps, and scale locking."""
+"""Tests for rigid refine helpers, action maps, and pivot preservation."""
 
 from __future__ import annotations
 
@@ -54,42 +54,22 @@ class TestBuildRefineAngleGrid(unittest.TestCase):
 
     def test_centered_grid_has_expected_count_and_spacing(self) -> None:
         grid = build_refine_angle_grid_deg(12.0)
-        self.assertEqual(len(grid), 11)
-        self.assertAlmostEqual(float(grid[0]), 7.0)
-        self.assertAlmostEqual(float(grid[-1]), 17.0)
+        self.assertEqual(len(grid), 16)
+        self.assertAlmostEqual(float(grid[0]), 4.5)
+        self.assertAlmostEqual(float(grid[-1]), 19.5)
         self.assertTrue(np.allclose(np.diff(grid), REFINE_ANGLE_STEP_DEG))
 
     def test_grid_near_180_is_absolute_not_wrapped(self) -> None:
         grid = build_refine_angle_grid_deg(178.0)
-        self.assertAlmostEqual(float(grid[0]), 173.0)
-        self.assertAlmostEqual(float(grid[-1]), 183.0)
-        self.assertAlmostEqual(REFINE_ANGLE_HALF_WIDTH_DEG, 5.0)
+        self.assertAlmostEqual(float(grid[0]), 170.5)
+        self.assertAlmostEqual(float(grid[-1]), 185.5)
+        self.assertAlmostEqual(REFINE_ANGLE_HALF_WIDTH_DEG, 7.5)
 
 
 class TestPreserveRigidRefineAttributes(unittest.TestCase):
-    """Scale lock and attribute preservation after brute registration."""
+    """Attribute preservation after brute registration."""
 
-    def test_lock_scale_keeps_current_scalar(self) -> None:
-        current = CenteredSimilarity2DTransform(
-            target_offset=(1.0, 2.0),
-            source_rotation_center=(10.0, 20.0),
-            angle=math.radians(5.0),
-            scalar=1.07,
-            flip_ud=False,
-        )
-        result = CenteredSimilarity2DTransform(
-            target_offset=(3.0, 4.0),
-            source_rotation_center=(30.0, 40.0),
-            angle=math.radians(6.0),
-            scalar=0.95,
-            flip_ud=False,
-        )
-        preserved = _preserve_rigid_refine_attributes(result, current, lock_scale=True)
-        self.assertIsInstance(preserved, CenteredSimilarity2DTransform)
-        self.assertAlmostEqual(preserved.scalar, 1.07)
-        self.assertAlmostEqual(float(preserved.angle), math.radians(6.0))
-
-    def test_scale_refine_does_not_force_copy_scalar(self) -> None:
+    def test_keeps_brute_angle_and_scalar(self) -> None:
         current = CenteredSimilarity2DTransform(
             target_offset=(1.0, 2.0),
             source_rotation_center=(10.0, 20.0),
@@ -102,9 +82,33 @@ class TestPreserveRigidRefineAttributes(unittest.TestCase):
             angle=math.radians(6.0),
             scalar=0.95,
         )
-        preserved = _preserve_rigid_refine_attributes(result, current, lock_scale=False)
+        preserved = _preserve_rigid_refine_attributes(result, current)
         self.assertIsInstance(preserved, CenteredSimilarity2DTransform)
         self.assertAlmostEqual(preserved.scalar, 0.95)
+        self.assertAlmostEqual(float(preserved.angle), math.radians(6.0))
+
+    def test_pivot_swap_keeps_the_brute_mapping(self) -> None:
+        """Adopting the user's pivot must not move the registered result."""
+        current = CenteredSimilarity2DTransform(
+            target_offset=(1.0, 2.0),
+            source_rotation_center=(120.0, 150.0),
+            angle=math.radians(5.0),
+            scalar=1.0,
+        )
+        result = CenteredSimilarity2DTransform(
+            target_offset=(-30.0, 25.0),
+            source_rotation_center=(2092.0, 2150.0),
+            angle=math.radians(8.4),
+            scalar=1.02,
+        )
+        probe = np.array([[100.0, 100.0], [2092.0, 2150.0], [4000.0, 300.0]])
+        expected = np.asarray(result.Transform(probe), dtype=float)
+
+        preserved = _preserve_rigid_refine_attributes(result, current)
+
+        np.testing.assert_allclose(
+            np.asarray(preserved.source_space_center_of_rotation, dtype=float), [120.0, 150.0])
+        np.testing.assert_allclose(np.asarray(preserved.Transform(probe), dtype=float), expected, atol=0.05)
 
 
 class TestRefineRigidTransformLocal(unittest.TestCase):
@@ -131,7 +135,7 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
 
     @patch("pyre.common.stos.SliceToSliceRigidRegistrationWithPreprocessedImages")
     @patch("pyre.common.resolve_source_and_target_image_data")
-    def test_angle_only_locks_scale_and_passes_hint(
+    def test_current_angle_only_searches_scale_at_1024(
             self,
             mock_resolve: MagicMock,
             mock_register: MagicMock,
@@ -144,14 +148,15 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
         align_record.ToImageTransform.return_value = CenteredSimilarity2DTransform(
             target_offset=(5.0, 6.0),
             source_rotation_center=(32.0, 32.0),
-            angle=math.radians(13.0),
+            angle=math.radians(12.0),
             scalar=0.9,
         )
         mock_register.return_value = align_record
+        self._app_settings.stos.brute_registration.search_scale = False
 
         result = RefineRigidTransformLocal(
             current_transform=self._current,
-            refine_scale=False,
+            search_angle=False,
             source_image_key="Source",
             target_image_key="Target",
             image_manager=self._image_manager,
@@ -161,17 +166,18 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
         settings = mock_register.call_args.kwargs["settings"]
         self.assertEqual(settings.method, SliceToSliceMethod.BruteForce)
         self.assertFalse(settings.try_flipped)
+        self.assertTrue(settings.search_scale)
+        self.assertEqual(settings.larget_dimension, 1024)
         self.assertAlmostEqual(settings.initial_scale_hint, 1.05)
-        self.assertEqual(len(list(settings.angles)), 11)
-        self.assertAlmostEqual(float(list(settings.angles)[0]), 7.0)
-        self.assertAlmostEqual(float(list(settings.angles)[-1]), 17.0)
+        self.assertEqual(len(list(settings.angles)), 1)
+        self.assertAlmostEqual(float(next(iter(settings.angles))), 12.0)
         assert result is not None
         self.assertIsInstance(result, CenteredSimilarity2DTransform)
-        self.assertAlmostEqual(result.scalar, 1.05)
+        self.assertAlmostEqual(result.scalar, 0.9)
 
     @patch("pyre.common.stos.SliceToSliceRigidRegistrationWithPreprocessedImages")
     @patch("pyre.common.resolve_source_and_target_image_data")
-    def test_scale_refine_keeps_brute_scalar(
+    def test_angle_search_covers_plus_minus_7_5_degrees(
             self,
             mock_resolve: MagicMock,
             mock_register: MagicMock,
@@ -191,7 +197,7 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
 
         result = RefineRigidTransformLocal(
             current_transform=self._current,
-            refine_scale=True,
+            search_angle=True,
             source_image_key="Source",
             target_image_key="Target",
             image_manager=self._image_manager,
@@ -199,7 +205,11 @@ class TestRefineRigidTransformLocal(unittest.TestCase):
         )
 
         settings = mock_register.call_args.kwargs["settings"]
+        self.assertTrue(settings.search_scale)
         self.assertAlmostEqual(settings.initial_scale_hint, 1.05)
+        self.assertEqual(len(list(settings.angles)), 16)
+        self.assertAlmostEqual(float(list(settings.angles)[0]), 4.5)
+        self.assertAlmostEqual(float(list(settings.angles)[-1]), 19.5)
         assert result is not None
         self.assertIsInstance(result, CenteredSimilarity2DTransform)
         self.assertAlmostEqual(result.scalar, 0.92)
@@ -221,8 +231,8 @@ class TestRigidRefineActionMaps(unittest.TestCase):
         action_map = RigidTransformActionMap(config=AppSettings())
         space = action_map.get_action(_keyboard_space_event(shift=False))
         shift_space = action_map.get_action(_keyboard_space_event(shift=True))
-        self.assertEqual(space.action, ControlPointAction.REFINE_RIGID_ANGLE)
-        self.assertEqual(shift_space.action, ControlPointAction.REFINE_RIGID_ANGLE_SCALE)
+        self.assertEqual(space.action, ControlPointAction.REFINE_RIGID)
+        self.assertEqual(shift_space.action, ControlPointAction.REFINE_RIGID_ANGLE_SEARCH)
 
     def test_helper_still_maps_space_to_register_for_mesh_grid(self) -> None:
         space = resolve_space_register_action(_keyboard_space_event(shift=False), set())

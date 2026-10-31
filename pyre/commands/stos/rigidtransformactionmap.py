@@ -71,9 +71,9 @@ class RigidTransformActionMap(IActionMap):
 
         if event.IsKeyboardInput and event.input == InputEvent.Press and event.keycode == Qt.Key.Key_Space:
             action = (
-                ControlPointAction.REFINE_RIGID_ANGLE_SCALE
+                ControlPointAction.REFINE_RIGID_ANGLE_SEARCH
                 if event.IsShiftPressed
-                else ControlPointAction.REFINE_RIGID_ANGLE
+                else ControlPointAction.REFINE_RIGID
             )
             return ControlPointActionResult(action, interactions)
 

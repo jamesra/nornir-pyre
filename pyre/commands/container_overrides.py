@@ -95,10 +95,10 @@ action_command_dp_map = providers.Dict({
     TransformType.RIGID: providers.Dict({
         ControlPointAction.NONE: providers.Factory(DefaultTransformCommand).provider,
         ControlPointAction.TRANSLATE: providers.Factory(ManipulateRigidTransformCommand).provider,
-        ControlPointAction.REFINE_RIGID_ANGLE: providers.Factory(
-            RefineRigidTransformCommand, refine_scale=False).provider,
-        ControlPointAction.REFINE_RIGID_ANGLE_SCALE: providers.Factory(
-            RefineRigidTransformCommand, refine_scale=True).provider,
+        ControlPointAction.REFINE_RIGID: providers.Factory(
+            RefineRigidTransformCommand, search_angle=False).provider,
+        ControlPointAction.REFINE_RIGID_ANGLE_SEARCH: providers.Factory(
+            RefineRigidTransformCommand, search_angle=True).provider,
         # ControlPointAction.DELETE: providers.Factory(DeleteControlPointCommand), RIGID Does not support DELETE
     })
 })
