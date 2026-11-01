@@ -29,6 +29,7 @@ from pyre.views.composite_display import (
     lookat_from_display_position,
 )
 from pyre.views.gltiles import is_rigid_transform
+from pyre.commands.transform_undo import rigid_state_changed, save_rigid_undo
 
 
 class ManipulateRigidTransformCommand(NavigationCommandBase):
@@ -233,6 +234,15 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
 
     def execute(self):
         self._end_interactive_edit_preserving_composite_display()
+        model = self._transform_controller.TransformModel
+        if isinstance(model, IRigidTransform):
+            current = model.GetRigidState()
+            if rigid_state_changed(self._original_state, current):
+                save_rigid_undo(
+                    self.history_manager,
+                    self._transform_controller,
+                    self._original_state,
+                )
         super().execute()
 
     def subscribe_to_parent(self):

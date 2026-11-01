@@ -8,7 +8,7 @@ include = ["pyre", "pyre.*"]
 
 [project]
 name = "pyre"
-version = "1.8.2"
+version = "1.8.4"
 authors = [
     { name = "James Anderson", email = "James.R.Anderson@utah.edu" },
 ]
@@ -40,7 +40,7 @@ classifiers = [
 
 
 [tool.setuptools.package-data]
-"pyre" = ["resources/*.png", "README.txt", "settings.json"]
+"pyre" = ["resources/*.png", "README.txt", "settings.json", "CHANGELOG.user.md"]
 
 
 [project.optional-dependencies]

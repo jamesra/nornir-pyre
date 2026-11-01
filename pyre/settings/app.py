@@ -75,8 +75,9 @@ class GridRefineDefaults(BaseModel):
     preview_pass_transforms: bool = False
     # Off: CPU convert when pass previews are on. Final result is still converted.
     gpu_preview_grid_convert: bool = False
-    # Min unmasked fraction (source AND target cell) to pin a grid point during
-    # masked-neighbor spring relaxation. Default 25%.
+    # Min unmasked fraction (source AND target alignment window / grid cell).
+    # Spacebar registers when both windows meet it; grid points that meet it
+    # stay pinned during masked-neighbor relaxation. Default 25%.
     masked_relax_min_unmasked: float = 0.25
 
     def to_angle_search_range(self) -> AngleSearchRange:
@@ -149,6 +150,8 @@ class UISettings(BaseModel):
 class AppSettings(BaseModel):
     debug: bool = False
     readme: str = "README.txt"
+    # Last Pyre package version whose What's New dialog was shown; None means never.
+    last_shown_changelog_version: str | None = None
 
     ui: UISettings = UISettings()  # field(default_factory=UISettings)
     stos: StosSettings = StosSettings()  # field(default_factory=StosSettings)

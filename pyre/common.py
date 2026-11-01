@@ -657,7 +657,22 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,  # type: ignore[type-arg
                            anglesToSearch: Iterable[float],
                            estimate_angle: bool = False):
     """Start an async alignment attempt for one control point. Returns None if ROI is masked; otherwise returns the task."""
-    if either_roi_is_masked(transform, target_mask, source_mask, target_controlpoint, alignmentArea):
+    from pyre.controllers import masked_grid_relax
+
+    source_controlpoint = None
+    if source_mask is not None:
+        try:
+            source_controlpoint = transform.InverseTransform(target_controlpoint)
+        except Exception:
+            source_controlpoint = None
+    if either_roi_is_masked(
+            transform,
+            target_mask,
+            source_mask,
+            target_controlpoint,
+            alignmentArea,
+            source_controlpoint=source_controlpoint,
+            min_unmasked=masked_grid_relax.resolve_min_unmasked()):
         return None
 
     if pool is None:

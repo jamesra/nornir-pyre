@@ -32,6 +32,20 @@ def drag_translate_interactions(
     return interactions
 
 
+def is_selected_glyph_group_press(
+        event: SelectionEventData,
+        interactions: set[int]) -> bool:
+    """True when a no-modifier left press hits a point already in the selection.
+
+    Defer REPLACE_SELECTION so click-drag can TRANSLATE the whole group; a
+    click without drag still replaces selection on release.
+    """
+    if not interactions or not event.NoModifierKeys:
+        return False
+    existing = event.existing_selections or ()
+    return bool(interactions & set(existing))
+
+
 def resolve_space_register_action(
         event: SelectionEventData, interactions: set[int]
 ) -> ControlPointActionResult | None:

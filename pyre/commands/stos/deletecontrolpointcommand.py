@@ -11,7 +11,8 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase, InstantCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
-from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.commands.transform_undo import save_points_undo
+from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ICommandHistory
 from pyre.interfaces.controlpointselection import SetSelectionCallable
 from pyre.container import IContainer
 from pyre.controllers import TransformController
@@ -23,6 +24,7 @@ class DeleteControlPointCommand(InstantCommandBase):
     _selected_points: ObservableSet[int]  # The indices of the selected points
     _original_points: NDArray[np.floating]
     _transform_controller: TransformController
+    _history_manager: ICommandHistory
 
     @inject
     def __init__(self,
@@ -30,6 +32,7 @@ class DeleteControlPointCommand(InstantCommandBase):
                  command_points: set[int],  # Points under mouse when command was triggered
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
+                 history_manager: ICommandHistory = Provide[IContainer.history_manager],
                  **kwargs):
         """
 
@@ -46,10 +49,11 @@ class DeleteControlPointCommand(InstantCommandBase):
         self._selected_points = selected_points
         self._selected_points.update(command_points)
         self._transform_controller = transform_controller
+        self._history_manager = history_manager
         if len(selected_points) == 0:
             raise RequiresSelectionError()
 
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.copy_points()
 
     def __str__(self):
         return "DeleteControlPointCommand"
@@ -64,6 +68,11 @@ class DeleteControlPointCommand(InstantCommandBase):
     def execute(self):
         indicies_to_delete = list(self._selected_points)
         self._selected_points.clear()
+        save_points_undo(
+            self._history_manager,
+            self._transform_controller.SetPoints,
+            self._original_points,
+        )
         self._transform_controller.TryDeletePoints(indicies_to_delete)
         super().execute()
 

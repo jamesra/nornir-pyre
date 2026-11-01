@@ -307,6 +307,39 @@ class StosState(StateEventsImpl):
         for func in self._OnImageChangeEventListeners:
             func(image_space)
 
+    def _replace_image_manager_slot(
+            self,
+            key: ViewType,
+            helper: nornir_imageregistration.ImagePermutationHelper | None,
+    ) -> None:
+        """Keep ImageManager slots identical to FixedImages / WarpedImages.
+
+        Refine Grid and the unpublished Spacebar fallback read helpers from the
+        image manager. Mask loads historically updated only StosState
+        permutations + published SHM, so those paths registered without the
+        new mask.
+        """
+        if key in self._image_manager:
+            del self._image_manager[key]
+        if helper is not None:
+            self._image_manager.add(key=key, image=helper)
+
+    def _set_source_permutations(
+            self,
+            helper: nornir_imageregistration.ImagePermutationHelper | None,
+    ) -> None:
+        """Assign Source (Fixed*) permutations and sync the image-manager slot."""
+        self._fixed_image_permutations = helper
+        self._replace_image_manager_slot(ViewType.Source, helper)
+
+    def _set_target_permutations(
+            self,
+            helper: nornir_imageregistration.ImagePermutationHelper | None,
+    ) -> None:
+        """Assign Target (Warped*) permutations and sync the image-manager slot."""
+        self._warped_image_permutations = helper
+        self._replace_image_manager_slot(ViewType.Target, helper)
+
     def LoadSourceImage(self, ImageFileFullPath: str) -> ImageViewModel:
         """Load the source (mapped) image into the image/viewmodel managers and update STOS permutation state."""
         search_dirs = [os.path.dirname(ImageFileFullPath) or "."]
@@ -324,13 +357,15 @@ class StosState(StateEventsImpl):
         vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.SourceImageViewModel = vm
         # Reuse loader helper when no separate mask VM; avoid rebuilding extrema/stats.
+        # When a mask VM is set, rebuild and replace the manager slot (loader wrote
+        # a mask-less helper).
         if self.FixedImageMaskViewModel is None:
-            self._fixed_image_permutations = result.permutations
+            self._set_source_permutations(result.permutations)
         else:
-            self._fixed_image_permutations = self._update_image_permutations(
+            self._set_source_permutations(self._update_image_permutations(
                 self.SourceImageViewModel,
                 self.FixedImageMaskViewModel,
-            )
+            ))
         self.publish_alignment_images(pyre.Space.Source)
         self.FireOnImageChanged(pyre.Space.Source)
         return vm
@@ -352,12 +387,12 @@ class StosState(StateEventsImpl):
         vm = self._image_loader.create_image_viewmodel(load_result=result)
         self.TargetImageViewModel = vm
         if self.WarpedImageMaskViewModel is None:
-            self._warped_image_permutations = result.permutations
+            self._set_target_permutations(result.permutations)
         else:
-            self._warped_image_permutations = self._update_image_permutations(
+            self._set_target_permutations(self._update_image_permutations(
                 self.TargetImageViewModel,
                 self.WarpedImageMaskViewModel,
-            )
+            ))
         self.publish_alignment_images(pyre.Space.Target)
         return vm
 
@@ -386,10 +421,10 @@ class StosState(StateEventsImpl):
             and self.FixedImageMaskViewModel.rgb_like_converted_to_grayscale
         ):
             _warn_single_file_rgb_like_converted(ImageFileFullPath)
-        self._fixed_image_permutations = self._update_image_permutations(
+        self._set_source_permutations(self._update_image_permutations(
             self.SourceImageViewModel,
             self.FixedImageMaskViewModel,
-        )
+        ))
         self.publish_alignment_images(pyre.Space.Source)
         return self.FixedImageMaskViewModel
 
@@ -400,10 +435,10 @@ class StosState(StateEventsImpl):
             and self.WarpedImageMaskViewModel.rgb_like_converted_to_grayscale
         ):
             _warn_single_file_rgb_like_converted(ImageFileFullPath)
-        self._warped_image_permutations = self._update_image_permutations(
+        self._set_target_permutations(self._update_image_permutations(
             self.TargetImageViewModel,
             self.WarpedImageMaskViewModel,
-        )
+        ))
         self.publish_alignment_images(pyre.Space.Target)
         return self.WarpedImageMaskViewModel
 

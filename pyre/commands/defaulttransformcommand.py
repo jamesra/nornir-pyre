@@ -35,6 +35,7 @@ from pyre.space import Space
 from pyre.commands.navigationcommandbase import NavigationCommandBase
 from pyre.container import IContainer
 from pyre.commands.extensions import GetKeyModifiers, GetMouseModifiers
+from pyre.commands.stos.actionmaphelpers import is_selected_glyph_group_press
 import pyre.ui
 from pyre.transform_edit_policy import blocks_layer_translate_action, blocks_control_point_translate_action
 from pyre.views.composite_display import (
@@ -93,6 +94,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _right_pan_active: bool = False
     _pending_empty_left_click: bool = False
     _pending_shift_glyph_click: bool = False
+    _pending_selected_glyph_click: bool = False
     _left_press_qt: tuple[float, float] | None = None
 
     log: Logger = logging.Logger("DefaultTransformCommand")
@@ -164,6 +166,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._right_pan_active = False
         self._pending_empty_left_click = False
         self._pending_shift_glyph_click = False
+        self._pending_selected_glyph_click = False
         self._left_press_qt = None
         transform_action_map_factory = transform_control_point_action_maps()[
             transform_controller.type]
@@ -339,6 +342,7 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._selection_event_history[selection_event_data.eventkey] = selection_event_data
         self._pending_empty_left_click = False
         self._pending_shift_glyph_click = False
+        self._pending_selected_glyph_click = False
         self._left_press_qt = None
         if (
                 event.buttons() & Qt.MouseButton.LeftButton
@@ -349,10 +353,16 @@ class DefaultTransformCommand(NavigationCommandBase):
             self._pending_empty_left_click = len(hits) == 0
             self._pending_shift_glyph_click = (
                 len(hits) >= 1 and selection_event_data.IsOnlyShiftPressed)
+            self._pending_selected_glyph_click = is_selected_glyph_group_press(
+                selection_event_data, set(hits))
             pos = event.position()
             self._left_press_qt = (float(pos.x()), float(pos.y()))
 
-        if not self._pending_empty_left_click and not self._pending_shift_glyph_click:
+        if (
+                not self._pending_empty_left_click
+                and not self._pending_shift_glyph_click
+                and not self._pending_selected_glyph_click
+        ):
             self._dispatch_selection_event(selection_event_data)
 
         self._last_mouse_press_event_args = event
@@ -393,6 +403,11 @@ class DefaultTransformCommand(NavigationCommandBase):
             return True
         try:
             converted = ConvertTransform(current, TransformType.MESH, **self._mesh_conversion_kwargs())
+            self.history_manager.SaveState(
+                self._transform_controller.__setattr__,
+                "TransformModel",
+                current,
+            )
             self._transform_controller.TransformModel = converted
             return True
         except Exception as e:
@@ -519,7 +534,11 @@ class DefaultTransformCommand(NavigationCommandBase):
             )
 
             self._selection_event_history[selection_event_data.eventkey] = selection_event_data
-            pending_region = self._pending_empty_left_click or self._pending_shift_glyph_click
+            pending_region = (
+                self._pending_empty_left_click
+                or self._pending_shift_glyph_click
+                or self._pending_selected_glyph_click
+            )
             if pending_region and (event.buttons() & Qt.MouseButton.LeftButton):
                 dx = 0.0
                 dy = 0.0
@@ -531,6 +550,7 @@ class DefaultTransformCommand(NavigationCommandBase):
                         return
                 self._pending_empty_left_click = False
                 self._pending_shift_glyph_click = False
+                self._pending_selected_glyph_click = False
 
             # Check for command, if there is no command, scroll the camera
             new_command = self._dispatch_selection_event(selection_event_data, update_cursor=False)
@@ -560,8 +580,10 @@ class DefaultTransformCommand(NavigationCommandBase):
     def on_mouse_release(self, event):
         self._right_pan_active = False
         pending_shift_glyph = self._pending_shift_glyph_click
+        pending_selected_glyph = self._pending_selected_glyph_click
         self._pending_empty_left_click = False
         self._pending_shift_glyph_click = False
+        self._pending_selected_glyph_click = False
         _, height = self._sync_camera_geometry()
         cy, cx = self.GetCorrectedMousePosition(event, height)
         self._last_mouse_position = (cy, cx)
@@ -570,8 +592,9 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         #        last_selection = self._get_last_event(InputSource.Mouse, InputEvent.Press)
 
-        if pending_shift_glyph:
-            # Release no longer reports the left button; restore it so shift-click still toggles.
+        if pending_shift_glyph or pending_selected_glyph:
+            # Release no longer reports the left button; restore it so the deferred
+            # press still resolves (shift-toggle, or replace onto the clicked glyph).
             modifiers = (
                 GetMouseModifiers(event, self._last_mouse_press_event_args)  # type: ignore[arg-type]
                 | InputModifiers.LeftMouseButton

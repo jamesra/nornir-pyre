@@ -107,12 +107,35 @@ class TestSpaceRegisterSnowball(unittest.TestCase):
         command.activate()
         return len(self.aligned) - before
 
-    def test_hover_presses_align_one_point_each(self) -> None:
+    def test_hover_presses_align_one_point_each_when_selection_cleared(self) -> None:
+        """Moving to a new hover after clearing selection still registers one point.
+
+        Solo hover-Space reselects that point for fine-tuning. Clear the
+        selection (empty click) before Space on a different hover so earlier
+        points are not unioned in.
+        """
         with self._synchronous_registration():
-            counts = [self._press_space({hovered}) for hovered in (5, 6, 9, 10, 1)]
+            counts = []
+            for hovered in (5, 6, 9, 10, 1):
+                self.selection.clear()
+                counts.append(self._press_space({hovered}))
         self.assertEqual(counts, [1, 1, 1, 1, 1])
-        self.assertEqual(set(self.selection), set(),
-                         "a hovered point must not be left selected after it registers")
+
+    def test_solo_hover_space_reselects_for_fine_tune(self) -> None:
+        """After Space on one hovered point, it is selected so Space can run again."""
+        hold = self.controller.space_hold
+        with self._synchronous_registration():
+            hold.begin()
+            first = self._press_space({5})
+            hold.end()
+            self.assertEqual(first, 1)
+            self.assertEqual(set(self.selection), {5})
+            hold.begin()
+            # Same point via restored selection; no hover required.
+            second = self._press_space(set())
+            hold.end()
+        self.assertEqual(second, 1)
+        self.assertEqual(set(self.selection), {5})
 
     def test_selection_registers_whole_set_and_is_restored(self) -> None:
         self.selection.update({2, 7, 11})

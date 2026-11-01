@@ -202,7 +202,7 @@ class TestControlPointMaskSkip(unittest.TestCase):
             raise AssertionError("masked mesh point should not be aligned")
 
         with patch(
-                "pyre.controllers.masked_grid_relax.resolve_stos_masks",
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(src, tgt),
         ):
             with patch.object(controller, "enqueue_masked_grid_relax") as relax:
@@ -219,7 +219,7 @@ class TestControlPointMaskSkip(unittest.TestCase):
             raise AssertionError("masked grid point should not be aligned")
 
         with patch(
-                "pyre.controllers.masked_grid_relax.resolve_stos_masks",
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(src, tgt),
         ):
             with patch.object(controller, "enqueue_masked_grid_relax") as relax:
@@ -245,7 +245,7 @@ class TestControlPointMaskSkip(unittest.TestCase):
 
         unmasked_id = controller.point_id_for_index(1)
         with patch(
-                "pyre.controllers.masked_grid_relax.resolve_stos_masks",
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(src, tgt),
         ):
             with patch.object(controller, "enqueue_masked_grid_relax") as relax:
@@ -269,7 +269,7 @@ class TestControlPointMaskSkip(unittest.TestCase):
             raise AssertionError("edge alignment ROI should not be dispatched")
 
         with patch(
-                "pyre.controllers.masked_grid_relax.resolve_stos_masks",
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(mask, mask),
         ), patch(
                 "pyre.controllers.masked_grid_relax.resolve_min_unmasked",
@@ -302,7 +302,7 @@ class TestControlPointMaskSkip(unittest.TestCase):
 
         interior_id = controller.point_id_for_index(1)
         with patch(
-                "pyre.controllers.masked_grid_relax.resolve_stos_masks",
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(mask, mask),
         ), patch(
                 "pyre.controllers.masked_grid_relax.resolve_min_unmasked",
@@ -315,6 +315,72 @@ class TestControlPointMaskSkip(unittest.TestCase):
             )
         self.assertEqual(added, [interior_id])
         self.assertEqual(len(aligned), 1)
+
+    def test_center_masked_but_roi_mostly_live_still_registers(self) -> None:
+        """A masked center pixel is fine when both alignment windows stay ≥25% live."""
+        points = np.array([
+            [2.0, 2.0, 2.0, 2.0],
+            [16.0, 16.0, 16.0, 16.0],
+            [20.0, 8.0, 20.0, 8.0],
+            [8.0, 20.0, 8.0, 20.0],
+        ], dtype=np.float32)
+        controller = TransformController(MeshWithRBFFallback(points))
+        mask = np.ones((32, 32), dtype=bool)
+        mask[16, 16] = False
+        aligned: list[object] = []
+
+        def _align(**_kwargs: object) -> object:
+            aligned.append(_kwargs)
+            record = MagicMock()
+            record.weight = 0
+            record.peak = None
+            return record
+
+        interior_id = controller.point_id_for_index(1)
+        with patch(
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
+                return_value=(mask, mask),
+        ), patch(
+                "pyre.controllers.masked_grid_relax.resolve_min_unmasked",
+                return_value=0.25,
+        ):
+            added = controller.enqueue_point_registrations(
+                [1],
+                align_fn=_align,
+                alignment_area=np.array([16, 16], dtype=np.int32),
+            )
+        self.assertEqual(added, [interior_id])
+        self.assertEqual(len(aligned), 1)
+
+    def test_center_masked_and_roi_below_threshold_skips(self) -> None:
+        """When the alignment window itself is mostly masked, skip registration."""
+        points = np.array([
+            [16.0, 16.0, 16.0, 16.0],
+            [8.0, 8.0, 8.0, 8.0],
+            [24.0, 8.0, 24.0, 8.0],
+            [8.0, 24.0, 8.0, 24.0],
+        ], dtype=np.float32)
+        controller = TransformController(MeshWithRBFFallback(points))
+        mask = np.ones((32, 32), dtype=bool)
+        # Zero the 16x16 window around (16,16) so unmasked fraction is ~0.
+        mask[8:25, 8:25] = False
+
+        def _align(**_kwargs: object) -> object:
+            raise AssertionError("mostly-masked ROI should not be dispatched")
+
+        with patch(
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
+                return_value=(mask, mask),
+        ), patch(
+                "pyre.controllers.masked_grid_relax.resolve_min_unmasked",
+                return_value=0.25,
+        ):
+            added = controller.enqueue_point_registrations(
+                [0],
+                align_fn=_align,
+                alignment_area=np.array([16, 16], dtype=np.int32),
+            )
+        self.assertEqual(added, [])
 
 
 class TestEitherRoiIsMasked(unittest.TestCase):

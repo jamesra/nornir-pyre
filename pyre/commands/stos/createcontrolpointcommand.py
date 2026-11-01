@@ -22,6 +22,7 @@ from pyre.commands.stos.point_coords import (
     known_space_for_control_point_create,
     known_yx_from_pair,
 )
+from pyre.commands.transform_undo import save_points_undo
 
 
 class CreateControlPointCommand(NavigationCommandBase):
@@ -72,7 +73,7 @@ class CreateControlPointCommand(NavigationCommandBase):
         self._left_mouse_down = bool(
             app is not None and QApplication.mouseButtons() & Qt.MouseButton.LeftButton)
         self._new_point_position = PointPair(source=source_position, target=target_position)
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.copy_points()
 
     def on_activate(self):
         QTimer.singleShot(0, self.queue_translate_command)
@@ -99,7 +100,6 @@ class CreateControlPointCommand(NavigationCommandBase):
         keycode = event.key()
         if keycode == Qt.Key.Key_Escape:
             self.cancel()
-            # self.history_manager.SaveState(self._transform_controller.SetPoints, self._transform_controller.points)
         else:
             super().on_key_down(event)
 
@@ -127,6 +127,13 @@ class CreateControlPointCommand(NavigationCommandBase):
         point = self._transform_controller.map_pair_for_control_point_create(
             known_space, known_yx)
         newpoint = control_point_row_from_pair(point)
+        # Ctrl+Z restores pre-create points (removes this point). A follow-on
+        # translate drag pushes its own undo entry above this one.
+        save_points_undo(
+            self.history_manager,
+            self._transform_controller.SetPoints,
+            self._original_points,
+        )
         index = self._transform_controller.TransformModel.AddPoint(newpoint)  # type: ignore[union-attr]
 
         # Ensure only the new point is selected

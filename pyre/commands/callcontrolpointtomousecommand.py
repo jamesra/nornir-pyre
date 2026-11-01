@@ -11,17 +11,19 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase, NavigationCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
-from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
+from pyre.commands.transform_undo import save_points_undo
+from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ICommandHistory
 from pyre.container import IContainer
 from pyre.controllers import TransformController
 
 
 class CallControlPointToMouseCommand(InstantCommandBase):
-    """This command deletes a selection of control points"""
+    """Move the selected control point to the current mouse position."""
 
     _selected_points: ObservableSet[int]  # The indices of the selected points
     _original_points: NDArray[np.floating]
     _transform_controller: TransformController
+    _history_manager: ICommandHistory
 
     _space: Space
     _translate_origin: NDArray[np.floating] 
@@ -37,6 +39,7 @@ class CallControlPointToMouseCommand(InstantCommandBase):
                  command_points: set[int],  # Points under mouse when command was triggered
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: TransformController = Provide[IContainer.transform_controller],
+                 history_manager: ICommandHistory = Provide[IContainer.history_manager],
                  **kwargs):
         """ 
         :param parent:
@@ -50,6 +53,7 @@ class CallControlPointToMouseCommand(InstantCommandBase):
         """
         super().__init__(completed_func=completed_func)
         self._transform_controller = transform_controller
+        self._history_manager = history_manager
         self._mouse_position = self._mouse_position_history[space]
         self._space = space
 
@@ -60,7 +64,7 @@ class CallControlPointToMouseCommand(InstantCommandBase):
 
         self._selected_point = self._selected_points.__iter__().__next__()
 
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.copy_points()
 
     def __str__(self):
         return "CallControlPointToMouseCommand"
@@ -73,8 +77,12 @@ class CallControlPointToMouseCommand(InstantCommandBase):
         return
 
     def execute(self):
-        indicies_to_delete = list(self._selected_points)
         assert self._mouse_position is not None
+        save_points_undo(
+            self._history_manager,
+            self._transform_controller.SetPoints,
+            self._original_points,
+        )
         self._transform_controller.SetPoint(self._selected_point,
                                             self._mouse_position[1],
                                             self._mouse_position[0],

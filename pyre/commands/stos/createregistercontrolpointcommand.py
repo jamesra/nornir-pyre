@@ -21,6 +21,8 @@ from pyre.commands.stos.point_coords import (
     known_yx_from_pair,
 )
 from pyre.interfaces.viewtype import ViewType
+from pyre.interfaces.managers.command_history import ICommandHistory
+from pyre.commands.transform_undo import save_points_undo
 
 
 class CreateRegisterControlPointCommand(InstantCommandBase):
@@ -36,6 +38,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
     _left_mouse_down: bool = False
     _transform_controller: "pyre.viewmodels.TransformController"  # type: ignore[name-defined]
     _commandqueue: ICommandQueue
+    _history_manager: ICommandHistory
 
     _source_image: str
     _target_image: str
@@ -48,6 +51,7 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
                  target_image: str,
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: "pyre.viewmodels.TransformController" = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
+                 history_manager: ICommandHistory = Provide[IContainer.history_manager],
                  config: Configuration = Provide[IContainer.config],
                  space: Space = Space.Source,
                  view_type: ViewType | None = None,
@@ -61,11 +65,12 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         self._target_image = target_image
         self._selected_points = selected_points
         self._transform_controller = transform_controller
+        self._history_manager = history_manager
         self._commandqueue = commandqueue
         self._space = space
         self._view_type = view_type
         self._new_point_position = PointPair(source=source_position, target=target_position)
-        self._original_points = transform_controller.points
+        self._original_points = transform_controller.copy_points()
 
     def on_activate(self):
         QTimer.singleShot(0, self.queue_registration_command)
@@ -87,6 +92,12 @@ class CreateRegisterControlPointCommand(InstantCommandBase):
         point = self._transform_controller.map_pair_for_control_point_create(
             known_space, known_yx)
         newpoint = control_point_row_from_pair(point)
+        # Ctrl+Z removes the created point. Registration apply is a separate edit.
+        save_points_undo(
+            self._history_manager,
+            self._transform_controller.SetPoints,
+            self._original_points,
+        )
         index = self._transform_controller.TransformModel.AddPoint(newpoint)
 
         # Ensure only the new point is selected
