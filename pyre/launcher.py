@@ -507,6 +507,11 @@ def main_qt(window_manager: IWindowManager = Provide[IContainer.window_manager],
             if view_type in window_manager:
                 window_manager[view_type].update()
 
+        # After windows and session restore: show What's New once per upgrade.
+        parent = window_manager[ViewType.Composite] if ViewType.Composite in window_manager else None
+        from pyre.ui.whats_new import maybe_show_whats_new_after_upgrade
+        maybe_show_whats_new_after_upgrade(parent, settings)
+
     # Schedule the initialization to occur after the event loop starts
     QTimer.singleShot(0, process_arguments)
 

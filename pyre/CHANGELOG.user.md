@@ -3,7 +3,17 @@
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Maintainers: add a new ``## X.Y.Z`` section at the **top** when cutting a Pyre release.
 CI copies that section into the GitHub Release body and regenerates
-``docs/packages/pyre_changelog.rst``.
+``docs/packages/pyre_changelog.rst``. Pyre shows new sections once after
+each upgrade (**Help → What's New** shows them anytime).
+
+## 1.8.3
+
+- Dragging a multi-point selection no longer drops the other selected points when you press on one of them; the whole group moves together.
+- Spacebar registration uses the alignment window, not only the center pixel: a point still registers when enough of both images is unmasked (default 25%, adjustable under **Registration → Transform Settings** as **Min unmasked tissue %**).
+- Opening a source or target mask updates every registration path (Spacebar and Refine Grid), so masks stay applied after you load them from the File menu.
+- After Spacebar on a single hovered point, that point is selected again when alignment finishes so you can press Space repeatedly to fine-tune it. Clear the selection (click empty space) before Space on a different point if you do not want the previous one included.
+- **Ctrl+Z** undoes recent edits: control-point drags (including multi-point), rigid layer drags, delete points, create point, call point to mouse, convert transform type, and mesh Spacebar alignment results. **Ctrl+X** still redoes when available.
+- After installing or upgrading, Pyre shows **What's New** once with the notes for that version. Open it again anytime from **Help → What's New**.
 
 ## 1.8.2
 

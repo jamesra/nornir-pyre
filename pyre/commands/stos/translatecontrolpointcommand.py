@@ -20,6 +20,7 @@ from pyre.interfaces.viewtype import ViewType
 from pyre.container import IContainer
 from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
+from pyre.commands.transform_undo import save_points_undo
 from pyre.views.gltiles import is_rigid_transform
 
 
@@ -144,15 +145,16 @@ class TranslateControlPointCommand(NavigationCommandBase):
         self._translate_origin = world_point
 
         new_selected_indicies = self._transform_controller.MovePoint(
-            list(self._selected_point_set),
+            list(self._command_points),
             delta[1],
             delta[0],
             space=self._edit_space_for_translate(),
         )
 
-        # Update selected points in the UI if indicies have changed
+        # Keep command and UI selection aligned if MovePoint remaps indices.
         new_indices_set = set(np.atleast_1d(new_selected_indicies).tolist())
-        if len(new_indices_set - self._selected_point_set) > 0:
+        if new_indices_set != self._command_points:
+            self._command_points = new_indices_set
             self._selected_point_set.clear()
             self._selected_point_set.update(new_indices_set)
 
@@ -177,7 +179,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
         dy, dx = nudge_yx
         self._transform_controller.MovePoint(
-            list(self._selected_point_set),
+            list(self._command_points),
             dx,
             dy,
             space=self._edit_space_for_translate(),
@@ -212,6 +214,16 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def execute(self):
         self._transform_controller.end_interactive_edit()
+        # One undo entry for the whole drag (multi-point included): Ctrl+Z restores
+        # the snapshot taken when the gesture started. Skip no-op click-release.
+        current = self._transform_controller.copy_points()
+        if (current.shape == self._original_points.shape
+                and not np.allclose(current, self._original_points, rtol=1e-5, atol=1e-3)):
+            save_points_undo(
+                self.history_manager,
+                self._transform_controller.SetPoints,
+                self._original_points,
+            )
         super().execute()
 
     def subscribe_to_parent(self):

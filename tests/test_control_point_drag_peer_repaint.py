@@ -77,6 +77,7 @@ class _Drag:
         cmd._transform_controller = self.controller
         cmd._translate_origin = None
         cmd._selected_point_set = ObservableSet([0])
+        cmd._command_points = {0}
         cmd._space = space
         cmd._window_manager = self.window_manager
         cmd._width, cmd._height = 800, 600

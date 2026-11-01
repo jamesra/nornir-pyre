@@ -213,6 +213,30 @@ def resolve_stos_masks() -> tuple[NDArray[np.bool_] | None, NDArray[np.bool_] | 
     return source_mask, target_mask
 
 
+def resolve_registration_gate_masks() -> tuple[NDArray[np.bool_] | None, NDArray[np.bool_] | None]:
+    """Return (source_mask, target_mask) for the Spacebar enqueue skip gate.
+
+    Prefer ``ImagePermutationHelper.BlendedMask`` from FixedImages / WarpedImages
+    so the pre-filter matches the arrays ``ImageWithMaskAsNoise`` / align-time
+    ``either_roi_is_masked`` use. Fall back to :func:`resolve_stos_masks` when
+    helpers are unloaded (tests and early startup).
+    """
+    import pyre.state
+    config = pyre.state.get_current_stos_config()
+    if config is None:
+        return None, None
+
+    source_mask: NDArray[np.bool_] | None = None
+    target_mask: NDArray[np.bool_] | None = None
+    if config.FixedImages is not None:
+        source_mask = np.asarray(config.FixedImages.BlendedMask, dtype=bool)
+    if config.WarpedImages is not None:
+        target_mask = np.asarray(config.WarpedImages.BlendedMask, dtype=bool)
+    if source_mask is not None or target_mask is not None:
+        return source_mask, target_mask
+    return resolve_stos_masks()
+
+
 def resolve_min_unmasked() -> float:
     """Return masked_relax_min_unmasked from AppSettings, or the default 0.25."""
     try:

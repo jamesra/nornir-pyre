@@ -46,7 +46,8 @@ class StosContainer(containers.DeclarativeContainer):
     history_manager = providers.ThreadSafeSingleton(CommandHistory)
     region_manager = providers.ThreadSafeSingleton(RegionMap)
     mouse_position_history = providers.ThreadSafeSingleton(MousePositionHistoryManager)
-    command_history = providers.ThreadSafeSingleton(CommandHistory)
+    # Same instance as history_manager so Ctrl+Z undoes SaveState from either name.
+    command_history = history_manager
     image_manager = providers.ThreadSafeSingleton(ImageManager)
     transform_gl_buffer_manager = providers.ThreadSafeSingleton(
         TransformControllerGLBufferManager, buffer_layouts={

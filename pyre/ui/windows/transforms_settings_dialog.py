@@ -144,9 +144,11 @@ class TransformsSettingsDialog(QDialog):
         self._masked_relax_min_unmasked.setValue(
             float(defaults.masked_relax_min_unmasked) * 100.0)
         self._masked_relax_min_unmasked.setToolTip(
-            "Grid control points with at least this much unmasked tissue in both "
-            "source and target cells stay fixed. Masked neighbors relax toward them "
-            "after a point is moved or registered.")
+            "Minimum unmasked tissue in both the source and target alignment "
+            "windows (default 25%). Spacebar registers a point when both windows "
+            "meet this fraction, even if the control-point center sits on a masked "
+            "pixel. Grid points that meet it stay pinned; neighbors below it relax "
+            "toward them after a move or registration.")
 
         form.addRow("Cell size", self._cell_size)
         form.addRow("Grid spacing", self._grid_spacing)
@@ -155,7 +157,7 @@ class TransformsSettingsDialog(QDialog):
         form.addRow("Angle step (degrees)", self._grid_angle_step)
         form.addRow("Preview pass transforms", self._preview_pass_transforms)
         form.addRow("GPU preview grid convert", self._gpu_preview_grid_convert)
-        form.addRow("Min unmasked to pin", self._masked_relax_min_unmasked)
+        form.addRow("Min unmasked tissue %", self._masked_relax_min_unmasked)
         return page
 
     def _build_point_tab(self, point: PointRegistrationSettings) -> QWidget:

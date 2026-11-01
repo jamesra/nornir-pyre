@@ -95,6 +95,7 @@ def _control_point_command(controller: _RecordingController, edit_space: Space,
     cmd = object.__new__(TranslateControlPointCommand)
     cmd._transform_controller = controller  # type: ignore[assignment]
     cmd._selected_point_set = {5, 3}  # type: ignore[assignment]
+    cmd._command_points = {5, 3}
     cmd.HighlightedPointIndex = highlighted  # type: ignore[attr-defined]
     cmd._edit_space_for_translate = lambda: edit_space  # type: ignore[method-assign]
     return cmd

@@ -11,7 +11,12 @@ from PyQt6.QtCore import Qt
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from pyre.commands.stos.actionmaphelpers import mesh_can_delete, mesh_get_action, mesh_get_possible_actions
+from pyre.commands.stos.actionmaphelpers import (
+    is_selected_glyph_group_press,
+    mesh_can_delete,
+    mesh_get_action,
+    mesh_get_possible_actions,
+)
 from pyre.commands.togglecontrolpointselectioncommand import (
     apply_selection_set_operation,
     apply_shift_region_selection,
@@ -102,6 +107,33 @@ class TestMeshGetActionSelection(unittest.TestCase):
         )
         result = mesh_get_action(event, {2}, _always_can_delete)
         self.assertEqual(result.action, ControlPointAction.TOGGLE_SELECTION)
+
+    def test_selected_glyph_group_press_defers_replace(self) -> None:
+        event = _event(
+            input_event=InputEvent.Press,
+            modifiers=InputModifiers.LeftMouseButton,
+            existing={1, 2, 3},
+        )
+        self.assertTrue(is_selected_glyph_group_press(event, {2}))
+        self.assertFalse(is_selected_glyph_group_press(event, {9}))
+        self.assertFalse(is_selected_glyph_group_press(event, set()))
+
+    def test_selected_glyph_group_press_ignores_shift(self) -> None:
+        event = _event(
+            input_event=InputEvent.Press,
+            modifiers=InputModifiers.LeftMouseButton | InputModifiers.ShiftKey,
+            existing={1, 2},
+        )
+        self.assertFalse(is_selected_glyph_group_press(event, {1}))
+
+    def test_drag_on_selected_point_is_translate(self) -> None:
+        event = _event(
+            input_event=InputEvent.Drag,
+            modifiers=InputModifiers.LeftMouseButton,
+            existing={1, 2, 3},
+        )
+        result = mesh_get_action(event, {2}, _always_can_delete)
+        self.assertEqual(result.action, ControlPointAction.TRANSLATE)
 
     def test_delete_key_with_selection(self) -> None:
         event = _event(

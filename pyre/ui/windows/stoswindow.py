@@ -491,6 +491,11 @@ class StosWindow(PyreWindowBase):
             lambda _checked=False: self.onInstructions())
         menu.addAction(menuInstructions)
 
+        menuWhatsNew = QAction("What's &New…", self)
+        menuWhatsNew.triggered.connect(  # type: ignore[union-attr]
+            lambda _checked=False: self.onWhatsNew())
+        menu.addAction(menuWhatsNew)
+
         menuManual = menu.addAction("&Online Manual")
         menuManual.triggered.connect(  # type: ignore[union-attr]
             lambda _checked=False: QDesktopServices.openUrl(QUrl(PYRE_MANUAL_URL)))
@@ -699,6 +704,11 @@ class StosWindow(PyreWindowBase):
     def onInstructions(self):
         """Open scrollable help scrolled to mouse and keyboard controls."""
         ControlsHelpDialog(self, self._config["readme"]).exec()
+
+    def onWhatsNew(self) -> None:
+        """Open the curated user changelog (Help → What's New)."""
+        from pyre.ui.whats_new import show_whats_new
+        show_whats_new(self, self._settings, full_history=True)
 
     def onTransformsSettings(self) -> None:
         """Open Registration → Transform Settings for registration defaults."""
@@ -1160,6 +1170,12 @@ class StosWindow(PyreWindowBase):
                 current_transform,
                 transform_type,
                 **kwargs
+            )
+            # Ctrl+Z restores the previous model object (same pattern as BlendLinear).
+            self._history_manager.SaveState(
+                self._transform_controller.__setattr__,
+                "TransformModel",
+                current_transform,
             )
             self._transform_controller.TransformModel = converted_transform
         except Exception as e:

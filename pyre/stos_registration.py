@@ -123,8 +123,14 @@ def sync_stos_registration_roles(
     """
     if not hasattr(stos_state, "_fixed_image_permutations"):
         return
-    stos_state._fixed_image_permutations = warped   # type: ignore[attr-defined]
-    stos_state._warped_image_permutations = fixed    # type: ignore[attr-defined]
+    set_source = getattr(stos_state, "_set_source_permutations", None)
+    set_target = getattr(stos_state, "_set_target_permutations", None)
+    if callable(set_source) and callable(set_target):
+        set_source(warped)
+        set_target(fixed)
+    else:
+        stos_state._fixed_image_permutations = warped   # type: ignore[attr-defined]
+        stos_state._warped_image_permutations = fixed    # type: ignore[attr-defined]
     _publish_alignment_images(stos_state)
 
 
@@ -180,22 +186,40 @@ def wire_stos_state_after_load(
         except (KeyError, TypeError):
             pass
 
+    set_source = getattr(stos_state, "_set_source_permutations", None)
+    set_target = getattr(stos_state, "_set_target_permutations", None)
     update_permutations = getattr(stos_state, "_update_image_permutations", None)
     if callable(update_permutations):
         if source_mask_vm is not None:
-            stos_state._fixed_image_permutations = update_permutations(source_vm, source_mask_vm)  # type: ignore[attr-defined]
+            helper = update_permutations(source_vm, source_mask_vm)
+            if callable(set_source):
+                set_source(helper)
+            else:
+                stos_state._fixed_image_permutations = helper  # type: ignore[attr-defined]
         elif source_slot is not None:
-            # Preserve STOS-loaded Mask from the image manager.
+            # Preserve STOS-loaded Mask from the image manager (already the slot).
             stos_state._fixed_image_permutations = source_slot  # type: ignore[attr-defined]
         else:
-            stos_state._fixed_image_permutations = update_permutations(source_vm, None)  # type: ignore[attr-defined]
+            helper = update_permutations(source_vm, None)
+            if callable(set_source):
+                set_source(helper)
+            else:
+                stos_state._fixed_image_permutations = helper  # type: ignore[attr-defined]
 
         if target_mask_vm is not None:
-            stos_state._warped_image_permutations = update_permutations(target_vm, target_mask_vm)  # type: ignore[attr-defined]
+            helper = update_permutations(target_vm, target_mask_vm)
+            if callable(set_target):
+                set_target(helper)
+            else:
+                stos_state._warped_image_permutations = helper  # type: ignore[attr-defined]
         elif target_slot is not None:
             stos_state._warped_image_permutations = target_slot  # type: ignore[attr-defined]
         else:
-            stos_state._warped_image_permutations = update_permutations(target_vm, None)  # type: ignore[attr-defined]
+            helper = update_permutations(target_vm, None)
+            if callable(set_target):
+                set_target(helper)
+            else:
+                stos_state._warped_image_permutations = helper  # type: ignore[attr-defined]
 
         _publish_alignment_images(stos_state)
 

@@ -125,6 +125,7 @@ def _align_control_point_from_arrays(
     small FFTs on the GPU. Does not change ``GetActiveComputationLib``.
     """
     from pyre.common import either_roi_is_masked
+    from pyre.controllers import masked_grid_relax
 
     area = np.asarray(alignment_area, dtype=np.float64)
     if either_roi_is_masked(
@@ -133,7 +134,8 @@ def _align_control_point_from_arrays(
             source_mask,
             target_controlpoint,
             area,
-            source_controlpoint=source_controlpoint):
+            source_controlpoint=source_controlpoint,
+            min_unmasked=masked_grid_relax.resolve_min_unmasked()):
         _logger.info("Skipping point alignment: masked ROI at %s", target_controlpoint)
         return None
     return nornir_imageregistration.local_distortion_correction.AttemptAlignPoint(
@@ -1620,6 +1622,12 @@ class TransformController:
 
         Shift+Space queues every point; restoring that set would re-select the
         whole mesh. Skip remembering in that case.
+
+        Points already in the UI selection are remembered so a multi-select
+        Space can restore them. A solo queued point is also remembered when the
+        selection was empty (hover-only Space): after the point moves, the
+        cursor often misses the glyph, and without reselect the next Space
+        cannot fine-tune the same point.
         """
         n_points = self.NumPoints
         if n_points > 1 and len(indices) >= n_points:
@@ -1628,12 +1636,15 @@ class TransformController:
         if ui is None:
             return
         added = set(int(point_id) for point_id in added_ids)
+        ui_indices = {int(i) for i in ui}
+        solo_hover = len(indices) == 1 and not ui_indices
         remembered: set[int] = set()
         for index in indices:
-            if int(index) not in ui:
+            idx = int(index)
+            point_id = self.point_id_for_index(idx)
+            if point_id is None or int(point_id) not in added:
                 continue
-            point_id = self.point_id_for_index(int(index))
-            if point_id is not None and int(point_id) in added:
+            if idx in ui_indices or solo_hover:
                 remembered.add(int(point_id))
         if remembered:
             self._suppress_registration_reselect = False
@@ -1738,9 +1749,11 @@ class TransformController:
     ) -> list[int]:
         """Queue unique control-point alignments by session ID. Returns newly queued IDs.
 
-        Control points on a source or target mask pixel, or whose alignment
-        window has too little unmasked tissue, are not aligned. When the
-        request is only those masked points and the transform is a grid, Spacebar
+        Control points whose alignment window has too little unmasked tissue
+        (``masked_relax_min_unmasked``, default 25% in both images) are not
+        aligned. A center pixel on the mask does not by itself skip registration
+        when the window still meets that threshold. When the request is only
+        those insufficient-ROI points and the transform is a grid, Spacebar
         instead relaxes them from neighboring unmasked nodes.
         """
         area = alignment_area if alignment_area is not None else self._registration_alignment_area
@@ -1792,22 +1805,31 @@ class TransformController:
             indices: Sequence[int],
             alignment_area: NDArray[np.integer] | None = None,
     ) -> tuple[list[int], list[int]]:
-        """Partition *indices* into (unmasked-to-register, masked-to-skip)."""
-        source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
+        """Partition *indices* into (unmasked-to-register, masked-to-skip).
+
+        When *alignment_area* is known, skip only when the alignment window has
+        too little unmasked tissue in either image (``masked_relax_min_unmasked``,
+        default 25%). A control point whose center sits on a masked pixel can
+        still register when enough of both windows is live. Without an area,
+        fall back to the center-pixel mask test.
+        """
+        # BlendedMask from the same helpers ImageWithMaskAsNoise uses, not the
+        # tissue-fallback masks used for grid relax when no STOS mask is loaded.
+        source_mask, target_mask = masked_grid_relax.resolve_registration_gate_masks()
         if source_mask is None and target_mask is None:
             return [int(i) for i in indices], []
-        masked_set = masked_grid_relax.control_point_indices_on_mask(
-            self.SourcePoints, self.TargetPoints, source_mask, target_mask)
         if alignment_area is not None:
-            masked_set.update(
-                masked_grid_relax.control_point_indices_with_insufficient_alignment_roi(
-                    self.SourcePoints,
-                    self.TargetPoints,
-                    source_mask,
-                    target_mask,
-                    alignment_area,
-                    masked_grid_relax.resolve_min_unmasked(),
-                ))
+            masked_set = masked_grid_relax.control_point_indices_with_insufficient_alignment_roi(
+                self.SourcePoints,
+                self.TargetPoints,
+                source_mask,
+                target_mask,
+                alignment_area,
+                masked_grid_relax.resolve_min_unmasked(),
+            )
+        else:
+            masked_set = masked_grid_relax.control_point_indices_on_mask(
+                self.SourcePoints, self.TargetPoints, source_mask, target_mask)
         register_indices: list[int] = []
         masked_indices: list[int] = []
         for index in indices:
@@ -2238,8 +2260,30 @@ class TransformController:
         self.notify_views_now()
         applied_index = self.index_for_point_id(point_id)
         if applied_index is not None:
-            self.enqueue_masked_grid_relax(
-                [int(applied_index)], undo_points=undo_snapshot)
+            if masked_grid_relax.grid_model_or_none(self) is not None:
+                # Grid: relax owns the undo snapshot (pre-move) so one Ctrl+Z
+                # undoes both the alignment and the spring follow-up.
+                self.enqueue_masked_grid_relax(
+                    [int(applied_index)], undo_points=undo_snapshot)
+            else:
+                # Mesh: no relax path, so push the pre-move snapshot now.
+                try:
+                    from dependency_injector.wiring import Provide, inject
+                    from pyre.container import IContainer
+                    from pyre.commands.transform_undo import save_points_undo
+                    from pyre.interfaces.managers.command_history import ICommandHistory
+
+                    @inject
+                    def _save(
+                            history: ICommandHistory = Provide[IContainer.history_manager],
+                    ) -> None:
+                        save_points_undo(history, self.SetPoints, undo_snapshot)
+
+                    _save()
+                except Exception:
+                    _logger.debug(
+                        "Could not save undo state for registration apply",
+                        exc_info=True)
 
     def enqueue_masked_grid_relax(
             self,
