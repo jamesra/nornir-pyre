@@ -6,6 +6,10 @@ CI copies that section into the GitHub Release body and regenerates
 ``docs/packages/pyre_changelog.rst``. Pyre shows new sections once after
 each upgrade (**Help → What's New** shows them anytime).
 
+## 1.8.4
+
+- Spacebar registration on damaged or heavily warped grids no longer freezes the UI for several seconds after results apply. When control points move but stay in the same mesh neighborhoods, Pyre reuses the existing triangulation instead of rebuilding it from scratch.
+
 ## 1.8.3
 
 - Dragging a multi-point selection no longer drops the other selected points when you press on one of them; the whole group moves together.
