@@ -25,6 +25,7 @@ from pyre.stos_quality_browser import (
     score_path_for_row,
     score_to_percentile,
     scores_from_rows,
+    stale_quality_score_paths,
 )
 
 
@@ -77,6 +78,99 @@ def test_attach_quality_scores_and_histogram(tmp_path: Path) -> None:
     assert stale == []
     hist = histogram_from_rows(updated)
     assert hist.NumSamples == 1
+
+
+def test_attach_quality_scores_validate_false_skips_checksum(tmp_path: Path, monkeypatch) -> None:
+    """Optimistic attach paints cached ZNCC without parsing every ``.stos``."""
+    auto = tmp_path / 'a.stos'
+    auto.write_text('transform')
+    cache = QualityCache()
+    merge_entry(
+        cache,
+        'a.stos',
+        pair=PairZnccResult(
+            pair_zncc=0.71,
+            downsample=16.0,
+            stos_checksum='deadbeef',
+            stos_mtime_ns=auto.stat().st_mtime_ns,
+            max_side=2048,
+        ),
+    )
+    save_quality_cache(str(tmp_path), cache)
+
+    calls: list[str] = []
+
+    def _boom(path: str) -> str:
+        calls.append(path)
+        raise AssertionError('LoadChecksum must not run during optimistic attach')
+
+    monkeypatch.setattr(
+        'nornir_imageregistration.stos_quality.StosFile.LoadChecksum',
+        _boom,
+    )
+
+    rows = [StosBrowserRow('a.stos', str(auto), None)]
+    updated, _loaded, missing = attach_quality_scores(
+        str(tmp_path),
+        rows,
+        StosFileSource.auto,
+        cache=load_quality_cache(str(tmp_path)),
+        validate=False,
+    )
+    assert updated[0].quality_score == 0.71
+    assert missing == []
+    assert calls == []
+
+
+def test_stale_quality_score_paths_uses_checksum(tmp_path: Path, monkeypatch) -> None:
+    auto = tmp_path / 'a.stos'
+    auto.write_text('transform')
+    cache = QualityCache()
+    merge_entry(
+        cache,
+        'a.stos',
+        pair=PairZnccResult(
+            pair_zncc=0.71,
+            downsample=16.0,
+            stos_checksum='old-checksum',
+            stos_mtime_ns=auto.stat().st_mtime_ns,
+            max_side=2048,
+        ),
+    )
+    save_quality_cache(str(tmp_path), cache)
+    loaded = load_quality_cache(str(tmp_path))
+    rows = [StosBrowserRow('a.stos', str(auto), None).with_quality_score(0.71)]
+
+    monkeypatch.setattr(
+        'nornir_imageregistration.stos_quality.StosFile.LoadChecksum',
+        lambda _path: 'new-checksum',
+    )
+    assert stale_quality_score_paths(
+        str(tmp_path), rows, StosFileSource.auto, loaded,
+    ) == [str(auto)]
+
+    monkeypatch.setattr(
+        'nornir_imageregistration.stos_quality.StosFile.LoadChecksum',
+        lambda _path: 'old-checksum',
+    )
+    assert stale_quality_score_paths(
+        str(tmp_path), rows, StosFileSource.auto, loaded,
+    ) == []
+
+
+def test_attach_quality_scores_validate_false_lists_missing(tmp_path: Path) -> None:
+    auto = tmp_path / 'a.stos'
+    auto.write_text('transform')
+    rows = [StosBrowserRow('a.stos', str(auto), None)]
+    updated, _cache, missing = attach_quality_scores(
+        str(tmp_path),
+        rows,
+        StosFileSource.auto,
+        cache=QualityCache(),
+        validate=False,
+    )
+    assert updated[0].quality_score is None
+    assert missing == [str(auto)]
 
 
 def test_score_to_percentile_needs_two_samples() -> None:

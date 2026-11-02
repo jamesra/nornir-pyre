@@ -8,7 +8,11 @@ import re
 
 logger = logging.getLogger(__name__)
 
-_VERSION_HEADING = re.compile(r"^##\s+(\d+\.\d+\.\d+)\s*$", re.MULTILINE)
+# "## 1.8.4" or "## 1.8.4 — 2026-11-01" / "— not yet released" (em dash, en dash, or hyphen).
+_VERSION_HEADING = re.compile(
+    r"^##\s+(\d+\.\d+\.\d+)(?:\s+[—–-]\s+(.+?))?\s*$",
+    re.MULTILINE,
+)
 _CHANGELOG_NAME = "CHANGELOG.user.md"
 
 
@@ -41,14 +45,26 @@ def read_changelog_text() -> str:
 
 def parse_changelog_sections(text: str) -> dict[str, str]:
     """Map ``X.Y.Z`` → section body (markdown without the ``##`` heading)."""
+    return {version: body for version, _label, body in parse_changelog_entries(text)}
+
+
+def parse_changelog_entries(text: str) -> list[tuple[str, str | None, str]]:
+    """Return ``(version, release_label, body)`` newest-first as written in the file.
+
+    *release_label* is the text after the em dash (date or ``not yet released``), or
+    ``None`` when the heading is bare ``## X.Y.Z``.
+    """
     matches = list(_VERSION_HEADING.finditer(text))
-    sections: dict[str, str] = {}
+    entries: list[tuple[str, str | None, str]] = []
     for index, match in enumerate(matches):
         version = match.group(1)
+        label = match.group(2)
+        if label is not None:
+            label = label.strip() or None
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        sections[version] = text[start:end].strip()
-    return sections
+        entries.append((version, label, text[start:end].strip()))
+    return entries
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
@@ -95,14 +111,24 @@ def versions_newer_than(
     return sorted(chosen, key=_version_tuple, reverse=True)
 
 
-def markdown_for_versions(sections: dict[str, str], versions: list[str]) -> str:
+def markdown_for_versions(
+        sections: dict[str, str],
+        versions: list[str],
+        *,
+        release_labels: dict[str, str | None] | None = None,
+) -> str:
     """Build a What's New markdown document for *versions* (already ordered)."""
     if not versions:
         return ""
+    labels = release_labels or {}
     blocks: list[str] = ["# What's New in Pyre\n"]
     for version in versions:
         body = sections.get(version, "").strip()
-        blocks.append(f"## Pyre {version}\n")
+        label = labels.get(version)
+        if label:
+            blocks.append(f"## Pyre {version} — {label}\n")
+        else:
+            blocks.append(f"## Pyre {version}\n")
         if body:
             blocks.append(body + "\n")
     return "\n".join(blocks).strip() + "\n"
@@ -120,9 +146,11 @@ def whats_new_markdown(
     Otherwise only sections newer than *last_shown* are included.
     """
     text = read_changelog_text()
-    sections = parse_changelog_sections(text)
-    if not sections:
+    entries = parse_changelog_entries(text)
+    if not entries:
         return text
+    sections = {version: body for version, _label, body in entries}
+    release_labels = {version: label for version, label, _body in entries}
     installed = current if current is not None else package_version()
     if full_history:
         versions = sorted(
@@ -133,4 +161,5 @@ def whats_new_markdown(
     else:
         versions = versions_newer_than(
             sections, last_shown=last_shown, current=installed)
-    return markdown_for_versions(sections, versions)
+    return markdown_for_versions(
+        sections, versions, release_labels=release_labels)

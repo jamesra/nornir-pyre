@@ -17,17 +17,17 @@ from pyre.user_changelog import (
 
 _SAMPLE = """# Pyre user changelog
 
-## 1.8.3
+## 1.8.3 — not yet released
 
-- Fine-tune Spacebar.
+- **Fine-tune Spacebar.** Holding Space aligns each point once.
 
-## 1.8.2
+## 1.8.2 — 2026-11-01
 
-- Save Warped Image fix.
+- **Fix: Save Warped Image.** Saved the wrong image before.
 
-## 1.7.7
+## 1.7.7 — 2026-09-24
 
-- Cancel on STOS open.
+- **Cancel on STOS open.** In-flight registrations stop when you open another file.
 """
 
 
@@ -35,7 +35,16 @@ class TestUserChangelogParse(unittest.TestCase):
     def test_parse_sections(self) -> None:
         sections = parse_changelog_sections(_SAMPLE)
         self.assertEqual(set(sections), {"1.8.3", "1.8.2", "1.7.7"})
-        self.assertIn("Fine-tune", sections["1.8.3"])
+        self.assertIn("Fine-tune Spacebar", sections["1.8.3"])
+
+    def test_parse_entries_keep_release_labels(self) -> None:
+        from pyre.user_changelog import parse_changelog_entries
+
+        entries = parse_changelog_entries(_SAMPLE)
+        by_version = {version: label for version, label, _body in entries}
+        self.assertEqual(by_version["1.8.3"], "not yet released")
+        self.assertEqual(by_version["1.8.2"], "2026-11-01")
+        self.assertEqual(by_version["1.7.7"], "2026-09-24")
 
     def test_version_greater(self) -> None:
         self.assertTrue(version_greater("1.8.3", "1.8.2"))
@@ -65,9 +74,13 @@ class TestUserChangelogParse(unittest.TestCase):
 
     def test_markdown_for_versions(self) -> None:
         sections = parse_changelog_sections(_SAMPLE)
-        md = markdown_for_versions(sections, ["1.8.3", "1.8.2"])
-        self.assertIn("## Pyre 1.8.3", md)
-        self.assertIn("## Pyre 1.8.2", md)
+        md = markdown_for_versions(
+            sections,
+            ["1.8.3", "1.8.2"],
+            release_labels={"1.8.3": "not yet released", "1.8.2": "2026-11-01"},
+        )
+        self.assertIn("## Pyre 1.8.3 — not yet released", md)
+        self.assertIn("## Pyre 1.8.2 — 2026-11-01", md)
         self.assertNotIn("1.7.7", md)
 
 

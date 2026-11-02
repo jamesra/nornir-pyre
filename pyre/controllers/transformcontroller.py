@@ -514,6 +514,10 @@ class TransformController:
     # Points queued and finished since the queue last went idle (status-bar progress).
     _registration_batch_total: int
     _registration_batch_finished: int
+    # One Ctrl+Z for the whole Spacebar queue: points before the first enqueue,
+    # committed when the queue goes idle or the user cancels mid-batch.
+    _registration_batch_undo_points: NDArray[np.floating] | None
+    _registration_batch_had_apply: bool
     _registration_leases: dict[tuple[int, int], PublishedPairLease]
     _registration_job_generations: dict[tuple[int, int], tuple[int | None, int | None]]
     _virtual_boundary_indices: list[int] | None
@@ -913,6 +917,10 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        # Drop an unfinished Spacebar undo; the old SetPoints snapshot is invalid
+        # once the model object changes.
+        self._registration_batch_undo_points = None
+        self._registration_batch_had_apply = False
         self._masked_relax_generation += 1
         self._masked_relax_pending_seeds.clear()
         self._masked_relax_pending_undo = None
@@ -959,6 +967,8 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        self._registration_batch_undo_points = None
+        self._registration_batch_had_apply = False
         self._masked_relax_generation += 1
         self._masked_relax_pending_seeds.clear()
         self._masked_relax_pending_undo = None
@@ -1244,6 +1254,8 @@ class TransformController:
         self._registration_epoch = 0
         self._registration_batch_total = 0
         self._registration_batch_finished = 0
+        self._registration_batch_undo_points = None
+        self._registration_batch_had_apply = False
         self._registration_leases = {}
         self._registration_job_generations = {}
         self._virtual_boundary_indices = None
@@ -1559,13 +1571,18 @@ class TransformController:
         Pending alignments are dropped. In-flight pool workers are not killed,
         because the pool is shared; their results are discarded by epoch when
         they arrive. Points already applied stay applied, and the selection is
-        not restored afterwards.
+        not restored afterwards. Also stops an in-flight masked/exterior grid
+        relax wave (partial TargetPoints already committed stay).
         """
         was_active = (self._registration_queue_busy()
                       or self._registration_batch_total > 0)
         self._registration_reselect_ids.clear()
         self._suppress_registration_reselect = False
         self._cancel_all_registrations()
+        # Same generation bump as begin_interactive_edit / transform replace.
+        self._masked_relax_generation += 1
+        self._masked_relax_pending_seeds.clear()
+        self._masked_relax_pending_undo = None
         if was_active:
             _logger.info("Cancelled control-point registrations")
             # Remesh / RBF refresh for points applied before the cancel; nothing
@@ -1788,6 +1805,11 @@ class TransformController:
         added = self._registration_queue.enqueue(point_ids)
         if added:
             _logger.info("Queued control-point alignments ids=%s", added)
+            # First enqueue of a batch: remember points so one Ctrl+Z undoes the
+            # whole queue (including a cancel that leaves partial applies).
+            if self._registration_batch_undo_points is None:
+                self._registration_batch_undo_points = self.copy_points()
+                self._registration_batch_had_apply = False
             self._remember_registration_reselect_ids(register_indices, added)
             self._registration_batch_total += len(added)
             self._report_registration_progress()
@@ -1841,15 +1863,61 @@ class TransformController:
         return register_indices, masked_indices
 
     def _enqueue_relax_for_masked_selection(self, masked_indices: Sequence[int]) -> None:
-        """Relax selected masked grid points from neighboring seeds (no-op off grid)."""
+        """Relax free/exterior grid points after Spacebar lands only on masked indices."""
+        if not masked_indices:
+            return
+        self.enqueue_relax_exterior_grid_points(undo_points=self.copy_points())
+
+    def enqueue_relax_exterior_grid_points(
+            self,
+            undo_points: NDArray[np.floating] | None = None,
+            *,
+            extra_seeds: Sequence[int] | None = None,
+    ) -> None:
+        """Queue one BFS spring step for all free (exterior / masked) grid TargetPoints.
+
+        Pins points with enough unmasked tissue and seeds from every fixed index so
+        free regions attached to the pinned interior settle after a registration or
+        when the user runs **Registration → Relax Exterior Grid Points**.
+
+        *extra_seeds* are always included (e.g. the point just registered) so a
+        visit-once wave still starts when the moved point no longer meets the
+        fixed-tissue threshold at its new location. No-op off grid, when every
+        point is fixed, or when there are no seeds.
+        """
         grid_model = masked_grid_relax.grid_model_or_none(self)
         if grid_model is None:
             return
-        seeds = masked_grid_relax.neighbor_seeds_for_free_points(
-            masked_indices, grid_model.grid_dims)
+        source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
+        min_unmasked = masked_grid_relax.resolve_min_unmasked()
+        source_ok, self._masked_relax_source_pin_cache = (
+            masked_grid_relax.get_or_build_source_ok(
+                self._masked_relax_source_pin_cache,
+                grid_model.grid,
+                min_unmasked,
+                source_mask,
+            ))
+        fixed_mask = masked_grid_relax.build_fixed_mask(
+            grid_model.grid,
+            min_unmasked,
+            source_mask,
+            target_mask,
+            source_ok=source_ok,
+        )
+        if not np.any(~fixed_mask):
+            return
+        seeds = [int(i) for i in np.flatnonzero(fixed_mask)]
+        if extra_seeds:
+            n = int(fixed_mask.shape[0])
+            seen = set(seeds)
+            for index in extra_seeds:
+                idx = int(index)
+                if 0 <= idx < n and idx not in seen:
+                    seen.add(idx)
+                    seeds.append(idx)
         if not seeds:
             return
-        self.enqueue_masked_grid_relax(seeds, undo_points=self.copy_points())
+        self.enqueue_masked_grid_relax(seeds, undo_points=undo_points)
 
     def _pump_registration_queue(self) -> None:
         """Start pending alignments until the concurrency limit is reached."""
@@ -2243,13 +2311,13 @@ class TransformController:
 
         self._registration_apply_in_progress = True
         try:
-            undo_snapshot = self.copy_points()
             self.MovePoint(index, dx, dy, space=Space.Target)
             if self.NumPoints != int(self._point_ids.shape[0]):
                 self._mint_point_ids()
                 self._cancel_all_registrations()
         finally:
             self._registration_apply_in_progress = False
+        self._registration_batch_had_apply = True
         self.__OnAlignmentAppliedListeners.invoke(
             point_id, True, f"delta=(dy={dy:+.2f}, dx={dx:+.2f}) w={weight:.4f}")
         # MovePoint runs under patch_live_tile_vertices, which suppresses OnChange.
@@ -2261,29 +2329,12 @@ class TransformController:
         applied_index = self.index_for_point_id(point_id)
         if applied_index is not None:
             if masked_grid_relax.grid_model_or_none(self) is not None:
-                # Grid: relax owns the undo snapshot (pre-move) so one Ctrl+Z
-                # undoes both the alignment and the spring follow-up.
-                self.enqueue_masked_grid_relax(
-                    [int(applied_index)], undo_points=undo_snapshot)
-            else:
-                # Mesh: no relax path, so push the pre-move snapshot now.
-                try:
-                    from dependency_injector.wiring import Provide, inject
-                    from pyre.container import IContainer
-                    from pyre.commands.transform_undo import save_points_undo
-                    from pyre.interfaces.managers.command_history import ICommandHistory
-
-                    @inject
-                    def _save(
-                            history: ICommandHistory = Provide[IContainer.history_manager],
-                    ) -> None:
-                        save_points_undo(history, self.SetPoints, undo_snapshot)
-
-                    _save()
-                except Exception:
-                    _logger.debug(
-                        "Could not save undo state for registration apply",
-                        exc_info=True)
+                # Grid: one exterior/masked spring step after every registration.
+                # Undo is deferred to the batch (see _commit_registration_batch_undo).
+                self.enqueue_relax_exterior_grid_points(
+                    undo_points=None,
+                    extra_seeds=[int(applied_index)],
+                )
 
     def enqueue_masked_grid_relax(
             self,
@@ -2531,6 +2582,7 @@ class TransformController:
 
     def _on_registration_queue_idle(self) -> None:
         """Remesh and refresh RBF after the last queued alignment is applied."""
+        self._commit_registration_batch_undo()
         self._reset_registration_progress()
         self._release_staged_alignment_pair()
         self._registration_source_image = None
@@ -2542,6 +2594,42 @@ class TransformController:
         elif self._model_needs_rbf_prewarm(self._TransformModel):
             self._queue_rbf_prewarm()
         self._maybe_restore_selection_after_registration()
+
+    def _commit_registration_batch_undo(self) -> None:
+        """Push one Ctrl+Z entry for the Spacebar queue, or discard if nothing applied.
+
+        Called when the queue goes idle after finishing or after Escape cancel; the
+        snapshot is the points from before the first enqueue of this batch.
+        """
+        snapshot = self._registration_batch_undo_points
+        had_apply = self._registration_batch_had_apply
+        self._registration_batch_undo_points = None
+        self._registration_batch_had_apply = False
+        if snapshot is None or not had_apply:
+            return
+        try:
+            current = self.copy_points()
+            if (
+                current.shape == snapshot.shape
+                and np.allclose(current, snapshot, rtol=1e-5, atol=1e-3)
+            ):
+                return
+            from dependency_injector.wiring import Provide, inject
+            from pyre.container import IContainer
+            from pyre.commands.transform_undo import save_points_undo
+            from pyre.interfaces.managers.command_history import ICommandHistory
+
+            @inject
+            def _save(
+                    history: ICommandHistory = Provide[IContainer.history_manager],
+            ) -> None:
+                save_points_undo(history, self.SetPoints, snapshot)
+
+            _save()
+        except Exception:
+            _logger.debug(
+                "Could not save undo state for registration batch",
+                exc_info=True)
 
     def SetPoints(self, points: NDArray | nornir_imageregistration.IControlPoints):
         """Set transform points to the passed array"""

@@ -44,7 +44,7 @@ Publish to GitHub (from monorepo root; also VS Code **pyre: publish Windows rele
 ..\..\..\release\publish_pyre_windows_release.ps1
 ```
 
-Add user-facing notes under `nornir-pyre/pyre/CHANGELOG.user.md` (`## <version>`) before publishing.
+Add user-facing notes under `nornir-pyre/pyre/CHANGELOG.user.md` (`## <version> — <date or not yet released>`) before publishing; bold skim lead then detail per the **user-changelog** rule.
 
 ## Files
 

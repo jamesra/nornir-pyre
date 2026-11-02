@@ -11,16 +11,22 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from nornir_imageregistration.stos_quality import QualityCache
+from nornir_imageregistration.stos_quality import (
+    PairZnccResult,
+    QualityCache,
+    merge_entry,
+    save_quality_cache,
+)
 from PyQt6.QtWidgets import QApplication
 from pyre.qt_eventmanager import init_main_thread_dispatcher
 from pyre.settings.app import AppSettings
-from pyre.stos_manual_paths import BrowseMode, scan_stos_browser_rows
+from pyre.stos_manual_paths import BrowseMode, StosFileSource, scan_stos_browser_rows
 from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
 
 _SCORE = "pyre.ui.windows.stosfilebrowser.score_stos_into_cache"
 _SAVE = "pyre.ui.windows.stosfilebrowser.save_quality_cache"
 _INTERVAL = "pyre.ui.windows.stosfilebrowser._QUALITY_CACHE_SAVE_INTERVAL_S"
+_STALE_PATHS = "pyre.ui.windows.stosfilebrowser.stale_quality_score_paths"
 
 
 def _stub_stos_folder(tmp: str, count: int) -> list[str]:
@@ -203,6 +209,61 @@ class TestStosBrowserQualityScoring(unittest.TestCase):
                 browser.rescan()
                 browser.wait_for_scan_idle()
             self.assertEqual(len(browser._rows), 1)
+
+    def test_cached_scores_paint_before_checksum_validation_finishes(self) -> None:
+        """stos_quality.json scores reach the table before LoadChecksum walks the folder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _stub_stos_folder(tmp, 1)
+            cache = QualityCache()
+            merge_entry(
+                cache,
+                os.path.basename(paths[0]),
+                pair=PairZnccResult(
+                    pair_zncc=0.42,
+                    downsample=16.0,
+                    stos_checksum='cached',
+                    stos_mtime_ns=os.stat(paths[0]).st_mtime_ns,
+                    max_side=2048,
+                ),
+            )
+            save_quality_cache(tmp, cache)
+
+            browser = self._browser(tmp)
+            browser.show()
+            self._app.processEvents()
+            generation = browser._scan_generation
+            entered = threading.Event()
+            release = threading.Event()
+
+            def slow_stale(*_args: Any, **_kwargs: Any) -> list[str]:
+                entered.set()
+                release.wait(5.0)
+                return []
+
+            with patch(_STALE_PATHS, side_effect=slow_stale), patch(_SCORE), patch(_SAVE):
+                future = browser._load_executor.submit(
+                    browser._attach_cached_scores_then_validate,
+                    tmp,
+                    list(browser._rows),
+                    StosFileSource.auto,
+                    generation,
+                )
+                self.assertTrue(entered.wait(5.0))
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    self._app.processEvents()
+                    if (
+                        browser._rows
+                        and browser._rows[0].quality_score == 0.42
+                    ):
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("cached score was not painted before checksum validation finished")
+                release.set()
+                future.result(timeout=5.0)
+                browser.wait_for_scan_idle()
+            self.assertEqual(browser._rows[0].quality_score, 0.42)
 
 
 if __name__ == "__main__":

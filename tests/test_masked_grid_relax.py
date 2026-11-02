@@ -222,13 +222,10 @@ class TestControlPointMaskSkip(unittest.TestCase):
                 "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
                 return_value=(src, tgt),
         ):
-            with patch.object(controller, "enqueue_masked_grid_relax") as relax:
+            with patch.object(controller, "enqueue_relax_exterior_grid_points") as relax:
                 added = controller.enqueue_point_registrations([0], align_fn=_align)
         self.assertEqual(added, [])
         relax.assert_called_once()
-        seeds = list(relax.call_args.args[0])
-        self.assertNotIn(0, seeds)
-        self.assertTrue(seeds)
 
     def test_spacebar_mixed_selection_registers_unmasked_only(self) -> None:
         controller = TransformController(_identity_grid())
@@ -381,6 +378,94 @@ class TestControlPointMaskSkip(unittest.TestCase):
                 alignment_area=np.array([16, 16], dtype=np.int32),
             )
         self.assertEqual(added, [])
+
+
+class TestRelaxExteriorGridPoints(unittest.TestCase):
+    def _mock_stos_masks(self, src: np.ndarray, tgt: np.ndarray) -> MagicMock:
+        mock_config = MagicMock()
+        mock_config.FixedImages = None
+        mock_config.WarpedImages = None
+        mock_config.SourceImageViewModel = None
+        mock_config.TargetImageViewModel = None
+        mock_config.FixedImageMaskViewModel.Image = src
+        mock_config.WarpedImageMaskViewModel.Image = tgt
+        return mock_config
+
+    def test_mesh_mode_is_noop(self) -> None:
+        controller = TransformController(_mesh())
+        with patch.object(controller, 'enqueue_masked_grid_relax') as enqueue:
+            controller.enqueue_relax_exterior_grid_points()
+            enqueue.assert_not_called()
+
+    def test_all_fixed_is_noop(self) -> None:
+        controller = TransformController(_identity_grid())
+        src = np.ones((64, 64), dtype=bool)
+        tgt = np.ones((64, 64), dtype=bool)
+        with patch('pyre.state.get_current_stos_config', return_value=self._mock_stos_masks(src, tgt)), \
+                patch('pyre.controllers.masked_grid_relax.resolve_min_unmasked', return_value=0.25), \
+                patch.object(controller, 'enqueue_masked_grid_relax') as enqueue:
+            controller.enqueue_relax_exterior_grid_points()
+            enqueue.assert_not_called()
+
+    def test_seeds_every_fixed_point_and_moves_free_exterior(self) -> None:
+        """Warped fixed interior + free exterior: one bulk step settles free neighbors."""
+        transform = _identity_grid(shape=(64, 64), cell=(16, 16))
+        controller = TransformController(transform)
+        points = np.asarray(transform.TargetPoints)
+        src = np.ones((64, 64), dtype=bool)
+        # Only a patch around point 0 has tissue; the rest of the lattice is free.
+        tgt = np.zeros((64, 64), dtype=bool)
+        y0, x0 = points[0]
+        tgt[int(y0) - 4:int(y0) + 5, int(x0) - 4:int(x0) + 5] = True
+
+        before = copy.deepcopy(controller.points)
+        # Warp the pinned seed without going through registration (no auto-relax).
+        controller.MovePoint(0, ImageDX=8.0, ImageDY=0.0, space=Space.Target)
+        after_move = copy.deepcopy(controller.points)
+
+        with patch('pyre.state.get_current_stos_config', return_value=self._mock_stos_masks(src, tgt)), \
+                patch('pyre.controllers.masked_grid_relax.resolve_min_unmasked', return_value=0.25):
+            with patch(
+                    "pyre.controllers.transformcontroller.QApplication.instance",
+                    return_value=None,
+            ):
+                # extra_seeds matches post-registration: the moved point may no
+                # longer meet the fixed-tissue threshold at its new location.
+                controller.enqueue_relax_exterior_grid_points(
+                    undo_points=before, extra_seeds=[0])
+
+        after = controller.points
+        neighbor = 1
+        self.assertFalse(
+            np.allclose(after[neighbor, 0:2], after_move[neighbor, 0:2]),
+            "Free exterior neighbor should settle after bulk exterior relax",
+        )
+        np.testing.assert_allclose(after[0, 0:2], before[0, 0:2] + np.array([0.0, 8.0]))
+
+    def test_registration_apply_triggers_exterior_relax(self) -> None:
+        controller = TransformController(_identity_grid())
+        record = MagicMock()
+        record.weight = 1.0
+        record.peak = np.array([1.0, 2.0], dtype=np.float64)
+        with patch.object(controller, 'enqueue_relax_exterior_grid_points') as relax:
+            controller._apply_registration_record(
+                controller.point_id_for_index(0),
+                np.asarray(controller.TargetPoints[0], dtype=np.float64).copy(),
+                record,
+            )
+            relax.assert_called_once()
+            # Batch undo owns Ctrl+Z; per-apply relax must not push its own entry.
+            self.assertIsNone(relax.call_args.kwargs.get('undo_points'))
+            self.assertEqual(relax.call_args.kwargs.get('extra_seeds'), [0])
+
+    def test_cancel_point_registrations_stops_exterior_relax(self) -> None:
+        controller = TransformController(_identity_grid())
+        controller._masked_relax_in_flight = True
+        controller._masked_relax_generation = 2
+        controller._masked_relax_pending_seeds.add(3)
+        controller.cancel_point_registrations()
+        self.assertEqual(controller._masked_relax_generation, 3)
+        self.assertEqual(controller._masked_relax_pending_seeds, set())
 
 
 class TestEitherRoiIsMasked(unittest.TestCase):

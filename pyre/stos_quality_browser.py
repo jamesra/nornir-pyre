@@ -38,8 +38,17 @@ def attach_quality_scores(
         source: StosFileSource,
         *,
         cache: QualityCache | None = None,
+        validate: bool = True,
 ) -> tuple[list[StosBrowserRow], QualityCache, list[str]]:
-    """Attach non-stale scores to *rows*; return updated rows, cache, and stale paths."""
+    """Attach scores to *rows*; return updated rows, cache, and paths that need work.
+
+    When *validate* is True (default), checksum/mtime staleness is checked and stale
+    paths are returned without a displayed score. When False, any ``pair_zncc`` already
+    in the cache is shown immediately and only missing/unreadable entries are listed —
+    use :func:`stale_quality_score_paths` afterward for background checksum validation.
+    ``StosFile.LoadChecksum`` parses each ``.stos``; skipping it for the first paint is
+    what keeps the browser responsive on large folders at startup.
+    """
     if cache is None:
         cache = load_quality_cache(group_folder)
     updated: list[StosBrowserRow] = []
@@ -50,16 +59,50 @@ def attach_quality_scores(
         if path is not None and os.path.isfile(path):
             key = cache_key_for_stos(group_folder, path)
             entry = cache.entries.get(key)
-            if entry_is_stale(entry, path):
-                stale_paths.append(path)
+            if validate:
+                if entry_is_stale(entry, path):
+                    stale_paths.append(path)
+                elif entry is not None and entry.get('pair_zncc') is not None:
+                    try:
+                        score = float(entry['pair_zncc'])
+                    except (TypeError, ValueError):
+                        score = None
+                        stale_paths.append(path)
             elif entry is not None and entry.get('pair_zncc') is not None:
                 try:
                     score = float(entry['pair_zncc'])
                 except (TypeError, ValueError):
                     score = None
                     stale_paths.append(path)
+            else:
+                stale_paths.append(path)
         updated.append(row.with_quality_score(score))
     return updated, cache, stale_paths
+
+
+def stale_quality_score_paths(
+        group_folder: str,
+        rows: Sequence[StosBrowserRow],
+        source: StosFileSource,
+        cache: QualityCache,
+) -> list[str]:
+    """Return score paths whose cache entries fail checksum/mtime validation.
+
+    Intended to run after an optimistic :func:`attach_quality_scores` (``validate=False``)
+    so the UI can show cached ZNCC first while this walks ``LoadChecksum`` off-thread.
+    """
+    stale_paths: list[str] = []
+    for row in rows:
+        path = score_path_for_row(row, source)
+        if path is None or not os.path.isfile(path):
+            continue
+        key = cache_key_for_stos(group_folder, path)
+        entry = cache.entries.get(key)
+        if entry is None or entry.get('pair_zncc') is None:
+            continue
+        if entry_is_stale(entry, path):
+            stale_paths.append(path)
+    return stale_paths
 
 
 def histogram_from_rows(rows: Sequence[StosBrowserRow]) -> Histogram:

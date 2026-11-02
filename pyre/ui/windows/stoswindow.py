@@ -456,6 +456,11 @@ class StosWindow(PyreWindowBase):
         menuClearMasked = menu.addAction("Remove Points on &Masked Areas")
         menuClearMasked.triggered.connect(self.onClearMaskedPoints)  # type: ignore[union-attr]
 
+        self._action_relax_exterior_grid = menu.addAction("Relax &Exterior Grid Points")
+        assert self._action_relax_exterior_grid is not None
+        self._action_relax_exterior_grid.triggered.connect(  # type: ignore[union-attr]
+            self.onRelaxExteriorGridPoints)
+
         menu.addSeparator()
 
         # One cancel for every long-running task: queued control-point alignments
@@ -812,6 +817,11 @@ class StosWindow(PyreWindowBase):
             None if source_mask_vm is None else source_mask_vm.Image,
             None if target_mask_vm is None else target_mask_vm.Image)
 
+    def onRelaxExteriorGridPoints(self) -> None:
+        """Settle free/exterior grid TargetPoints with one masked-spring BFS step."""
+        self._transform_controller.enqueue_relax_exterior_grid_points(
+            undo_points=self._transform_controller.copy_points())
+
     def onFlipImage(self):
         """Handle Flip Image action"""
         self.transform_controller.FlipWarped()
@@ -841,8 +851,12 @@ class StosWindow(PyreWindowBase):
         is_rigid = isinstance(
             self._transform_controller.TransformModel,
             nornir_imageregistration.IRigidTransform)
+        is_grid = isinstance(
+            self._transform_controller.TransformModel,
+            nornir_imageregistration.IGridTransform)
         self._action_refine_rigid.setVisible(is_rigid)
         self._action_refine_rigid_angle_search.setVisible(is_rigid)
+        self._action_relax_exterior_grid.setEnabled(is_grid)
 
     def cancel_all_long_running(self) -> None:
         """Cancel queued control-point alignments and the running refine/rotate job.
@@ -1044,6 +1058,7 @@ class StosWindow(PyreWindowBase):
         user_grid_spacing = user_settings.grid_spacing
         user_cell_size = user_settings.cell_size
         user_angle_range = user_settings.angle_range
+        user_estimate_angle = bool(user_settings.estimate_angle)
         grid_defaults = self._settings.stos.grid_refine
         preview_passes = bool(grid_defaults.preview_pass_transforms)
         gpu_preview_convert = bool(grid_defaults.gpu_preview_grid_convert)
@@ -1056,6 +1071,7 @@ class StosWindow(PyreWindowBase):
                 grid_spacing=user_grid_spacing,
                 cell_size=user_cell_size,
                 angles_to_search=user_angle_range,
+                estimate_angle=user_estimate_angle,
             )
             return compute_grid_refine_transform(
                 transform_snapshot,

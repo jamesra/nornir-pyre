@@ -21,8 +21,9 @@
 - ``+`` / ``-`` / ``=`` step one transform when a folder is loaded (application-wide).
   On US QWERTY, unshifted ``=`` and ``-`` step down; ``Shift+=`` (``+``) steps up.
   ``Shift++`` / ``Shift+-`` step ten transforms (numpad; main keyboard ``Shift+-`` only).
-- Transform table shows pair ZNCC when ``stos_quality.json`` has a fresh score; missing or
-  stale scores are computed in the background. A histogram under the table marks the
+- Transform table shows pair ZNCC from ``stos_quality.json`` as soon as the folder scan
+  finishes (cached values paint immediately). Checksum/mtime validation and missing-score
+  ZNCC work run afterward in the background. A histogram under the table marks the
   selected score. ZNCC text is tinted by empirical percentile in the folder (magenta low,
   soft white mid, green high); Manual gold styling is unchanged.
 - The Modified column uses ISO ``yy-mm-dd`` for older files, or 24-hour ``HH:MM`` when
@@ -73,6 +74,7 @@ from pyre.stos_quality_browser import (
     quality_score_rgb,
     score_to_percentile,
     scores_from_rows,
+    stale_quality_score_paths,
 )
 from pyre.ui.widgets.stos_file_source_selector import StosFileSourceSelector
 from pyre.ui.widgets.stos_quality_histogram import StosQualityHistogramWidget
@@ -614,13 +616,8 @@ class StosFileBrowserWindow(QMainWindow):
                 return
             qt_post_to_main(
                 lambda f=folder, r=rows, g=generation: self._on_scan_rows_ready(f, r, g))
-            cache = load_quality_cache(folder)
-            rows2, cache, stale = attach_quality_scores(folder, rows, source, cache=cache)
-            if generation != self._scan_generation:
-                return
-            qt_post_to_main(
-                lambda f=folder, r=rows2, c=cache, s=stale, g=generation:
-                self._on_quality_attach_ready(f, r, c, s, g))
+            self._attach_cached_scores_then_validate(
+                folder, rows, source, generation)
 
         self._scan_future = self._load_executor.submit(_worker)
 
@@ -639,16 +636,48 @@ class StosFileBrowserWindow(QMainWindow):
         def _worker() -> None:
             if generation != self._scan_generation:
                 return
-            cache = load_quality_cache(folder)
-            rows2, cache, stale = attach_quality_scores(
-                folder, rows_snapshot, source, cache=cache)
-            if generation != self._scan_generation:
-                return
-            qt_post_to_main(
-                lambda f=folder, r=rows2, c=cache, s=stale, g=generation:
-                self._on_quality_attach_ready(f, r, c, s, g))
+            self._attach_cached_scores_then_validate(
+                folder, rows_snapshot, source, generation)
 
         self._scan_future = self._load_executor.submit(_worker)
+
+    def _attach_cached_scores_then_validate(
+            self,
+            folder: str,
+            rows: list[StosBrowserRow],
+            source: StosFileSource,
+            generation: int,
+    ) -> None:
+        """Paint cached ZNCC immediately, then checksum-validate and score off the UI thread.
+
+        ``attach_quality_scores(..., validate=False)`` skips ``StosFile.LoadChecksum`` so a
+        large folder's ``stos_quality.json`` can fill the table at startup without waiting
+        on a full parse of every ``.stos``. Validation and missing-score ZNCC follow.
+        """
+        cache = load_quality_cache(folder)
+        rows2, cache, missing = attach_quality_scores(
+            folder, rows, source, cache=cache, validate=False)
+        if generation != self._scan_generation:
+            return
+        # Show cache hits now; do not start ZNCC yet — scoring cancels prior work when
+        # re-queued, so wait until checksum validation finishes and merge the path lists.
+        qt_post_to_main(
+            lambda f=folder, r=rows2, c=cache, g=generation:
+            self._on_quality_attach_ready(f, r, c, [], g))
+        checksum_stale = stale_quality_score_paths(folder, rows2, source, cache)
+        if generation != self._scan_generation:
+            return
+        to_score = list(dict.fromkeys([*missing, *checksum_stale]))
+        if to_score:
+            qt_post_to_main(
+                lambda paths=to_score, g=generation: self._queue_validated_quality_scores(
+                    paths, g))
+
+    def _queue_validated_quality_scores(self, paths: list[str], generation: int) -> None:
+        """Start background ZNCC for *paths* when this scan generation is still current."""
+        if generation != self._scan_generation:
+            return
+        self._queue_quality_scores(paths)
 
     def _on_scan_rows_ready(
             self,
@@ -688,7 +717,11 @@ class StosFileBrowserWindow(QMainWindow):
             stale: list[str],
             generation: int,
     ) -> None:
-        """Apply attached scores after background cache/checksum work."""
+        """Apply attached scores (optimistic cache paint or post-score refresh).
+
+        *stale* paths still needing ZNCC are scored when provided; the optimistic
+        attach path posts an empty list and queues scoring after checksum validation.
+        """
         if generation != self._scan_generation or self._folder != folder:
             return
         self._rows = rows
