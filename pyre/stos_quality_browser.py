@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 from typing import Sequence
 
 from nornir_imageregistration.stos_quality import (
@@ -27,7 +26,7 @@ _PERCENTILE_SOFTEN_K: float = 1.75
 def score_path_for_row(row: StosBrowserRow, source: StosFileSource) -> str | None:
     """Return the ``.stos`` path whose quality score should be shown for *row*."""
     preferred = row.load_path_for_source(source)
-    if preferred is not None and os.path.isfile(preferred):
+    if preferred is not None:
         return preferred
     return row.default_load_path
 
@@ -56,7 +55,8 @@ def attach_quality_scores(
     for row in rows:
         path = score_path_for_row(row, source)
         score: float | None = None
-        if path is not None and os.path.isfile(path):
+        # Row paths come from the folder listing; no per-row stat (seconds per hundred rows on a share).
+        if path is not None:
             key = cache_key_for_stos(group_folder, path)
             entry = cache.entries.get(key)
             if validate:
@@ -94,7 +94,7 @@ def stale_quality_score_paths(
     stale_paths: list[str] = []
     for row in rows:
         path = score_path_for_row(row, source)
-        if path is None or not os.path.isfile(path):
+        if path is None:
             continue
         key = cache_key_for_stos(group_folder, path)
         entry = cache.entries.get(key)

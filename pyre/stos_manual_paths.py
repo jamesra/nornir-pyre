@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import os
 import re
+import stat
 
 MANUAL_SUBDIR = "Manual"
 AUTOMATIC_SUBDIR = "Automatic"
@@ -124,11 +125,6 @@ def resolve_load_path(
     return None
 
 
-def _existing_file(path: str | None) -> str | None:
-    """Return *path* when it is an existing file, else None."""
-    return path if path and os.path.isfile(path) else None
-
-
 def expected_stos_path_for_source(
         folder: str,
         basename: str,
@@ -146,24 +142,46 @@ def expected_stos_path_for_source(
     return os.path.join(folder, basename)
 
 
+def _stat_file(path: str | None) -> tuple[str, float] | None:
+    """Return ``(path, mtime)`` when *path* is an existing file, else None (one stat call)."""
+    if not path:
+        return None
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (path, info.st_mtime) if stat.S_ISREG(info.st_mode) else None
+
+
+def _first_file(*paths: str | None) -> tuple[str | None, float | None]:
+    """Return the path and mtime of the first existing file in *paths*."""
+    for path in paths:
+        found = _stat_file(path)
+        if found is not None:
+            return found
+    return None, None
+
+
 def refresh_browser_row(
         folder: str | None,
         row: StosBrowserRow,
         mode: BrowseMode = BrowseMode.stos_group,
 ) -> StosBrowserRow:
-    """Re-stat output / Automatic / Manual files for *row*.
+    """Re-stat output / Automatic / Manual files for one *row* (selection, load, context menu).
 
     Keeps a cached path that still exists so injected test rows remain valid, and
     picks up files created under *folder* after the last directory scan.
     """
     if mode == BrowseMode.flat_manual:
         expected_manual = os.path.join(folder, row.basename) if folder else None
+        manual_path, manual_mtime = _first_file(row.manual_path, expected_manual)
         return StosBrowserRow(
             basename=row.basename,
             auto_path=None,
-            manual_path=_existing_file(row.manual_path) or _existing_file(expected_manual),
+            manual_path=manual_path,
             input_path=None,
             quality_score=row.quality_score,
+            manual_mtime=manual_mtime,
         )
 
     expected_auto = os.path.join(folder, row.basename) if folder else None
@@ -171,12 +189,18 @@ def refresh_browser_row(
         os.path.join(automatic_directory(folder), row.basename) if folder else None)
     expected_manual = (
         os.path.join(manual_directory(folder), row.basename) if folder else None)
+    auto_path, auto_mtime = _first_file(row.auto_path, expected_auto)
+    manual_path, manual_mtime = _first_file(row.manual_path, expected_manual)
+    input_path, input_mtime = _first_file(row.input_path, expected_input)
     return StosBrowserRow(
         basename=row.basename,
-        auto_path=_existing_file(row.auto_path) or _existing_file(expected_auto),
-        manual_path=_existing_file(row.manual_path) or _existing_file(expected_manual),
-        input_path=_existing_file(row.input_path) or _existing_file(expected_input),
+        auto_path=auto_path,
+        manual_path=manual_path,
+        input_path=input_path,
         quality_score=row.quality_score,
+        auto_mtime=auto_mtime,
+        manual_mtime=manual_mtime,
+        input_mtime=input_mtime,
     )
 
 
@@ -225,105 +249,131 @@ def resolve_stos_restore_path(
 
 @dataclass(frozen=True)
 class StosBrowserRow:
-    """One logical row in the Stos Directory listing."""
+    """One logical row in the Stos Directory listing.
+
+    A path is set only when that file existed when the row was built (folder scan or
+    :func:`refresh_browser_row`), and its mtime comes from the same listing or stat.
+    The properties below never touch the file system: on an SMB share each stat took
+    ~240 ms, and the table refresh called them for every row on the UI thread.
+    """
 
     basename: str
     auto_path: str | None
     manual_path: str | None
     input_path: str | None = None
     quality_score: float | None = None
+    auto_mtime: float | None = None
+    manual_mtime: float | None = None
+    input_mtime: float | None = None
 
     @property
     def has_manual_override(self) -> bool:
-        return self.manual_path is not None and os.path.isfile(self.manual_path)
+        return self.manual_path is not None
 
     @property
     def has_input_transform(self) -> bool:
         """True when ``Automatic/<basename>`` exists for this row."""
-        return self.input_path is not None and os.path.isfile(self.input_path)
+        return self.input_path is not None
 
     @property
     def is_manual_only(self) -> bool:
         """True when a manual override exists and no automatic file is present."""
-        has_manual = self.manual_path is not None and os.path.isfile(self.manual_path)
-        has_auto = self.auto_path is not None and os.path.isfile(self.auto_path)
-        return has_manual and not has_auto
+        return self.manual_path is not None and self.auto_path is None
 
     @property
     def default_load_path(self) -> str | None:
-        return resolve_default_load_path(self.auto_path, self.manual_path)
+        """Prefer the manual override when present."""
+        return self.manual_path or self.auto_path
 
     def load_path_for_source(self, source: StosFileSource) -> str | None:
-        """Return the path to load for *source*."""
-        return resolve_load_path(
-            self.auto_path, self.manual_path, source, input_path=self.input_path)
+        """Return the path to load for *source*, or None when that file is absent."""
+        if source == StosFileSource.auto:
+            return self.default_load_path
+        if source == StosFileSource.original:
+            return self.auto_path
+        if source == StosFileSource.input:
+            return self.input_path
+        if source == StosFileSource.manual:
+            return self.manual_path
+        return None
+
+    def mtime_for_path(self, path: str | None) -> float | None:
+        """Return the recorded mtime of *path* when it is one of this row's files."""
+        if path is None:
+            return None
+        if path == self.manual_path:
+            return self.manual_mtime
+        if path == self.auto_path:
+            return self.auto_mtime
+        if path == self.input_path:
+            return self.input_mtime
+        return None
 
     def with_quality_score(self, score: float | None) -> StosBrowserRow:
         """Return a copy of this row with *score* attached."""
-        return StosBrowserRow(
-            basename=self.basename,
-            auto_path=self.auto_path,
-            manual_path=self.manual_path,
-            input_path=self.input_path,
-            quality_score=score,
-        )
+        return replace(self, quality_score=score)
 
     @property
     def sort_key(self) -> tuple:
         return _basename_sort_key(self.basename)
 
 
-def _list_stos_files(folder: str) -> list[str]:
-    if not os.path.isdir(folder):
+def _list_stos_files(folder: str) -> list[tuple[str, float]]:
+    """Return ``(path, mtime)`` for each ``*.stos`` file in *folder*, from one directory listing.
+
+    On Windows ``DirEntry.is_file()`` and ``DirEntry.stat()`` use data the listing already
+    returned, so this costs no per-file network round trip on a share.
+    """
+    try:
+        with os.scandir(folder) as entries:
+            return [
+                (entry.path, entry.stat().st_mtime)
+                for entry in entries
+                if entry.name.lower().endswith(".stos") and entry.is_file()
+            ]
+    except OSError:
         return []
-    return [
-        os.path.join(folder, name)
-        for name in os.listdir(folder)
-        if name.lower().endswith(".stos")
-        and os.path.isfile(os.path.join(folder, name))
-    ]
 
 
 def _upsert_browser_row(
         by_name: dict[str, StosBrowserRow],
         basename: str,
         *,
-        auto_path: str | None = None,
-        input_path: str | None = None,
-        manual_path: str | None = None,
+        auto: tuple[str, float] | None = None,
+        input_file: tuple[str, float] | None = None,
+        manual: tuple[str, float] | None = None,
 ) -> None:
-    """Merge one STOS path into *by_name*, preserving any paths already recorded."""
-    row = by_name.get(basename)
-    by_name[basename] = StosBrowserRow(
-        basename=basename,
-        auto_path=auto_path if auto_path is not None else (row.auto_path if row else None),
-        manual_path=manual_path if manual_path is not None else (row.manual_path if row else None),
-        input_path=input_path if input_path is not None else (row.input_path if row else None),
-    )
+    """Merge one listed STOS ``(path, mtime)`` into *by_name*, preserving the other variants."""
+    row = by_name.get(basename) or StosBrowserRow(basename=basename, auto_path=None, manual_path=None)
+    if auto is not None:
+        row = replace(row, auto_path=auto[0], auto_mtime=auto[1])
+    if input_file is not None:
+        row = replace(row, input_path=input_file[0], input_mtime=input_file[1])
+    if manual is not None:
+        row = replace(row, manual_path=manual[0], manual_mtime=manual[1])
+    by_name[basename] = row
 
 
 def scan_stos_browser_rows(folder: str, mode: BrowseMode = BrowseMode.stos_group) -> list[StosBrowserRow]:
-    """Build browser rows for *folder* according to *mode*."""
+    """Build browser rows for *folder* according to *mode*.
+
+    Lists the folder, ``Automatic/`` and ``Manual/`` once each; rows carry existence and
+    mtimes from those listings. Slow on a large share folder, so call it off the UI thread.
+    """
     if mode == BrowseMode.flat_manual:
         rows = [
-            StosBrowserRow(basename=os.path.basename(path), auto_path=None, manual_path=path)
-            for path in _list_stos_files(folder)
+            StosBrowserRow(basename=os.path.basename(path), auto_path=None, manual_path=path,
+                           manual_mtime=mtime)
+            for path, mtime in _list_stos_files(folder)
         ]
     else:
         by_name: dict[str, StosBrowserRow] = {}
-        for path in _list_stos_files(folder):
-            _upsert_browser_row(by_name, os.path.basename(path), auto_path=path)
-
-        automatic_folder = automatic_directory(folder)
-        if os.path.isdir(automatic_folder):
-            for path in _list_stos_files(automatic_folder):
-                _upsert_browser_row(by_name, os.path.basename(path), input_path=path)
-
-        manual_folder = manual_directory(folder)
-        if os.path.isdir(manual_folder):
-            for path in _list_stos_files(manual_folder):
-                _upsert_browser_row(by_name, os.path.basename(path), manual_path=path)
-
+        for listed in _list_stos_files(folder):
+            _upsert_browser_row(by_name, os.path.basename(listed[0]), auto=listed)
+        for listed in _list_stos_files(automatic_directory(folder)):
+            _upsert_browser_row(by_name, os.path.basename(listed[0]), input_file=listed)
+        for listed in _list_stos_files(manual_directory(folder)):
+            _upsert_browser_row(by_name, os.path.basename(listed[0]), manual=listed)
         rows = list(by_name.values())
 
     rows.sort(key=lambda row: row.sort_key)

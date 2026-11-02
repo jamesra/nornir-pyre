@@ -12,7 +12,7 @@ from unittest.mock import patch
 from PyQt6.QtWidgets import QApplication
 
 from pyre.settings.app import AppSettings, StosSettings
-from pyre.stos_manual_paths import BrowseMode, StosBrowserRow, StosFileSource
+from pyre.stos_manual_paths import BrowseMode, StosBrowserRow, StosFileSource, scan_stos_browser_rows
 from pyre.ui.windows.stosfilebrowser import StosFileBrowserWindow
 
 
@@ -357,18 +357,50 @@ class TestStosBrowserFileSource(unittest.TestCase):
             browser._pending_load = None
             browser._folder = tmp
             browser._browse_mode = BrowseMode.stos_group
-            browser._rows = [
-                StosBrowserRow(basename="today.stos", auto_path=today_path, manual_path=None),
-                StosBrowserRow(basename="old.stos", auto_path=old_path, manual_path=None),
-            ]
+            # Rows from the scan carry the listing mtimes; the Modified column never stats.
+            browser._rows = scan_stos_browser_rows(tmp, BrowseMode.stos_group)
+            self.assertEqual([row.basename for row in browser._rows], ["old.stos", "today.stos"])
             browser._populate_list_from_rows(browser._rows, scores_ready=False)
             self.assertEqual(
                 browser._list_widget.horizontalHeaderItem(2).text(),
                 "Modified",
             )
-            self.assertRegex(browser._list_widget.item(0, 2).text(), r"^\d{2}:\d{2}$")
-            self.assertRegex(browser._list_widget.item(1, 2).text(), r"^\d{2}-\d{2}-\d{2}$")
-            self.assertIn("Modified:", browser._list_widget.item(0, 2).toolTip())
+            self.assertRegex(browser._list_widget.item(1, 2).text(), r"^\d{2}:\d{2}$")
+            self.assertRegex(browser._list_widget.item(0, 2).text(), r"^\d{2}-\d{2}-\d{2}$")
+            self.assertIn("Modified:", browser._list_widget.item(1, 2).toolTip())
+
+    def test_score_refresh_makes_no_file_system_calls(self) -> None:
+        """The per-row table refresh uses listing data only (each stat cost ~240 ms on SMB)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "Manual"))
+            for name in ("1-2.stos", "2-3.stos"):
+                open(os.path.join(tmp, name), "w", encoding="utf-8").close()
+            for name in ("2-3.stos", "3-4.stos"):
+                open(os.path.join(tmp, "Manual", name), "w", encoding="utf-8").close()
+            settings = AppSettings(stos=StosSettings(stos_file_source=StosFileSource.auto.value))
+            browser = StosFileBrowserWindow(parent=None, settings=settings)
+            self.addCleanup(self._shutdown_browser, browser)
+            browser._scan_generation += 1
+            browser._score_generation += 1
+            browser._folder = tmp
+            browser._browse_mode = BrowseMode.stos_group
+            browser._rows = [row.with_quality_score(0.5) for row in
+                             scan_stos_browser_rows(tmp, BrowseMode.stos_group)]
+            browser._populate_list_from_rows(browser._rows, scores_ready=False)
+
+            def _no_fs(*_args, **_kwargs):
+                raise AssertionError("file system call during table refresh")
+
+            with patch("os.stat", _no_fs), patch("os.path.isfile", _no_fs), \
+                    patch("os.path.exists", _no_fs), patch("os.path.getmtime", _no_fs):
+                browser._refresh_score_column_and_histogram()
+                browser._refresh_mtime_column()
+
+            self.assertNotIn("Manual: (none)", browser._list_widget.item(1, 0).toolTip())
+            self.assertIn("Manual: (none)", browser._list_widget.item(0, 0).toolTip())
+            self.assertRegex(browser._list_widget.item(2, 2).text(), r"^\d{2}:\d{2}$")
+            self.assertTrue(browser._rows[2].is_manual_only)
+            self.assertFalse(browser._rows[1].is_manual_only)
 
     def test_modified_column_follows_file_source_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

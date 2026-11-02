@@ -874,13 +874,13 @@ class StosFileBrowserWindow(QMainWindow):
         return self._rows[self._current_index]
 
     def _row_has_auto(self, row: StosBrowserRow) -> bool:
-        return row.auto_path is not None and os.path.isfile(row.auto_path)
+        return row.auto_path is not None
 
     def _row_has_input(self, row: StosBrowserRow) -> bool:
         return row.has_input_transform
 
     def _row_has_manual(self, row: StosBrowserRow) -> bool:
-        return row.manual_path is not None and os.path.isfile(row.manual_path)
+        return row.manual_path is not None
 
     def _row_can_delete_automatic(self, row: StosBrowserRow) -> bool:
         """True when Delete may remove the automatic STOS file for *row*."""
@@ -965,14 +965,12 @@ class StosFileBrowserWindow(QMainWindow):
         return None, source
 
     def _row_mtime(self, row: StosBrowserRow) -> float | None:
-        """Return mtime of the STOS that File Source would load for *row*, if it exists."""
+        """Return mtime of the STOS that File Source would load for *row*, from the folder listing.
+
+        Never stats: the table refresh calls this for every row on the UI thread.
+        """
         load_path, _ = self._resolve_load_path_for_row(row, self._source_for_load())
-        if load_path is None:
-            return None
-        try:
-            return os.path.getmtime(load_path)
-        except OSError:
-            return None
+        return row.mtime_for_path(load_path)
 
     def _modified_tooltip(self, mtime: float | None, base_tip: str) -> str:
         if mtime is None:
