@@ -31,6 +31,8 @@ def _run_smoke_test() -> int:
     """Verify frozen/runtime imports without starting the GUI."""
     configure_frozen_environment()
 
+    import matplotlib.backends.backend_agg  # noqa: F401  (.png plots)
+    import matplotlib.backends.backend_svg  # noqa: F401  (.svg plots; chosen by extension, so not traced)
     import nornir_imageregistration  # noqa: F401
     import nornir_pools  # noqa: F401
     import nornir_shared  # noqa: F401

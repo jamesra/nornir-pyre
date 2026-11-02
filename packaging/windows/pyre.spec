@@ -26,6 +26,10 @@ hiddenimports = [
     "dependency_injector.providers",
     "matplotlib.backends.backend_qtagg",
     "matplotlib.backends.backend_qt",
+    # savefig picks the backend from the file extension at run time, so PyInstaller cannot
+    # see it: Refine w/ Grid diagnostic plots (.svg) failed in 1.8.5 without backend_svg.
+    "matplotlib.backends.backend_svg",
+    "matplotlib.backends.backend_agg",
     "nornir_shared",
     "nornir_shared.misc",
     "nornir_pools",
