@@ -13,11 +13,21 @@ Notes for whoever updates this file. Comments like this one are not shown in Pyr
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Pyre shows new sections once after each upgrade (**Help → What's New** shows them anytime).
 
-## 1.8.4 — not yet released
+## 1.8.6 — not yet released
 
-- **Fix: Spacebar freeze on warped grids.** Spacebar registration on damaged or heavily warped grids no longer freezes the UI for several seconds after results apply. When control points move but stay in the same mesh neighborhoods, Pyre reuses the existing triangulation instead of rebuilding it from scratch.
 - **Exterior grid points settle after registration.** After each grid-point registration, Pyre runs one spring step that settles exterior / masked lattice points into a low-energy layout matching the warped interior. Use **Registration → Relax Exterior Grid Points** to run that step again without registering.
 - **One Ctrl+Z for a Spacebar queue.** **Ctrl+Z** after a Spacebar registration queue undoes the whole queue in one step, including a cancel that left some points already applied.
+- **STOS browser shows cached scores first.** The STOS folder browser paints pair ZNCC from `stos_quality.json` as soon as the folder scan finishes, then validates checksums and scores missing entries in the background.
+
+## 1.8.5 — 2026-11-01
+
+- **Fix: Refine Grid colinear trusted points.** Refine Grid no longer distorts a section when the trusted control points it found lie on a line; it keeps the existing transform instead.
+- **Faster Refine Grid on shift-only cells.** Refine Grid is faster on sections where most grid cells only need a shift.
+- **1.8.4 installer replaced.** Includes the 1.8.3 and 1.8.4 changes below. The installer published as 1.8.4 was built from older code and lacked them; it has been replaced by this release.
+
+## 1.8.4 — 2026-11-01
+
+- **Fix: Spacebar freeze on warped grids.** Spacebar registration on damaged or heavily warped grids no longer freezes the UI for several seconds after results apply. When control points move but stay in the same mesh neighborhoods, Pyre reuses the existing triangulation instead of rebuilding it from scratch.
 
 ## 1.8.3 — 2026-10-31
 
