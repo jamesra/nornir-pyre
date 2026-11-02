@@ -19,6 +19,7 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 - **One Ctrl+Z for a Spacebar queue.** **Ctrl+Z** after a Spacebar registration queue undoes the whole queue in one step, including a cancel that left some points already applied.
 - **STOS browser shows cached scores first.** The STOS folder browser paints pair ZNCC from `stos_quality.json` as soon as the folder scan finishes, then validates checksums and scores missing entries in the background.
 - **Fix: STOS browser froze on network folders.** Opening a large STOS folder on a network share no longer freezes Pyre for minutes. The browser reads file dates and Manual overrides from one listing of each folder instead of checking every file separately, and the listing runs in the background.
+- **Fix: Refine w/ Grid failed in the 1.8.5 installer.** **Registration → Refine w/ Grid** stopped with "No module named 'matplotlib.backends.backend_svg'" when saving its diagnostic plots. The installer now includes the module.
 
 ## 1.8.5 — 2026-11-01
 
