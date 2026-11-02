@@ -6,6 +6,12 @@ CI copies that section into the GitHub Release body and regenerates
 ``docs/packages/pyre_changelog.rst``. Pyre shows new sections once after
 each upgrade (**Help → What's New** shows them anytime).
 
+## 1.8.5
+
+- Refine Grid no longer distorts a section when the trusted control points it found lie on a line; it keeps the existing transform instead.
+- Refine Grid is faster on sections where most grid cells only need a shift.
+- Includes the 1.8.3 and 1.8.4 changes below. The installer published as 1.8.4 was built from older code and lacked them; it has been replaced by this release.
+
 ## 1.8.4
 
 - Spacebar registration on damaged or heavily warped grids no longer freezes the UI for several seconds after results apply. When control points move but stay in the same mesh neighborhoods, Pyre reuses the existing triangulation instead of rebuilding it from scratch.
