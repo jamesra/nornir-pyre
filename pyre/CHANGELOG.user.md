@@ -13,7 +13,7 @@ Notes for whoever updates this file. Comments like this one are not shown in Pyr
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Pyre shows new sections once after each upgrade (**Help → What's New** shows them anytime).
 
-## 1.8.6 — not yet released
+## 1.8.6 — 2026-11-01
 
 - **Alt+Shift+wheel for fine scale.** **Alt+Shift+mouse wheel** scales the transform in small steps (about 0.5% per notch). **Shift+wheel** remains the larger step (~2%). **Ctrl+Shift+wheel** remains the fine rotation gesture. Holding Alt no longer steals focus into the menu bar. On Windows, Shift(+Alt)+wheel is often reported as a sideways scroll; Pyre still treats that as a scale step.
 - **Exterior grid points settle after registration.** After each grid-point registration, Pyre runs one spring step that settles exterior / masked lattice points into a low-energy layout matching the warped interior. Use **Registration → Relax Exterior Grid Points** to run that step again without registering.
