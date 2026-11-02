@@ -312,6 +312,17 @@ class TestBusyBlocksWholeTransformGestures(unittest.TestCase):
         controller.Rotate(0.25, np.array([0.0, 0.0], dtype=np.float64), space=Space.Source)
         np.testing.assert_allclose(controller.SourcePoints, before)
 
+    def test_wheel_relative_scale_delta_fine_is_slower(self) -> None:
+        from pyre.commands.navigationcommandbase import wheel_relative_scale_delta
+
+        normal = wheel_relative_scale_delta(1.0, fine=False)
+        fine = wheel_relative_scale_delta(1.0, fine=True)
+        self.assertAlmostEqual(normal, 0.98)
+        self.assertAlmostEqual(fine, 1.0 - 1.0 / 200.0)
+        self.assertLess(abs(1.0 - fine), abs(1.0 - normal))
+        self.assertAlmostEqual(
+            wheel_relative_scale_delta(-1.0, fine=False), 1.02)
+
     def test_wheel_helper_false_when_busy(self) -> None:
         from pyre.commands.navigationcommandbase import (
             wheel_applies_relative_scale,

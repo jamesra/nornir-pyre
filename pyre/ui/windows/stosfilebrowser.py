@@ -185,7 +185,10 @@ class StosFileBrowserWindow(QMainWindow):
     _load_generation: int
     _pending_load: _PendingStosLoad | None
     _debounce_timer: QTimer
+    # Background pool: folder scan, checksum validation, ZNCC scoring.
     _load_executor: ThreadPoolExecutor
+    # Separate pool so STOS opens are never queued behind folder-wide LoadChecksum.
+    _stos_load_executor: ThreadPoolExecutor
     _load_executor_shut_down: bool
 
     @staticmethod
@@ -225,7 +228,9 @@ class StosFileBrowserWindow(QMainWindow):
         self._scan_future = None
         self._quality_cache = QualityCache()
         self._pending_load = None
-        self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-load")
+        self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-bg")
+        self._stos_load_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="stos-nav-load")
         self._load_executor_shut_down = False
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -664,7 +669,13 @@ class StosFileBrowserWindow(QMainWindow):
         qt_post_to_main(
             lambda f=folder, r=rows2, c=cache, g=generation:
             self._on_quality_attach_ready(f, r, c, [], g))
-        checksum_stale = stale_quality_score_paths(folder, rows2, source, cache)
+        checksum_stale = stale_quality_score_paths(
+            folder,
+            rows2,
+            source,
+            cache,
+            should_cancel=lambda: generation != self._scan_generation,
+        )
         if generation != self._scan_generation:
             return
         to_score = list(dict.fromkeys([*missing, *checksum_stale]))
@@ -1206,7 +1217,7 @@ class StosFileBrowserWindow(QMainWindow):
 
             qt_post_to_main(_apply)
 
-        future = self._load_executor.submit(_worker)
+        future = self._stos_load_executor.submit(_worker)
         future.add_done_callback(lambda f: _on_done(f))
 
     # ------------------------------------------------------------------
@@ -1278,8 +1289,11 @@ class StosFileBrowserWindow(QMainWindow):
         """Restart background work that closing or hiding the window deferred."""
         super().showEvent(event)
         if self._load_executor_shut_down:
-            # closeEvent shut the executor down; the shared window is reopened, not rebuilt.
-            self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-load")
+            # closeEvent shut the executors down; the shared window is reopened, not rebuilt.
+            self._load_executor = ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix="stos-nav-bg")
+            self._stos_load_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="stos-nav-load")
             self._load_executor_shut_down = False
         self._resume_deferred_quality_scores()
 
@@ -1297,7 +1311,9 @@ class StosFileBrowserWindow(QMainWindow):
         if self._score_future is not None and not self._score_future.done():
             self._quality_scores_incomplete = True  # resume on reopen; saved scores are kept
         self._score_generation += 1
+        self._scan_generation += 1  # stop in-flight checksum walks between rows
         self._remove_mouse_navigation_filter()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
+        self._stos_load_executor.shutdown(wait=False, cancel_futures=True)
         self._load_executor_shut_down = True
         super().closeEvent(event)

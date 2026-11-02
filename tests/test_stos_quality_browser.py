@@ -158,6 +158,54 @@ def test_stale_quality_score_paths_uses_checksum(tmp_path: Path, monkeypatch) ->
     ) == []
 
 
+def test_stale_quality_score_paths_stops_when_cancelled(tmp_path: Path, monkeypatch) -> None:
+    paths = []
+    for name in ('a.stos', 'b.stos', 'c.stos'):
+        p = tmp_path / name
+        p.write_text('transform')
+        paths.append(p)
+    cache = QualityCache()
+    for p in paths:
+        merge_entry(
+            cache,
+            p.name,
+            pair=PairZnccResult(
+                pair_zncc=0.5,
+                downsample=16.0,
+                stos_checksum='x',
+                stos_mtime_ns=p.stat().st_mtime_ns,
+                max_side=2048,
+            ),
+        )
+    rows = [
+        StosBrowserRow(p.name, str(p), None).with_quality_score(0.5) for p in paths
+    ]
+    seen: list[str] = []
+
+    def _checksum(path: str) -> str:
+        seen.append(path)
+        return 'y'
+
+    monkeypatch.setattr(
+        'nornir_imageregistration.stos_quality.StosFile.LoadChecksum',
+        _checksum,
+    )
+
+    def should_cancel() -> bool:
+        # After the first LoadChecksum, abort before walking the rest of the folder.
+        return len(seen) >= 1
+
+    stale = stale_quality_score_paths(
+        str(tmp_path),
+        rows,
+        StosFileSource.auto,
+        cache,
+        should_cancel=should_cancel,
+    )
+    assert len(seen) == 1
+    assert stale == [str(paths[0])]
+
+
 def test_attach_quality_scores_validate_false_lists_missing(tmp_path: Path) -> None:
     auto = tmp_path / 'a.stos'
     auto.write_text('transform')

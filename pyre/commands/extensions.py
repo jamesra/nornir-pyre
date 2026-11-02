@@ -36,15 +36,20 @@ def arrow_key_nudge_yx(event: QKeyEvent) -> tuple[int, int] | None:
 def wheel_scroll_steps(event: QWheelEvent) -> float:
     """Return wheel motion in standard-notch units (1.0 ≈ one detent).
 
-    Qt may leave angleDelta at zero for high-resolution / modifier wheel events on
-    Windows; fall back to pixelDelta in that case.
+    Prefer vertical ``angleDelta`` / ``pixelDelta``. On Windows, Shift(+Alt)+wheel is
+    often remapped to a horizontal wheel event (``angleDelta.x`` only); treat that
+    axis the same so Shift+scale and Alt+Shift+fine-scale still see a step.
     """
-    angle_y = event.angleDelta().y()
-    if angle_y != 0:
-        return angle_y / 120.0
-    pixel_y = event.pixelDelta().y()
-    if pixel_y != 0:
-        return pixel_y / _PIXEL_DELTA_PER_NOTCH
+    angle = event.angleDelta()
+    if angle.y() != 0:
+        return angle.y() / 120.0
+    if angle.x() != 0:
+        return angle.x() / 120.0
+    pixel = event.pixelDelta()
+    if pixel.y() != 0:
+        return pixel.y() / _PIXEL_DELTA_PER_NOTCH
+    if pixel.x() != 0:
+        return pixel.x() / _PIXEL_DELTA_PER_NOTCH
     return 0.0
 
 

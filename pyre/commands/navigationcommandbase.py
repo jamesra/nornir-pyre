@@ -57,7 +57,7 @@ def wheel_applies_warped_transform(controller: object) -> bool:
 
 
 def wheel_applies_relative_scale(controller: object) -> bool:
-    """True when Shift+wheel may scale the transform.
+    """True when Shift+wheel (or Alt+Shift+wheel) may scale the transform.
 
     Whole-transform scale is only allowed with no UI selection and no queued
     (busy) points. Otherwise leftover Shift zooms the camera.
@@ -70,11 +70,27 @@ def wheel_applies_relative_scale(controller: object) -> bool:
     return True
 
 
+# Shift+wheel ≈ 2% per notch; Alt+Shift+wheel ≈ 0.5% (4x finer — visible but slow).
+_WHEEL_SCALE_DIVISOR = 50.0
+_WHEEL_SCALE_FINE_DIVISOR = 200.0
+
+
+def wheel_keyboard_modifiers(event: QWheelEvent) -> Qt.KeyboardModifier:
+    """Live keyboard modifiers for a wheel event (event bits can lag on Windows)."""
+    return event.modifiers() | QGuiApplication.queryKeyboardModifiers()
+
+
+def wheel_relative_scale_delta(scroll_y: float, *, fine: bool = False) -> float:
+    """Multiplicative scale factor for one wheel step (1.0 = no change)."""
+    divisor = _WHEEL_SCALE_FINE_DIVISOR if fine else _WHEEL_SCALE_DIVISOR
+    return 1.0 + (-scroll_y / divisor)
+
+
 def wheel_scale_uses_target_points(
         model: nornir_imageregistration.ITransform | None,
         view_type: ViewType | None,
         space: Space) -> bool:
-    """True when Shift+scroll should scale TargetPoints (composite/target mesh-like).
+    """True when Shift(+Alt)+scroll should scale TargetPoints (composite/target mesh-like).
 
     Rigid CS2D stays on ``ScaleWarpedAboutSourcePoint`` with a source-space pivot.
     """
@@ -365,18 +381,22 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                 self._width, self._height = panel_w, panel_h
                 self.camera.window_size = np.array((panel_h, panel_w))
 
-            # Wheel events can keep Shift/Ctrl from an earlier gesture; query live keys.
-            wheel_mods = QGuiApplication.queryKeyboardModifiers()
-            shift_scale = (
-                (wheel_mods & Qt.KeyboardModifier.ShiftModifier)
-                and not (wheel_mods & Qt.KeyboardModifier.ControlModifier)
+            # Wheel events can keep Shift/Ctrl/Alt from an earlier gesture; merge event + live keys.
+            wheel_mods = wheel_keyboard_modifiers(e)
+            can_relative_scale = (
+                not (wheel_mods & Qt.KeyboardModifier.ControlModifier)
                 and isinstance(
                     self._transform_controller.TransformModel,
                     nornir_imageregistration.ITransformRelativeScaling)
                 and wheel_applies_relative_scale(self._transform_controller)
             )
-            if shift_scale and scroll_y != 0.0:
-                scale_delta = (1.0 + (-scroll_y / 50.0))
+            # Shift+wheel = normal scale; Alt+Shift+wheel = fine scale (mirrors Ctrl+Shift rotate).
+            shift_held = bool(wheel_mods & Qt.KeyboardModifier.ShiftModifier)
+            alt_held = bool(wheel_mods & Qt.KeyboardModifier.AltModifier)
+            want_scale = bool(can_relative_scale and shift_held)
+            fine_scale = bool(want_scale and alt_held)
+            if want_scale and scroll_y != 0.0:
+                scale_delta = wheel_relative_scale_delta(scroll_y, fine=fine_scale)
                 try:
                     point_pair = self.get_world_positions(e)
                     view = self._view_type()
@@ -405,7 +425,11 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
                             self._adjust_camera_lookat_for_cursor(point_pair, pair_after)
                     finally:
                         self._transform_controller.end_interactive_edit()
+                    # GL panel + siblings that listen to transform-change all need a repaint.
                     self.parent.update()
+                    win = self.parent.window()
+                    if win is not None:
+                        win.update()
                 except NotImplementedError:
                     pass
             elif (

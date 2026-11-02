@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Callable, Sequence
 
 from nornir_imageregistration.stos_quality import (
     QualityCache,
@@ -85,14 +85,20 @@ def stale_quality_score_paths(
         rows: Sequence[StosBrowserRow],
         source: StosFileSource,
         cache: QualityCache,
+        *,
+        should_cancel: Callable[[], bool] | None = None,
 ) -> list[str]:
     """Return score paths whose cache entries fail checksum/mtime validation.
 
     Intended to run after an optimistic :func:`attach_quality_scores` (``validate=False``)
     so the UI can show cached ZNCC first while this walks ``LoadChecksum`` off-thread.
+    *should_cancel* is checked between rows so a superseded scan can stop the walk
+    without waiting for every ``.stos`` parse to finish.
     """
     stale_paths: list[str] = []
     for row in rows:
+        if should_cancel is not None and should_cancel():
+            break
         path = score_path_for_row(row, source)
         if path is None:
             continue

@@ -34,6 +34,7 @@ Right button:
 Scroll wheel:
     * Scroll to zoom about the cursor
     * Shift+Scroll to scale the transform about the cursor (only while no points are selected or queued for alignment)
+    * Alt+Shift+Scroll for finer scale steps about the cursor
     * Ctrl+Scroll to rotate the mapped section about the cursor; Ctrl+Shift+Scroll rotates in finer steps
 
 By transform type:

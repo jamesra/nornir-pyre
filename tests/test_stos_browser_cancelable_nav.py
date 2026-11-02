@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -108,12 +110,80 @@ class TestStosBrowserCancelableNavigation(unittest.TestCase):
             future.add_done_callback = MagicMock()
             return future
 
-        with patch.object(browser._load_executor, "submit", side_effect=fake_submit):
+        with patch.object(browser._stos_load_executor, "submit", side_effect=fake_submit):
             with patch("pyre.ui.windows.stoswindow.StosWindow.load_stos_data"):
                 browser._execute_pending_load()
 
         self.assertIsNone(browser._pending_load)
         self.assertEqual(submitted, ["submitted"])
+
+    def test_stos_open_uses_dedicated_executor_not_background_pool(self) -> None:
+        """Checksum validation shares the bg pool; opens must not wait behind it."""
+        browser = self._browser()
+        browser._pending_load = _PendingStosLoad(
+            generation=1,
+            filepath="/tmp/section_1.stos",
+            index=1,
+            browser_basename="section_1.stos",
+        )
+        browser._load_generation = 1
+        bg_submits: list[str] = []
+        load_submits: list[str] = []
+
+        def bg_submit(fn, *args, **kwargs):
+            bg_submits.append("bg")
+            future = MagicMock()
+            future.add_done_callback = MagicMock()
+            return future
+
+        def load_submit(fn, *args, **kwargs):
+            load_submits.append("load")
+            future = MagicMock()
+            future.add_done_callback = MagicMock()
+            return future
+
+        with patch.object(browser._load_executor, "submit", side_effect=bg_submit), \
+                patch.object(browser._stos_load_executor, "submit", side_effect=load_submit), \
+                patch("pyre.ui.windows.stoswindow.StosWindow.load_stos_data"):
+            browser._execute_pending_load()
+
+        self.assertEqual(load_submits, ["load"])
+        self.assertEqual(bg_submits, [])
+
+    def test_stos_open_completes_while_background_pool_is_saturated(self) -> None:
+        """Regression: folder-wide LoadChecksum used to starve STOS opens on the shared pool."""
+        browser = self._browser()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.addCleanup(browser.close)
+        started = threading.Barrier(4)  # 3 bg workers + main
+
+        def block_forever() -> None:
+            started.wait(5.0)
+            release.wait(10.0)
+
+        for _ in range(3):
+            browser._load_executor.submit(block_forever)
+        self.assertTrue(started.wait(5.0), "background workers did not all start")
+
+        loaded = threading.Event()
+
+        def fake_load(_path: str) -> object:
+            loaded.set()
+            return object()
+
+        browser._pending_load = _PendingStosLoad(
+            generation=1,
+            filepath="/tmp/section_1.stos",
+            index=1,
+            browser_basename="section_1.stos",
+        )
+        browser._load_generation = 1
+        with patch("pyre.ui.windows.stoswindow.StosWindow.load_stos_data", side_effect=fake_load), \
+                patch("pyre.ui.windows.stoswindow.StosWindow.apply_stos_load_result"):
+            browser._execute_pending_load()
+            self.assertTrue(loaded.wait(2.0), "STOS open stayed queued behind background work")
+        release.set()
 
     def test_choosing_a_stos_cancels_in_flight_registrations(self) -> None:
         browser = self._browser()

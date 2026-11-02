@@ -63,6 +63,15 @@ class PyreWindowBase(QMainWindow):
             invoke_event = cast(InvokeOnMainThreadEvent, event)
             invoke_event.invoke()
             return True
+        # Windows: Alt alone toggles menu-bar focus and steals mouse-wheel events from
+        # the GL view. Alt is a Pyre mouse/selection modifier (Alt+Shift+wheel fine scale,
+        # Alt+click / Alt+drag). Swallow Alt key events so the menu bar stays inactive;
+        # menus remain usable with the mouse (Alt+letter mnemonics no longer activate).
+        if event.type() in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.ShortcutOverride):
+            from PyQt6.QtGui import QKeyEvent
+            if isinstance(event, QKeyEvent) and event.key() in (Qt.Key.Key_Alt, Qt.Key.Key_AltGr):
+                event.accept()
+                return True
         return super().event(event)
     
     def _invoke_on_main_thread_handler(self, callback, args, kwargs):
