@@ -71,6 +71,9 @@ class GridRefineDefaults(BaseModel):
     num_iterations: int = 5
     max_angle: float = 0.0
     angle_step_size: float = 3.0
+    # Off: only score max_angle/step (and 0). On: log-polar finds one angle and
+    # adds it to that list (still including 0).
+    estimate_angle: bool = False
     # Off: skip per-pass UI updates (ConvertTransformToGridTransform is expensive).
     preview_pass_transforms: bool = False
     # Off: CPU convert when pass previews are on. Final result is still converted.

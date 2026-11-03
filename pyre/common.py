@@ -462,6 +462,7 @@ def create_pyre_grid_refinement_settings(
         grid_spacing: int | NDArray[np.integer] | Iterable[int] | None = None,
         cell_size: int | NDArray[np.integer] | Iterable[int] | None = None,
         angles_to_search: Iterable[float] | NDArray[np.floating] | None = None,
+        estimate_angle: bool = False,
 ) -> GridRefinement:
     """Build STOS grid-refine settings that stay on host arrays.
 
@@ -478,6 +479,7 @@ def create_pyre_grid_refinement_settings(
         grid_spacing=grid_spacing,
         cell_size=cell_size,
         angles_to_search=angles_to_search,
+        estimate_angle=estimate_angle,
         cupy_processing=False,
         single_thread_processing=False,
     )
@@ -691,7 +693,8 @@ def StartAttemptAlignPoint(pool: nornir_pools.poolbase,  # type: ignore[type-arg
                                                                                        target_controlpoint=target_controlpoint,
                                                                                        alignmentArea=alignmentArea,
                                                                                        anglesToSearch=anglesToSearch,
-                                                                                       estimate_angle=estimate_angle)
+                                                                                       estimate_angle=estimate_angle,
+                                                                                       search_scale=False)
 
     return task
 

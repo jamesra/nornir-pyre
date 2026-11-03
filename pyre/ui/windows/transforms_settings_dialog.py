@@ -120,6 +120,13 @@ class TransformsSettingsDialog(QDialog):
         self._grid_angle_step.setSingleStep(0.5)
         self._grid_angle_step.setValue(defaults.angle_step_size)
 
+        self._grid_estimate_angle = QCheckBox(page)
+        self._grid_estimate_angle.setChecked(bool(defaults.estimate_angle))
+        self._grid_estimate_angle.setToolTip(
+            "Run a log-polar estimate per cell and register that angle in "
+            "addition to 0 and any max/step angles above. Slower than the "
+            "angle list alone.")
+
         self._preview_pass_transforms = QCheckBox(page)
         self._preview_pass_transforms.setChecked(bool(defaults.preview_pass_transforms))
         self._preview_pass_transforms.setToolTip(
@@ -155,6 +162,7 @@ class TransformsSettingsDialog(QDialog):
         form.addRow("Maximum passes", self._num_iterations)
         form.addRow("Max angle (± degrees)", self._grid_max_angle)
         form.addRow("Angle step (degrees)", self._grid_angle_step)
+        form.addRow("Estimate best angle", self._grid_estimate_angle)
         form.addRow("Preview pass transforms", self._preview_pass_transforms)
         form.addRow("GPU preview grid convert", self._gpu_preview_grid_convert)
         form.addRow("Min unmasked tissue %", self._masked_relax_min_unmasked)
@@ -236,6 +244,7 @@ class TransformsSettingsDialog(QDialog):
             num_iterations=int(self._num_iterations.value()),
             max_angle=float(self._grid_max_angle.value()),
             angle_step_size=float(self._grid_angle_step.value()),
+            estimate_angle=self._grid_estimate_angle.isChecked(),
             preview_pass_transforms=self._preview_pass_transforms.isChecked(),
             gpu_preview_grid_convert=self._gpu_preview_grid_convert.isChecked(),
             masked_relax_min_unmasked=float(self._masked_relax_min_unmasked.value()) / 100.0,

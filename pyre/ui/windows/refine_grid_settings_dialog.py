@@ -17,6 +17,7 @@ class GridSettingsDialogResult(NamedTuple):
     cell_size: int
     grid_spacing: int
     angle_range: pyre.settings.AngleSearchRange
+    estimate_angle: bool = False
 
     @property
     def angles_to_search(self) -> list[float]:
@@ -239,6 +240,14 @@ class RefineGridSettingsDialog(QDialog):
         self.angle_step_size_ctrl.setValue(defaults.angle_step_size)
         self.angle_step_size_ctrl.setSingleStep(0.5)
 
+        self.estimate_angle_ctrl = QCheckBox(
+            "Estimate best angle (add to list)", panel)
+        self.estimate_angle_ctrl.setChecked(bool(defaults.estimate_angle))
+        self.estimate_angle_ctrl.setToolTip(
+            "Run a log-polar estimate per cell and register that angle in "
+            "addition to 0 and any max/step angles above. Slower than the "
+            "angle list alone.")
+
         self.preview_pass_transforms_ctrl = QCheckBox(
             "Preview pass transforms", panel)
         self.preview_pass_transforms_ctrl.setChecked(bool(defaults.preview_pass_transforms))
@@ -286,6 +295,8 @@ class RefineGridSettingsDialog(QDialog):
             grid_layout.addWidget(angle_step_size_label, next_row, 0)
             grid_layout.addWidget(self.angle_step_size_ctrl, next_row, 1)
             next_row += 1
+            grid_layout.addWidget(self.estimate_angle_ctrl, next_row, 0, 1, 2)
+            next_row += 1
             grid_layout.addWidget(self.preview_pass_transforms_ctrl, next_row, 0, 1, 2)
             next_row += 1
             grid_layout.addWidget(self.gpu_preview_grid_convert_ctrl, next_row, 0, 1, 2)
@@ -297,6 +308,7 @@ class RefineGridSettingsDialog(QDialog):
             self.max_angle_ctrl.hide()
             angle_step_size_label.hide()
             self.angle_step_size_ctrl.hide()
+            self.estimate_angle_ctrl.hide()
             self.preview_pass_transforms_ctrl.hide()
             self.gpu_preview_grid_convert_ctrl.hide()
         grid_layout.addWidget(self.ok_btn, next_row, 0)
@@ -330,6 +342,7 @@ class RefineGridSettingsDialog(QDialog):
             num_iterations=self.iterations,
             max_angle=self.max_angle,
             angle_step_size=self.angle_step_size,
+            estimate_angle=self.estimate_angle_ctrl.isChecked(),
             preview_pass_transforms=self.preview_pass_transforms_ctrl.isChecked(),
             gpu_preview_grid_convert=self.gpu_preview_grid_convert_ctrl.isChecked(),
         )
@@ -368,6 +381,7 @@ class RefineGridSettingsDialog(QDialog):
                         else dlg.iterations),
                     "max_angle": dlg.max_angle,
                     "angle_step_size": dlg.angle_step_size,
+                    "estimate_angle": dlg.estimate_angle_ctrl.isChecked(),
                     "preview_pass_transforms": dlg.preview_pass_transforms_ctrl.isChecked(),
                     "gpu_preview_grid_convert": dlg.gpu_preview_grid_convert_ctrl.isChecked(),
                 })
@@ -378,7 +392,8 @@ class RefineGridSettingsDialog(QDialog):
                 grid_spacing=dlg.grid_spacing,
                 angle_range=pyre.settings.AngleSearchRange(
                     max_angle=dlg.max_angle,
-                    angle_step_size=dlg.angle_step_size)
+                    angle_step_size=dlg.angle_step_size),
+                estimate_angle=dlg.estimate_angle_ctrl.isChecked(),
             )
         else:
             return None

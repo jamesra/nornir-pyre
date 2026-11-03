@@ -170,6 +170,7 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
             num_iterations=8,
             max_angle=6.0,
             angle_step_size=1.5,
+            estimate_angle=True,
         )
 
         with patch.object(RefineGridSettingsDialog, "exec", return_value=QDialog.DialogCode.Accepted):
@@ -180,9 +181,15 @@ class TestRefineGridSettingsDialogPersistence(unittest.TestCase):
         self.assertEqual(512, result.cell_size)
         self.assertEqual(256, result.grid_spacing)
         self.assertEqual(8, result.num_iterations)
+        self.assertTrue(result.estimate_angle)
         self.assertEqual(512, settings.stos.grid_refine.cell_size)
         self.assertEqual(256, settings.stos.grid_refine.grid_spacing)
         self.assertEqual(8, settings.stos.grid_refine.num_iterations)
+        self.assertTrue(settings.stos.grid_refine.estimate_angle)
+
+    def test_refine_dialog_estimate_angle_defaults_off(self) -> None:
+        dlg = RefineGridSettingsDialog(defaults=GridRefineDefaults())
+        self.assertFalse(dlg.estimate_angle_ctrl.isChecked())
 
     def test_convert_dialog_spacing_mode(self) -> None:
         dlg = ConvertToGridDialog()
