@@ -24,11 +24,6 @@ from pyre.transform_edit_policy import target_panel_manipulation_locked
 from pyre.interfaces.viewtype import ViewType
 from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
-from pyre.views.composite_display import (
-    display_lookat_for_composite,
-    lookat_from_display_position,
-)
-from pyre.views.gltiles import is_rigid_transform
 from pyre.commands.transform_undo import rigid_state_changed, save_rigid_undo
 
 
@@ -182,26 +177,6 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
     def can_execute(self) -> bool:
         return True
 
-    def _end_interactive_edit_preserving_composite_display(self) -> None:
-        """End the gesture without letting composite view_proj jump onto the source.
-
-        Capture target-display lookat while the translate freeze is still active,
-        clear the gesture, then rebase ``camera.lookat`` so live ``Transform(lookat)``
-        matches that same display point.
-        """
-        display_yx: NDArray[np.floating] | None = None
-        if self._view_type() == ViewType.Composite:
-            model = self._transform_controller.TransformModel
-            if model is not None and is_rigid_transform(model):
-                display_yx = display_lookat_for_composite(
-                    self.camera, self._transform_controller)
-        self._transform_controller.end_interactive_edit()
-        if display_yx is not None:
-            new_lookat = lookat_from_display_position(
-                self._transform_controller, display_yx)
-            if np.all(np.isfinite(new_lookat)):
-                self.camera.lookat = new_lookat
-
     def _restore_original_state(self) -> None:
         """Undo the gesture by restoring the parameters captured at construction.
 
@@ -216,24 +191,14 @@ class ManipulateRigidTransformCommand(NavigationCommandBase):
         model.SetRigidState(self._original_state)
 
     def cancel(self):
-        display_yx: NDArray[np.floating] | None = None
-        if self._view_type() == ViewType.Composite:
-            model = self._transform_controller.TransformModel
-            if model is not None and is_rigid_transform(model):
-                display_yx = display_lookat_for_composite(
-                    self.camera, self._transform_controller)
+        # Composite lookat is display-native; ending the gesture does not move framing.
         self._transform_controller.end_interactive_edit()
         self._restore_original_state()
-        if display_yx is not None:
-            new_lookat = lookat_from_display_position(
-                self._transform_controller, display_yx)
-            if np.all(np.isfinite(new_lookat)):
-                self.camera.lookat = new_lookat
         super().cancel()
         return
 
     def execute(self):
-        self._end_interactive_edit_preserving_composite_display()
+        self._transform_controller.end_interactive_edit()
         model = self._transform_controller.TransformModel
         if isinstance(model, IRigidTransform):
             current = model.GetRigidState()

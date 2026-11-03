@@ -33,7 +33,6 @@ from pyre.controllers.transform_display import gesture_for_wheel_rotate
 from pyre.interfaces.viewtype import ViewType
 from pyre.commands.extensions import wheel_scroll_steps
 from pyre.views.composite_display import (
-    lookat_delta_from_display_delta,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
     resolve_composite_display_draw_params,
@@ -208,24 +207,7 @@ class NavigationCommandBase(UICommandBase, abc.ABC):
         view = self._view_type()
         model = self._transform_controller.TransformModel
         if view == ViewType.Composite and model is not None:
-            if is_rigid_transform(model):
-                delta_display = after.target - before.target
-                if not is_plausible_world_delta(
-                        delta_display, self.camera,
-                        transform_controller=self._transform_controller):
-                    return
-                delta_lookat = lookat_delta_from_display_delta(model, delta_display)
-                if not is_plausible_world_delta(
-                        delta_lookat, self.camera,
-                        transform_controller=self._transform_controller):
-                    return
-                proposed = self.camera.lookat - delta_lookat
-                if not is_plausible_world_point(
-                        proposed, self.camera,
-                        transform_controller=self._transform_controller):
-                    return
-                self.camera.lookat = proposed
-                return
+            # Composite lookat is target display space; lock with a plain translate.
             delta_display = after.target - before.target
             if not is_plausible_world_delta(
                     delta_display, self.camera,

@@ -58,4 +58,6 @@ See also `.cursor/skills/pyre-stos-rigid-transform-ui/SKILL.md` for rigid STOS i
 | Target | `TargetPoints`, `ControlImage*` | `Space.Target` | `ViewType.Target` |
 
 `Transform()` maps source → target. Composite draws the target layer in native target
-coordinates (static) and warps the source layer into target display space.
+coordinates (static) and warps the source layer into target display space. Composite
+`camera.lookat` is stored in that same target display space (pan is a plain translate);
+do not couple camera navigation through `Transform` / `InverseTransform`.

@@ -627,27 +627,28 @@ class TransformController:
         )
 
     def _clear_composite_display_cache(self) -> None:
-        """Drop cached composite lookat/bounds so the next paint remaps through Transform().
+        """Drop cached composite display bounds (tile-cull helpers).
 
-        If a display lookat was cached (freeze / busy registration), stash it so composite
-        panels can rebase ``camera.lookat`` before the next paint.
+        Composite ``camera.lookat`` is target display space and does not need
+        InverseTransform rebasing when the warp remeshes.
         """
-        if self._cached_composite_display_lookat is not None:
-            self._pending_composite_display_preserve = np.asarray(
-                self._cached_composite_display_lookat, dtype=np.float64).ravel()[:2].copy()
+        self._pending_composite_display_preserve = None
         self._cached_composite_display_lookat = None
         self._cached_composite_display_bounds = None
         self._cached_composite_lookat_src = None
         self._cached_composite_bounds_src = None
 
     def consume_pending_composite_display_preserve(self) -> NDArray[np.floating] | None:
-        """Return and clear a stashed composite display lookat, if any."""
+        """Return and clear a stashed composite display lookat, if any.
+
+        Legacy hook: display-native lookat no longer stashes a preserve value.
+        """
         pending = self._pending_composite_display_preserve
         self._pending_composite_display_preserve = None
         return pending
 
     def discard_composite_display_cache(self) -> None:
-        """Drop composite lookat/bounds caches without rebasing to a prior display point.
+        """Drop composite display caches.
 
         Used when loading a new ``.stos`` so framing from the previous transform cannot
         leak into the new session.

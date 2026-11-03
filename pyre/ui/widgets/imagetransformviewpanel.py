@@ -58,7 +58,6 @@ from pyre.views.composite_display import (
     composite_control_point_draw_rows,
     composite_legend_rich_text,
     display_lookat_for_composite,
-    rebase_composite_camera_to_display,
     resolve_composite_display_draw_params,
 )
 from pyre.views.registration_roi_overlay import (
@@ -422,10 +421,10 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
 
     def _on_transform_controller_changed(self, controller: TransformController) -> None:
         """Repaint when registration or display overlays change in another STOS view."""
+        # Composite lookat is display-native; remesh/registration must not InverseTransform
+        # rebase the camera. Drop any legacy pending preserve without moving lookat.
         if self._view_type == ViewType.Composite:
-            pending = controller.consume_pending_composite_display_preserve()
-            if pending is not None:
-                rebase_composite_camera_to_display(self.camera, controller, pending)
+            controller.consume_pending_composite_display_preserve()
         if self._image_layer_dirty_for_transform(controller):
             self.mark_image_layer_dirty()
         self._glpanel.update()
@@ -631,11 +630,29 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
             self.camera.scale = 1.0
             return
 
-        center = (self._image_transform_view.height / 2.0, self._image_transform_view.width / 2.0)  # type: ignore[operator]
+        # Composite lookat is target display space: prefer the target (control) image.
+        width = self._image_transform_view.width
+        height = self._image_transform_view.height
+        if self._view_type == ViewType.Composite:
+            target_view = getattr(self._image_transform_view, "_target_image_view", None)
+            if target_view is not None and target_view.width is not None:
+                width = target_view.width
+                height = target_view.height
+            else:
+                model = self._transform_controller.TransformModel
+                if model is not None and hasattr(model, "FixedBoundingBox"):
+                    try:
+                        bb = model.FixedBoundingBox
+                        height = float(bb.Height)
+                        width = float(bb.Width)
+                    except Exception:
+                        pass
+
+        center = (height / 2.0, width / 2.0)  # type: ignore[operator]
         self.camera.lookat = center
 
-        width_scale = self.width() / self._image_transform_view.width  # type: ignore[operator]
-        height_scale = self.height() / self._image_transform_view.height  # type: ignore[operator]
+        width_scale = self.width() / width  # type: ignore[operator]
+        height_scale = self.height() / height  # type: ignore[operator]
 
         self.camera.scale = min(width_scale, height_scale)
 
@@ -721,11 +738,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def lookatfixedpoint(self, point, scale):
         """Look at a point specified in Target (control / fixed) space.
 
-        Source and Composite cameras store lookat in Source space, so the point
-        is InverseTransformed before applying. Target cameras use the point as-is.
+        Composite and Target cameras store lookat in target/display space (point
+        as-is). Source cameras InverseTransform into source space.
         """
         point = camera_lookat_from_target_space(
-            self.transform_controller, point, self.space)
+            self.transform_controller, point, self.space, view_type=self._view_type)
 
         super(ImageTransformViewPanel, self).lookatfixedpoint(point, scale)  # type: ignore[arg-type]
 

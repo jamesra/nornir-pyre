@@ -71,31 +71,30 @@ class TestCameraRejectsNonFiniteLookat(unittest.TestCase):
 
 
 class TestCompositeLookatSurvivesNanInverse(unittest.TestCase):
-    """When InverseTransform yields NaN, composite helpers must not poison the camera."""
+    """Composite camera navigation must not depend on InverseTransform."""
 
     def setUp(self) -> None:
         self.controller = TransformController(_tiny_mesh())
         self.camera = Camera((150.0, 150.0), scale=1.0, settings=_settings())
 
-    def test_rebase_skips_non_finite_inverse(self) -> None:
-        before = self.camera.lookat.copy()
+    def test_rebase_assigns_display_point_directly(self) -> None:
+        target = np.array([50.0, 50.0], dtype=np.float64)
         with patch.object(
                 self.controller, 'InverseTransform',
                 return_value=np.array([[np.nan, np.nan]], dtype=np.float64)):
-            rebase_composite_camera_to_display(
-                self.camera, self.controller, np.array([50.0, 50.0]))
-        np.testing.assert_allclose(self.camera.lookat, before)
+            rebase_composite_camera_to_display(self.camera, self.controller, target)
+        np.testing.assert_allclose(self.camera.lookat, target)
 
-    def test_pan_skips_non_finite_inverse(self) -> None:
+    def test_pan_ignores_non_finite_inverse(self) -> None:
         before = self.camera.lookat.copy()
+        delta = np.array([10.0, -5.0], dtype=np.float64)
         with patch.object(
                 self.controller, 'InverseTransform',
                 return_value=np.array([[np.nan, np.nan]], dtype=np.float64)):
-            apply_composite_display_pan_delta(
-                self.camera, self.controller, np.array([10.0, -5.0]))
-        np.testing.assert_allclose(self.camera.lookat, before)
+            apply_composite_display_pan_delta(self.camera, self.controller, delta)
+        np.testing.assert_allclose(self.camera.lookat, before + delta)
 
-    def test_display_lookat_falls_back_when_forward_is_nan(self) -> None:
+    def test_display_lookat_is_camera_lookat(self) -> None:
         with patch.object(
                 self.controller, 'Transform',
                 return_value=np.array([[np.nan, np.nan]], dtype=np.float64)):
@@ -113,31 +112,22 @@ class TestCompositeLookatSurvivesNanInverse(unittest.TestCase):
         np.testing.assert_allclose(mapped, target)
         self.assertTrue(np.all(np.isfinite(mapped)))
 
-    def test_lookat_from_display_reports_nan_without_assigning(self) -> None:
+    def test_lookat_from_display_is_identity(self) -> None:
+        display = np.array([1.0, 2.0], dtype=np.float64)
         with patch.object(
                 self.controller, 'InverseTransform',
                 return_value=np.array([[np.nan, np.nan]], dtype=np.float64)):
-            result = lookat_from_display_position(
-                self.controller, np.array([1.0, 2.0]))
-        self.assertFalse(np.all(np.isfinite(result)))
+            result = lookat_from_display_position(self.controller, display)
+        np.testing.assert_allclose(result, display)
 
-    def test_pan_skips_astronomical_inverse(self) -> None:
+    def test_pan_ignores_astronomical_inverse(self) -> None:
         before = self.camera.lookat.copy()
+        delta = np.array([10.0, -5.0], dtype=np.float64)
         with patch.object(
                 self.controller, 'InverseTransform',
                 return_value=np.array([[1.14e8, 1.39e8]], dtype=np.float64)):
-            apply_composite_display_pan_delta(
-                self.camera, self.controller, np.array([10.0, -5.0]))
-        np.testing.assert_allclose(self.camera.lookat, before)
-
-    def test_display_lookat_falls_back_when_forward_is_astronomical(self) -> None:
-        with patch.object(
-                self.controller, 'Transform',
-                return_value=np.array([[2.3e9, 2.9e9]], dtype=np.float64)):
-            display = display_lookat_for_composite(self.camera, self.controller)
-        self.assertTrue(np.all(np.isfinite(display)))
-        self.assertLess(float(np.max(np.abs(display))), 1e6)
-        np.testing.assert_allclose(display, self.camera.lookat)
+            apply_composite_display_pan_delta(self.camera, self.controller, delta)
+        np.testing.assert_allclose(self.camera.lookat, before + delta)
 
     def test_camera_lookat_from_target_falls_back_on_astronomical_inverse(self) -> None:
         target = np.array([40.0, 50.0], dtype=np.float64)
@@ -149,5 +139,5 @@ class TestCompositeLookatSurvivesNanInverse(unittest.TestCase):
         np.testing.assert_allclose(mapped, target)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
