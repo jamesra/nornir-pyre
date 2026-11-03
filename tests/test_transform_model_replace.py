@@ -5,10 +5,14 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
-from nornir_imageregistration.transforms import MeshWithRBFFallback
+from nornir_imageregistration.transforms import (
+    CenteredSimilarity2DTransform,
+    MeshWithRBFFallback,
+)
 from PyQt6.QtWidgets import QApplication
 
 from pyre.controllers.transformcontroller import TransformController
+from pyre.observable import ObservableSet
 
 
 def _mesh() -> MeshWithRBFFallback:
@@ -19,6 +23,15 @@ def _mesh() -> MeshWithRBFFallback:
         [100.0, 100.0, 200.0, 200.0],
     ], dtype=np.float64)
     return MeshWithRBFFallback(points)
+
+
+def _rigid() -> CenteredSimilarity2DTransform:
+    return CenteredSimilarity2DTransform(
+        target_offset=(0.0, 0.0),
+        source_rotation_center=(50.0, 50.0),
+        angle=0.0,
+        scalar=1.0,
+    )
 
 
 def _flush_coalesced_change() -> None:
@@ -96,6 +109,33 @@ class TestTransformModelReplace(unittest.TestCase):
         new_model = _mesh()
         controller.apply_external_transform(new_model)
         self.assertIs(controller.TransformModel, new_model)
+
+    def test_model_replace_clears_ui_selection(self) -> None:
+        """Leftover mesh selection must not survive convert-to-rigid (blocks scale)."""
+        selection = ObservableSet(initial_set={0, 2})
+        controller = TransformController(_mesh(), selected_points=selection)
+        self.assertTrue(controller.has_ui_control_point_selection())
+
+        controller.TransformModel = _rigid()
+
+        self.assertFalse(controller.has_ui_control_point_selection())
+        self.assertEqual(len(selection), 0)
+        self.assertEqual(len(controller.selected_points), 0)
+
+    def test_apply_external_transform_clears_ui_selection(self) -> None:
+        selection = ObservableSet(initial_set={1})
+        controller = TransformController(_mesh(), selected_points=selection)
+        controller.apply_external_transform(_mesh())
+        self.assertFalse(controller.has_ui_control_point_selection())
+        self.assertEqual(len(selection), 0)
+
+    def test_same_object_reassign_keeps_ui_selection(self) -> None:
+        selection = ObservableSet(initial_set={0})
+        model = _mesh()
+        controller = TransformController(model, selected_points=selection)
+        controller.TransformModel = model
+        self.assertTrue(controller.has_ui_control_point_selection())
+        self.assertEqual(selection, {0})
 
 
 if __name__ == "__main__":

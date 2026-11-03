@@ -15,6 +15,7 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.7 — 2026-11-01
 
+- **Fix: convert transform type left selection and Space gestures stuck.** Changing transform type (for example mesh → rigid, or rigid → RBF) now clears the control-point selection and refreshes Space / mouse command routing for the new type. Leftover selection had been blocking **Shift+wheel** / **Alt+Shift+wheel** scale, and Space could still behave like rigid refine after converting to mesh, grid, or RBF.
 - **Optional best-angle estimate for Refine Grid.** **Registration → Transform Settings** and the Refine Grid dialog offer **Estimate best angle**, off by default. When on, each cell runs a log-polar angle estimate and registers that angle in addition to 0 and any max/step angles; Refine Grid no longer searches scale on that path.
 - **Alt+Shift+wheel for fine scale.** **Alt+Shift+mouse wheel** scales the transform in small steps (about 0.5% per notch). **Shift+wheel** remains the larger step (~2%). **Ctrl+Shift+wheel** remains the fine rotation gesture. Holding Alt no longer steals focus into the menu bar. On Windows, Shift(+Alt)+wheel is often reported as a sideways scroll; Pyre still treats that as a scale step.
 - **Fix: choosing a STOS stayed stuck while scores validated.** Opening a transform from the STOS browser (double-click or context-menu Open) no longer waits behind folder-wide checksum validation. Opens use their own worker; background score checks can stop when superseded.

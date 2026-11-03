@@ -596,6 +596,19 @@ class TransformController:
         ui = self._ui_selected_points
         return ui is not None and len(ui) > 0
 
+    def _clear_control_point_selection(self) -> None:
+        """Drop controller and shared UI selection after a model replace.
+
+        Previous row indices do not refer to the new model. Leaving them set
+        blocks whole-transform gestures (Shift+wheel scale, Space registration).
+        """
+        self._selected_points.clear()
+        self._registration_reselect_ids.clear()
+        self._suppress_registration_reselect = False
+        ui = self._ui_selected_points
+        if ui is not None and len(ui) > 0:
+            ui.clear()
+
     def freeze_composite_display_during_point_drag(self) -> bool:
         """True when composite camera/bounds must not remap through Transform().
 
@@ -917,6 +930,11 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        # Row indices / session IDs from the previous model are meaningless after replace
+        # (and leftover selection blocks Shift+wheel scale / Space registration).
+        # Skip the initial None → model bind in __init__ so callers can pass a selection.
+        if old_transform is not None:
+            self._clear_control_point_selection()
         # Drop an unfinished Spacebar undo; the old SetPoints snapshot is invalid
         # once the model object changes.
         self._registration_batch_undo_points = None
@@ -967,6 +985,7 @@ class TransformController:
         self._tile_mesh_cache.clear()
         self._mint_point_ids()
         self._cancel_all_registrations()
+        self._clear_control_point_selection()
         self._registration_batch_undo_points = None
         self._registration_batch_had_apply = False
         self._masked_relax_generation += 1
@@ -1236,6 +1255,7 @@ class TransformController:
         self._registration_queue = ControlPointRegistrationQueue()
         self._busy_points = ControlPointBusySet()
         self._space_hold = SpaceHoldRegistrations()
+        self._selected_points = set()
         self._ui_selected_points = selected_points
         self._registration_reselect_ids = set()
         self._suppress_registration_reselect = False

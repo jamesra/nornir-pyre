@@ -91,6 +91,7 @@ class DefaultTransformCommand(NavigationCommandBase):
     _last_mouse_press_event_args: QMouseEvent | None = None
     _selection_event_history: dict[SelectionEventKey, SelectionEventData] = {}
     _action_to_command: dict  # type: ignore[type-arg]
+    _bound_transform_type: TransformType
     _right_pan_active: bool = False
     _pending_empty_left_click: bool = False
     _pending_shift_glyph_click: bool = False
@@ -158,7 +159,6 @@ class DefaultTransformCommand(NavigationCommandBase):
 
         self._action_command_map_by_type = transform_type_to_action_command_map
         self._get_transform_action_map_dict = transform_control_point_action_maps
-        self._action_to_command = transform_type_to_action_command_map[transform_controller.type]
         self._selection_event_history = {}
         self._commandqueue = commandqueue
         self._space = space
@@ -168,24 +168,10 @@ class DefaultTransformCommand(NavigationCommandBase):
         self._pending_shift_glyph_click = False
         self._pending_selected_glyph_click = False
         self._left_press_qt = None
-        transform_action_map_factory = transform_control_point_action_maps()[
-            transform_controller.type]
-
-        if isinstance(transform_controller.TransformModel, IControlPoints):
-            controlpointmapkey = ControlPointManagerKey(
-                transform_controller, space, self._view_type())
-            self._controlpointmap = self._controlpointmap_manager.getorcreate(controlpointmapkey)
-            self._actionmap = transform_action_map_factory(self._controlpointmap)
-        else:
-            self._actionmap = transform_action_map_factory()  # type: ignore[call-arg]
-
-        # self._transform_controller.AddOnChangeEventListener(self._on_transform_controller_changed)
-  
-    # def _on_transform_controller_changed(self, *args, **kwargs):
-    #     self._action_command_map = pyre.commands.container_overrides.action_command_map[self._transform_controller.type]
+        self._bound_transform_type = transform_controller.type
+        self._rebind_maps_for_current_transform_type()
 
     def execute(self):
-        #        self._transform_controller.RemoveOnChangeEventListener(self._on_transform_controller_changed)
         super().execute()
 
     @property
@@ -420,7 +406,9 @@ class DefaultTransformCommand(NavigationCommandBase):
             return False
 
     def _rebind_maps_for_current_transform_type(self) -> None:
+        """Bind action and command maps to the controller's current transform type."""
         tc = self._transform_controller
+        self._bound_transform_type = tc.type
         self._action_to_command = self._action_command_map_by_type[tc.type]
         map_factory = self._get_transform_action_map_dict()[tc.type]
         if isinstance(tc.TransformModel, IControlPoints):
@@ -430,11 +418,22 @@ class DefaultTransformCommand(NavigationCommandBase):
         else:
             self._actionmap = map_factory()  # type: ignore[call-arg]
 
+    def _ensure_maps_match_transform_type(self) -> None:
+        """Rebind if the model type changed while this command stayed active.
+
+        Menu convert cancels and recreates this command, but any path that
+        replaces the model without that teardown would otherwise keep rigid
+        Space→refine routing after a switch to mesh/grid/RBF (or the reverse).
+        """
+        if self._bound_transform_type != self._transform_controller.type:
+            self._rebind_maps_for_current_transform_type()
+
     def check_for_new_command(self, selection_event_data: SelectionEventData) -> bool:
         """:return: True if a new command was created"""
         if self.status != pyre.CommandStatus.Active:
             return False
 
+        self._ensure_maps_match_transform_type()
         new_action = self._actionmap.get_action(selection_event_data)
 
         if self._point_edit_requires_mesh_conversion(new_action.action):

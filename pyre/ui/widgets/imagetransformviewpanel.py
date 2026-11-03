@@ -448,11 +448,11 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
         self.mark_image_layer_dirty()
         self._glpanel.update()
 
-        # Cancel in-progress commands when the model is replaced externally.
-        if self._command is None:
-            return
-
-        if self._command.status == pyre.CommandStatus.Completed:
+        # Replace the active command so type-specific action maps (rigid Space
+        # refine vs mesh/RBF register) match the new model. A Completed command
+        # has no events bound; activate a fresh default instead of returning.
+        if self._command is None or self._command.status == pyre.CommandStatus.Completed:
+            self.activate_command()
             return
 
         if old is not new or (old is not None and new is not None and old.type != new.type):
