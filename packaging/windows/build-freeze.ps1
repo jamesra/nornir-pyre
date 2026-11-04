@@ -6,12 +6,17 @@
     Creates a clean virtual environment, installs monorepo packages from local
     file URLs (CPU-only imageregistration), installs third-party dependencies,
     and runs PyInstaller using pyre.spec. Output is written to dist/pyre/.
+
+    Locally (not on GitHub Actions, not with -SkipVersionGuard) it first runs
+    release\bump_pyre_version.py --if-released, so a version whose changelog
+    section is already dated (shipped) is never frozen again under that number.
 #>
 [CmdletBinding()]
 param(
     [string]$MonorepoRoot = "",
     [string]$Python = "python",
-    [switch]$SkipVerify
+    [switch]$SkipVerify,
+    [switch]$SkipVersionGuard
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +38,11 @@ $ThirdPartyReqs = Join-Path $RepoRoot "release\pyre-windows-third-party.txt"
 
 Write-Host "Monorepo root: $RepoRoot"
 Write-Host "Pyre root:     $PyreRoot"
+
+if (-not $SkipVersionGuard -and $env:GITHUB_ACTIONS -ne "true") {
+    & $Python (Join-Path $RepoRoot "release\bump_pyre_version.py") --if-released
+    if ($LASTEXITCODE -ne 0) { throw "bump_pyre_version.py --if-released failed" }
+}
 
 if (-not $SkipVerify) {
     Write-Host "Verifying package versions..."
