@@ -18,6 +18,7 @@ from pyre.views.composite_display import (
     composite_control_point_draw_rows,
     composite_tile_cull_rect,
     display_lookat_for_composite,
+    lookat_from_display_position,
     target_space_lookat_for_stos_view,
     world_point_pair_for_composite_mouse,
     apply_composite_display_pan_delta,
@@ -62,10 +63,11 @@ class TestCompositeDisplayMesh(unittest.TestCase):
         self.camera = MagicMock()
         self.camera.lookat = np.array([20.0, 30.0], dtype=np.float64)
 
-    def test_display_lookat_is_camera_lookat(self) -> None:
-        """Composite lookat is already target display space."""
+    def test_display_lookat_is_forward_of_camera_lookat(self) -> None:
+        expected = np.squeeze(
+            self.controller.Transform(self.camera.lookat.reshape(1, 2), extrapolate=True))
         actual = display_lookat_for_composite(self.camera, self.controller)
-        np.testing.assert_allclose(actual, self.camera.lookat, rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
 
     def test_world_point_pair_round_trips_mesh(self) -> None:
         display = np.array([150.0, 250.0], dtype=np.float64)
@@ -78,9 +80,9 @@ class TestCompositeDisplayMesh(unittest.TestCase):
             self.controller.Transform(pair.source.reshape(1, 2), extrapolate=True))
         np.testing.assert_allclose(roundtrip, pair.target, rtol=1e-4, atol=1e-3)
 
-    def test_busy_points_display_lookat_without_transform(self) -> None:
-        """Queued alignments own the CUDA device; display lookat must not Transform()."""
-        before = display_lookat_for_composite(self.camera, self.controller)
+    def test_busy_points_reuse_cached_lookat_without_transform(self) -> None:
+        """Queued alignments own the CUDA device; composite paints must not Transform()."""
+        cached = display_lookat_for_composite(self.camera, self.controller)
         point_id = self.controller.point_id_for_index(0)
         assert point_id is not None
         self.controller.mark_busy_points("register", [point_id])
@@ -89,8 +91,18 @@ class TestCompositeDisplayMesh(unittest.TestCase):
                 self.controller, "Transform",
                 side_effect=AssertionError("Transform must not run while points are busy")):
             frozen = display_lookat_for_composite(self.camera, self.controller)
-        np.testing.assert_allclose(frozen, before)
-        np.testing.assert_allclose(frozen, self.camera.lookat)
+        np.testing.assert_allclose(frozen, cached)
+
+    def test_busy_points_skip_transform_when_lookat_cache_empty(self) -> None:
+        point_id = self.controller.point_id_for_index(0)
+        assert point_id is not None
+        self.controller.mark_busy_points("register", [point_id])
+        self.controller._clear_composite_display_cache()
+        with patch.object(
+                self.controller, "Transform",
+                side_effect=AssertionError("Transform must not run while points are busy")):
+            fallback = display_lookat_for_composite(self.camera, self.controller)
+        np.testing.assert_allclose(fallback, self.camera.lookat)
 
     def test_pan_while_busy_shifts_cached_display_lookat_without_transform(self) -> None:
         """Right-drag pan must move the frozen composite view, not chatter lookat."""
@@ -218,7 +230,7 @@ class TestCompositeDisplayMesh(unittest.TestCase):
 
 
 class TestCompositeRigidGestureCameraRebase(unittest.TestCase):
-    """Display-native lookat stays put through a composite rigid translate."""
+    """Ending a composite rigid translate must keep target-display framing."""
 
     def test_display_lookat_stable_after_ending_translate_gesture(self) -> None:
         from nornir_imageregistration.transforms import CenteredSimilarity2DTransform
@@ -236,29 +248,37 @@ class TestCompositeRigidGestureCameraRebase(unittest.TestCase):
         display_before = display_lookat_for_composite(camera, controller)
         controller.Translate(np.array([12.0, -8.0], dtype=np.float64), space=Space.Source)
 
+        # Mimic execute(): capture while frozen, end gesture, rebase lookat.
         display_frozen = display_lookat_for_composite(camera, controller)
         np.testing.assert_allclose(display_frozen, display_before, atol=1e-5)
         controller.end_interactive_edit()
+        camera.lookat = lookat_from_display_position(controller, display_frozen)
 
         display_after = display_lookat_for_composite(camera, controller)
         np.testing.assert_allclose(display_after, display_before, atol=1e-4)
-        np.testing.assert_allclose(camera.lookat, display_before, atol=1e-4)
+        # Without rebase, live Transform(old lookat) would have jumped with the translate.
+        unbased = _transform_without_rebase(controller, np.array([40.0, 50.0], dtype=np.float64))
+        self.assertFalse(np.allclose(unbased, display_before, atol=1.0))
 
 
 class TestCompositeRegistrationCameraRebase(unittest.TestCase):
-    """Remesh/clear no longer InverseTransform-rebases display-native lookat."""
+    """Point-queue registration must not jump composite framing when freeze lifts."""
 
-    def test_clear_cache_does_not_stash_lookat_preserve(self) -> None:
+    def test_clear_cache_stashes_display_for_panel_rebase(self) -> None:
         controller = TransformController(_mesh())
         controller._rbf_prewarm_ready = True
         camera = _TestCamera(np.array([20.0, 30.0], dtype=np.float64))
-        before = display_lookat_for_composite(camera, controller).copy()
+        display_before = display_lookat_for_composite(camera, controller)
+        self.assertIsNotNone(controller._cached_composite_display_lookat)
 
+        # Clearing the freeze cache must hand the frozen display lookat to the panel.
         controller._clear_composite_display_cache()
         pending = controller.consume_pending_composite_display_preserve()
-        self.assertIsNone(pending)
-        np.testing.assert_allclose(
-            display_lookat_for_composite(camera, controller), before, atol=1e-5)
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        np.testing.assert_allclose(pending, display_before, atol=1e-5)
+        self.assertIsNone(controller.consume_pending_composite_display_preserve())
+        self.assertIsNone(controller._cached_composite_display_lookat)
 
 
 class TestMatchViewLookatSync(unittest.TestCase):
@@ -285,13 +305,11 @@ class TestMatchViewLookatSync(unittest.TestCase):
         np.testing.assert_allclose(actual, self.target_lookat, rtol=1e-5, atol=1e-5)
 
     def test_composite_view_exports_display_lookat(self) -> None:
-        # Composite lookat is target/display space (same coords as Target panel).
-        camera = _TestCamera(self.target_lookat)
+        camera = _TestCamera(self.source_lookat)
         actual = target_space_lookat_for_stos_view(
             camera, self.controller, Space.Source, ViewType.Composite)
         expected = display_lookat_for_composite(camera, self.controller)
         np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
-        np.testing.assert_allclose(actual, self.target_lookat, rtol=1e-5, atol=1e-5)
 
     def test_camera_lookat_from_target_round_trips_source(self) -> None:
         source = camera_lookat_from_target_space(
@@ -300,9 +318,6 @@ class TestMatchViewLookatSync(unittest.TestCase):
         target = camera_lookat_from_target_space(
             self.controller, self.target_lookat, Space.Target)
         np.testing.assert_allclose(target, self.target_lookat, rtol=1e-5, atol=1e-5)
-        composite = camera_lookat_from_target_space(
-            self.controller, self.target_lookat, Space.Source, view_type=ViewType.Composite)
-        np.testing.assert_allclose(composite, self.target_lookat, rtol=1e-5, atol=1e-5)
 
     def test_match_from_source_aligns_all_panel_cameras(self) -> None:
         """Simulate M on Source: all panels end at corresponding centers."""
@@ -314,29 +329,71 @@ class TestMatchViewLookatSync(unittest.TestCase):
         )
         source_cam = camera_lookat_from_target_space(self.controller, sync, Space.Source)
         target_cam = camera_lookat_from_target_space(self.controller, sync, Space.Target)
-        composite_cam = camera_lookat_from_target_space(
-            self.controller, sync, Space.Source, view_type=ViewType.Composite)
+        composite_cam = camera_lookat_from_target_space(self.controller, sync, Space.Source)
         np.testing.assert_allclose(source_cam, self.source_lookat, rtol=1e-4, atol=1e-3)
         np.testing.assert_allclose(target_cam, sync, rtol=1e-5, atol=1e-5)
-        np.testing.assert_allclose(composite_cam, sync, rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(composite_cam, self.source_lookat, rtol=1e-4, atol=1e-3)
         display = display_lookat_for_composite(_TestCamera(composite_cam), self.controller)
         np.testing.assert_allclose(display, sync, rtol=1e-4, atol=1e-3)
 
 
-class TestCompositePanIgnoresWildInverse(unittest.TestCase):
-    """Plain display translate must not rocket when InverseTransform is wild (rigid→RBF)."""
+def _stretched_mesh() -> MeshWithRBFFallback:
+    """Non-uniform warp: x stretches 2x on the right half, y shears with x."""
+    points = []
+    for ty in (0.0, 100.0, 200.0, 300.0):
+        for tx in (0.0, 100.0, 200.0, 300.0):
+            sx = tx if tx <= 100.0 else 100.0 + (tx - 100.0) / 2.0
+            sy = ty - 0.1 * tx
+            points.append([ty, tx, sy, sx])
+    return MeshWithRBFFallback(np.asarray(points, dtype=np.float32))
 
-    def test_pan_moves_lookat_by_delta_despite_bad_inverse(self) -> None:
-        controller = TransformController(_mesh())
-        controller._rbf_prewarm_ready = True
-        camera = _TestCamera(np.array([150.0, 200.0], dtype=np.float64))
-        before = camera.lookat.copy()
+
+class TestCompositePanUsesLocalForwardMap(unittest.TestCase):
+    """Composite pan converts display deltas with the local forward map, not an inverse solve."""
+
+    def setUp(self) -> None:
+        self.controller = TransformController(_stretched_mesh())
+        self.controller._rbf_prewarm_ready = True
+
+    def test_pan_moves_display_despite_wild_inverse(self) -> None:
+        """Rigid->RBF can leave InverseTransform astronomical; the pan must still move."""
+        camera = _TestCamera(np.array([150.0, 120.0], dtype=np.float64))
+        display_before = display_lookat_for_composite(camera, self.controller).copy()
         delta = np.array([3.0, -5.0], dtype=np.float64)
         with patch.object(
-                controller, "InverseTransform",
+                self.controller, "InverseTransform",
                 return_value=np.array([[1.14e8, 1.39e8]], dtype=np.float64)):
-            apply_composite_display_pan_delta(camera, controller, delta)
-        np.testing.assert_allclose(camera.lookat, before + delta, rtol=1e-5, atol=1e-5)
+            apply_composite_display_pan_delta(camera, self.controller, delta)
+        display_after = display_lookat_for_composite(camera, self.controller)
+        np.testing.assert_allclose(display_after, display_before + delta, atol=1e-2)
+
+    def test_drag_across_warp_tracks_cursor_without_inverse(self) -> None:
+        camera = _TestCamera(np.array([150.0, 60.0], dtype=np.float64))
+        display_start = display_lookat_for_composite(camera, self.controller).copy()
+        step = np.array([1.0, 4.0], dtype=np.float64)
+        with patch.object(
+                self.controller, "InverseTransform",
+                side_effect=AssertionError("pan must not InverseTransform per move")):
+            for _ in range(40):
+                apply_composite_display_pan_delta(camera, self.controller, step)
+        display_end = display_lookat_for_composite(camera, self.controller)
+        np.testing.assert_allclose(display_end, display_start + 40 * step, atol=0.5)
+
+    def test_pan_falls_back_to_plain_translate_when_forward_fails(self) -> None:
+        camera = _TestCamera(np.array([150.0, 120.0], dtype=np.float64))
+        display_lookat_for_composite(camera, self.controller)
+        before = camera.lookat.copy()
+        delta = np.array([2.0, 3.0], dtype=np.float64)
+        with patch.object(
+                self.controller, "Transform",
+                return_value=np.full((3, 2), np.nan, dtype=np.float64)):
+            apply_composite_display_pan_delta(camera, self.controller, delta)
+        np.testing.assert_allclose(camera.lookat, before + delta, atol=1e-9)
+
+
+def _transform_without_rebase(
+        controller: TransformController, source_lookat: np.ndarray) -> np.ndarray:
+    return np.squeeze(np.asarray(controller.Transform(source_lookat.reshape(1, 2)), dtype=np.float64))
 
 
 if __name__ == "__main__":

@@ -200,6 +200,27 @@ class TransformsSettingsDialog(QDialog):
             "Show mesh/grid triangulation lines and control point glyphs "
             "on the Source and Target image panels.")
 
+        self._open_mesh_as = QComboBox(page)
+        self._open_mesh_as.addItem("Mesh", "mesh")
+        self._open_mesh_as.addItem("RBF", "rbf")
+        open_as_index = self._open_mesh_as.findData(self._settings.stos.open_mesh_transforms_as)
+        self._open_mesh_as.setCurrentIndex(max(open_as_index, 0))
+        self._open_mesh_as.setToolTip(
+            "Transform type used when opening a .stos that contains a mesh transform. "
+            "RBF transforms are saved as meshes, so choose RBF to keep editing them as RBF.")
+
+        self._composite_drag_space = QComboBox(page)
+        self._composite_drag_space.addItem("Target point (point follows cursor)", "target")
+        self._composite_drag_space.addItem("Source point (image follows cursor)", "source")
+        drag_index = self._composite_drag_space.findData(self._settings.stos.composite_point_drag_space)
+        self._composite_drag_space.setCurrentIndex(max(drag_index, 0))
+        self._composite_drag_space.setToolTip(
+            "Which side of a control point a drag in the Composite view moves. Target moves the "
+            "point over the image; Source keeps the point still and slides the warped image under it. "
+            "Grid transforms always move the target point.")
+
+        form.addRow("Open mesh transforms as", self._open_mesh_as)
+        form.addRow("Composite drag moves", self._composite_drag_space)
         form.addRow("Alignment area", self._alignment_area)
         form.addRow("Max angle (± degrees)", self._point_max_angle)
         form.addRow("Angle step (degrees)", self._point_angle_step)
@@ -261,6 +282,8 @@ class TransformsSettingsDialog(QDialog):
 
         self._settings.ui.show_control_point_ids = self._show_control_point_ids.isChecked()
         self._settings.ui.show_mesh_lines = self._show_mesh_lines.isChecked()
+        self._settings.stos.open_mesh_transforms_as = str(self._open_mesh_as.currentData())
+        self._settings.stos.composite_point_drag_space = str(self._composite_drag_space.currentData())
 
     @staticmethod
     def edit_settings(settings: AppSettings, parent: QWidget | None = None) -> bool:

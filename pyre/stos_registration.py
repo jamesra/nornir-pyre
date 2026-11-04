@@ -263,12 +263,28 @@ def ensure_mask_viewmodels_from_load(
         )
 
 
+def load_stos_transform(
+        transform_string: str,
+        open_mesh_as: str = "mesh",
+) -> nornir_imageregistration.ITransform:
+    """Parse a STOS transform string; mesh transforms open as RBF when *open_mesh_as* is "rbf"."""
+    transform = nornir_imageregistration.transforms.LoadTransform(transform_string)
+    if (
+            open_mesh_as == "rbf"
+            and transform.type == nornir_imageregistration.transforms.TransformType.MESH
+    ):
+        transform = nornir_imageregistration.transforms.ConvertTransform(
+            transform, nornir_imageregistration.transforms.TransformType.RBF)
+    return transform
+
+
 def apply_stos_transform_to_controller(
         transform_controller: object,
         transform_string: str,
+        open_mesh_as: str = "mesh",
 ) -> nornir_imageregistration.ITransform:
     """Parse a STOS transform string and install it on the shared TransformController."""
-    transform = nornir_imageregistration.transforms.LoadTransform(transform_string)
+    transform = load_stos_transform(transform_string, open_mesh_as)
     transform_controller.TransformModel = transform  # type: ignore[attr-defined]
     return transform_controller.TransformModel  # type: ignore[attr-defined,no-any-return]
 

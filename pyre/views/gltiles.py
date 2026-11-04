@@ -23,6 +23,7 @@ from nornir_imageregistration.transforms.triangulation import (
     barycentric_stencil_delaunay,
     barycentric_weights_in_triangle,
 )
+from pyre import mesh_hull_affine
 from pyre.gl_engine import DynamicVAO, GLBuffer, GLIndexBuffer, ShaderVAO
 from pyre.space import Space
 from pyre.perf_debug import timed
@@ -57,6 +58,8 @@ class TileGLObjects:
     mesh_populated: bool = False
     cp_indices: NDArray[np.integer] | None = None
     cp_weights: NDArray[np.floating] | None = None
+    # Set for relative stencils (RBF): TargetPoints the vertices were last mapped with.
+    cp_targets: NDArray[np.floating] | None = None
 
     def release(self) -> None:
         """Free GL names under the current context before dropping this tile.
@@ -127,12 +130,12 @@ def _find_corresponding_points(transform: nornir_imageregistration.ITransform,
     Pairs stay on the Transform output backend until a Delaunay/GL host conversion.
     """
     pts_for_transform = nornir_imageregistration.EnsurePointsAre2DArray(points)
+    mapped = mesh_hull_affine.map_points(transform, pts_for_transform, forward=forward_transform,
+                                         extrapolate=extrapolate)
     if forward_transform:
-        mapped = transform.Transform(pts_for_transform, extrapolate=extrapolate)
         warped_points = mapped
         fixed_points = points
     else:
-        mapped = transform.InverseTransform(pts_for_transform, extrapolate=extrapolate)
         warped_points = points
         fixed_points = mapped
 
@@ -618,13 +621,19 @@ def patch_tile_vertices_from_stencil(
         source_points: NDArray[np.floating],
         moved_indices: NDArray[np.integer],
         edit_space: Space,
+        base_targets: NDArray[np.floating] | None = None,
 ) -> tuple[NDArray[np.floating], NDArray[np.floating]] | None:
     """Patch Target XY from a cached barycentric stencil.
 
     Target-space edits blend live TargetPoints with cached weights. Source-space
     edits refresh weights from live SourcePoints when the query is still inside
     the last simplex; vertices that left the triangle are left unchanged.
+
+    With *base_targets* (the TargetPoints the vertices were last mapped with) the patch
+    is relative: each vertex moves by the change in its stencil value instead of being
+    set to it, which keeps RBF vertices off the flat triangles.
     """
+    old_weights = np.asarray(cp_weights, dtype=np.float64)
     verts = np.array(vertices, dtype=np.float32, copy=True)
     if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
         return None
@@ -668,6 +677,13 @@ def patch_tile_vertices_from_stencil(
     mapped = apply_barycentric_stencil(indices[blend_mask], weights[blend_mask], target)
     if mapped.shape[0] != int(np.count_nonzero(blend_mask)):
         return None
+    if base_targets is not None:
+        base = np.asarray(base_targets, dtype=np.float64)
+        if base.shape != target.shape:
+            return None
+        previous = apply_barycentric_stencil(indices[blend_mask], old_weights[blend_mask], base)
+        mapped = mapped - previous + np.column_stack(
+            (verts[blend_mask, 1], verts[blend_mask, 0])).astype(np.float64)
     if not np.all(np.isfinite(mapped)):
         return None
     verts[blend_mask, 0] = mapped[:, 1]
@@ -698,12 +714,15 @@ def try_patch_tile_vertices_from_stencil(
         source_points,
         moved_indices,
         edit_space,
+        base_targets=render_data.cp_targets,
     )
     if patched is None:
         return False
     new_verts, new_weights = patched
     render_data.vertex_buffer.data = new_verts
     render_data.cp_weights = new_weights
+    if render_data.cp_targets is not None:
+        render_data.cp_targets = np.array(target_points, dtype=np.float64, copy=True)
     return True
 
 
@@ -833,20 +852,37 @@ def _tile_bounding_rect(
     return nornir_imageregistration.spatial.Rectangle.CreateFromPointAndArea((y, x), texture_size)
 
 
+def _stencil_triangulation_source(
+        transform: nornir_imageregistration.ITransform) -> tuple[ITriangulatedSourceSpace | None, bool]:
+    """(Model whose source triangulation weights tile vertices, whether the stencil is relative).
+
+    Two-way RBF tiles use the forward RBF's triangulation. Their vertices lie on the RBF
+    surface rather than the triangles, so they are patched by the change in the
+    stencil (relative); an absolute patch would snap them onto the triangles.
+    """
+    if isinstance(transform, IGridTransform):
+        return None, False
+    if isinstance(transform, ITriangulatedSourceSpace):
+        return transform, False
+    forward = getattr(transform, "_forward_rbf", None)  # TwoWayRBFWithLinearCorrection
+    if isinstance(forward, ITriangulatedSourceSpace):
+        return forward, True
+    return None, False
+
+
 def _mesh_barycentric_stencil(
         vertices: NDArray[np.floating],
         transform: nornir_imageregistration.ITransform,
 ) -> tuple[NDArray[np.integer] | None, NDArray[np.floating] | None]:
-    """Control-point stencil for deformable mesh tile vertices; None for grid/quads."""
-    if isinstance(transform, IGridTransform):
-        return None, None
-    if not isinstance(transform, ITriangulatedSourceSpace):
+    """Control-point stencil for deformable mesh/RBF tile vertices; None for grid/quads."""
+    triangulated, _relative = _stencil_triangulation_source(transform)
+    if triangulated is None:
         return None, None
     verts = np.asarray(vertices)
     if verts.ndim != 2 or verts.shape[1] < 5 or verts.shape[0] == 0:
         return None, None
     try:
-        delaunay = transform.source_space_trianglulation
+        delaunay = triangulated.source_space_trianglulation
     except Exception:
         return None, None
     if delaunay is None or not hasattr(delaunay, "find_simplex"):
@@ -868,8 +904,12 @@ def _tile_mesh_cpu_entry(
 
     cp_indices = None
     cp_weights = None
+    cp_targets = None
     if not is_rigid_quad and transform is not None:
         cp_indices, cp_weights = _mesh_barycentric_stencil(vertices, transform)
+        if cp_indices is not None and _stencil_triangulation_source(transform)[1]:
+            cp_targets = nornir_imageregistration.EnsureNumpyArray(
+                transform.TargetPoints, dtype=np.float64).copy()  # type: ignore[attr-defined]
     return TileMeshCpuEntry(
         vertices=vertices,
         indices=indices,
@@ -878,6 +918,7 @@ def _tile_mesh_cpu_entry(
         is_rigid_quad=is_rigid_quad,
         cp_indices=cp_indices,
         cp_weights=cp_weights,
+        cp_targets=cp_targets,
     )
 
 
@@ -963,6 +1004,8 @@ def apply_tile_mesh_cpu(render_data: TileGLObjects, entry) -> None:
         None if entry.cp_indices is None else np.array(entry.cp_indices, copy=True))
     render_data.cp_weights = (
         None if entry.cp_weights is None else np.array(entry.cp_weights, copy=True))
+    cp_targets = getattr(entry, "cp_targets", None)
+    render_data.cp_targets = None if cp_targets is None else np.array(cp_targets, copy=True)
 
 
 def _update_tile_buffers(transform: nornir_imageregistration.ITransform,

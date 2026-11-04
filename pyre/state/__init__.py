@@ -203,7 +203,11 @@ def InitializeStateFromSettings(stos_transform_controller: TransformController,
         image_loader.create_image_viewmodel(load_result=load_result.source)
         image_loader.create_image_viewmodel(load_result=load_result.target)
         try:
-            apply_stos_transform_to_controller(stos_transform_controller, load_result.stos.Transform)  # type: ignore[arg-type]
+            apply_stos_transform_to_controller(
+                stos_transform_controller,
+                load_result.stos.Transform,  # type: ignore[arg-type]
+                settings.stos.open_mesh_transforms_as,
+            )
         except Exception as e:
             _log.error("STOS transform parse failed for %s: %s", restore_path, e)
             _clear_stale_stos_restore_settings(settings)

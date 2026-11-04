@@ -22,6 +22,8 @@ class TileMeshCpuEntry:
   is_rigid_quad: bool = False
   cp_indices: NDArray[np.integer] | None = None
   cp_weights: NDArray[np.floating] | None = None
+  # Set for relative stencils (RBF): TargetPoints the vertices were last mapped with.
+  cp_targets: NDArray[np.floating] | None = None
 
 
 class TileMeshCpuCache:

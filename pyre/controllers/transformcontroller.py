@@ -30,6 +30,7 @@ import nornir_imageregistration.interactive_edit
 import nornir_imageregistration.local_distortion_correction
 import nornir_pools as pools
 import pyre.qt_eventmanager
+from pyre import mesh_hull_affine
 from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing
 from pyre.controllers.control_point_registration_queue import (
     ControlPointBusySet,
@@ -364,7 +365,8 @@ def _compute_virtual_corner_pairs(
         target_yx = np.array([[ty, tx]], dtype=np.float64)
         try:
             source_yx = np.asarray(
-                model.InverseTransform(target_yx, extrapolate=True), dtype=np.float64).reshape(1, 2)
+                mesh_hull_affine.map_points(model, target_yx, forward=False, extrapolate=True),
+                dtype=np.float64).reshape(1, 2)
         except Exception:
             continue
         if not np.all(np.isfinite(source_yx)):
@@ -376,7 +378,8 @@ def _compute_virtual_corner_pairs(
         source_yx = np.array([[sy, sx]], dtype=np.float64)
         try:
             target_yx = np.asarray(
-                model.Transform(source_yx, extrapolate=True), dtype=np.float64).reshape(1, 2)
+                mesh_hull_affine.map_points(model, source_yx, forward=True, extrapolate=True),
+                dtype=np.float64).reshape(1, 2)
         except Exception:
             continue
         if not np.all(np.isfinite(target_yx)):
@@ -627,28 +630,27 @@ class TransformController:
         )
 
     def _clear_composite_display_cache(self) -> None:
-        """Drop cached composite display bounds (tile-cull helpers).
+        """Drop cached composite lookat/bounds so the next paint remaps through Transform().
 
-        Composite ``camera.lookat`` is target display space and does not need
-        InverseTransform rebasing when the warp remeshes.
+        If a display lookat was cached (freeze / busy registration), stash it so composite
+        panels can rebase ``camera.lookat`` before the next paint.
         """
-        self._pending_composite_display_preserve = None
+        if self._cached_composite_display_lookat is not None:
+            self._pending_composite_display_preserve = np.asarray(
+                self._cached_composite_display_lookat, dtype=np.float64).ravel()[:2].copy()
         self._cached_composite_display_lookat = None
         self._cached_composite_display_bounds = None
         self._cached_composite_lookat_src = None
         self._cached_composite_bounds_src = None
 
     def consume_pending_composite_display_preserve(self) -> NDArray[np.floating] | None:
-        """Return and clear a stashed composite display lookat, if any.
-
-        Legacy hook: display-native lookat no longer stashes a preserve value.
-        """
+        """Return and clear a stashed composite display lookat, if any."""
         pending = self._pending_composite_display_preserve
         self._pending_composite_display_preserve = None
         return pending
 
     def discard_composite_display_cache(self) -> None:
-        """Drop composite display caches.
+        """Drop composite lookat/bounds caches without rebasing to a prior display point.
 
         Used when loading a new ``.stos`` so framing from the previous transform cannot
         leak into the new session.
@@ -1023,7 +1025,7 @@ class TransformController:
             # Force off: setdefault would leave caller extrapolate=True and build RBF
             # on the UI thread while the prewarm worker also holds the CUDA context.
             kwargs['extrapolate'] = False
-        return self.TransformModel.Transform(points, **kwargs)
+        return mesh_hull_affine.map_points(self.TransformModel, points, forward=True, **kwargs)
 
     def InverseTransform(self, points: NDArray[np.floating], **kwargs):
         if self.interactive_edit_in_progress:
@@ -1032,7 +1034,7 @@ class TransformController:
             kwargs['extrapolate'] = False
         elif not self.rbf_prewarm_ready:
             kwargs['extrapolate'] = False
-        return self.TransformModel.InverseTransform(points, **kwargs)
+        return mesh_hull_affine.map_points(self.TransformModel, points, forward=False, **kwargs)
 
     def AddOnChangeEventListener(self, func: Callable):
         """Subscribe to be called when the transform changes in a way that a point may be mapped to a new position"""
@@ -1509,9 +1511,9 @@ class TransformController:
         if model is None:
             return PointPair(target=known.copy(), source=known.copy())
         if known_space == Space.Source:
-            mapped = _mapped_yx_host(model.Transform(query, extrapolate=True))
+            mapped = _mapped_yx_host(mesh_hull_affine.map_points(model, query, forward=True, extrapolate=True))
             return PointPair(target=mapped, source=known)
-        mapped = _mapped_yx_host(model.InverseTransform(query, extrapolate=True))
+        mapped = _mapped_yx_host(mesh_hull_affine.map_points(model, query, forward=False, extrapolate=True))
         return PointPair(target=known, source=mapped)
 
     def _rebuild_id_to_index(self) -> None:
@@ -2656,10 +2658,13 @@ class TransformController:
         """Set transform points to the passed array"""
         if isinstance(points, nornir_imageregistration.IControlPoints):
             points = points.points
-        elif isinstance(points, np.ndarray):
-            pass
-        else:
+        elif not isinstance(points, np.ndarray) and cp.get_array_module(points) is np:
             raise ValueError(f"points parameter has unexpected type: {points.__class__}")
+
+        # copy_points snapshots of GPU models are CuPy; the model may since have
+        # been replaced by a host transform (convert type, undo across a replace).
+        if not _is_gpu_component_transform(self.TransformModel):
+            points = nornir_imageregistration.EnsureNumpyArray(points)
 
         if isinstance(self.TransformModel, IControlPoints):
             self.TransformModel.points = points  # type: ignore[assignment]

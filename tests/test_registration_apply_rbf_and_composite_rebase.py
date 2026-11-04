@@ -6,8 +6,10 @@
   never cleared.
 * Any exception while applying a result must still pump the queue, or the idle
   handler that hides the progress strip never runs.
-* Composite ``camera.lookat`` is target display space, so remesh/registration must
-  not InverseTransform-rebase the camera (that used to creep the view on Space).
+* After each applied result the composite panel rebases ``camera.lookat`` (source
+  space) so ``Transform(lookat)`` keeps the on-screen center. ``InverseTransform``
+  is not an exact inverse of ``Transform`` (mesh: 15 px, RBF: 5 px), so each rebase
+  moved the view and a held Space crept it tens of pixels.
 """
 
 from __future__ import annotations
@@ -27,8 +29,10 @@ from pyre.controllers.transformcontroller import TransformController
 from pyre.observable import ObservableSet
 from pyre.registration_job import get_registration_job_runner
 from pyre.views.composite_display import (
+    _ui_transform_point,
     display_lookat_for_composite,
     lookat_from_display_position,
+    rebase_composite_camera_to_display,
 )
 
 
@@ -105,8 +109,10 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
         camera = SimpleNamespace(lookat=np.array([380.0, 330.0]), visible_world_size=None)
 
         def on_change(changed: TransformController, *_args: object, **_kwargs: object) -> None:
-            # Panel drops legacy pending preserve; lookat stays display-native.
-            changed.consume_pending_composite_display_preserve()
+            # What ImageTransformViewPanel._on_transform_controller_changed does for Composite.
+            pending = changed.consume_pending_composite_display_preserve()
+            if pending is not None:
+                rebase_composite_camera_to_display(camera, changed, pending)
 
         controller.AddOnChangeEventListener(on_change)
         start = display_lookat_for_composite(camera, controller).copy()
@@ -123,14 +129,24 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
         np.testing.assert_allclose(self._run(_rbf()), [0.0, 0.0], atol=1e-6)
 
 
-class TestDisplayLookatIdentity(unittest.TestCase):
-    """``lookat_from_display_position`` is identity for display-native cameras."""
+class TestDisplaySolve(unittest.TestCase):
+    """``lookat_from_display_position`` lands Transform(lookat) on the display point."""
 
-    def test_returns_display_point(self) -> None:
-        controller = _controller(_mesh())
-        display = np.array([123.0, 456.0], dtype=np.float64)
-        lookat = lookat_from_display_position(controller, display)
-        np.testing.assert_allclose(lookat, display)
+    def _worst_miss(self, model: ITransform) -> float:
+        controller = _controller(model)
+        rng = np.random.default_rng(7)
+        worst = 0.0
+        for display in rng.uniform(50.0, 650.0, (100, 2)):
+            lookat = lookat_from_display_position(controller, display)
+            shown = _ui_transform_point(controller, True, lookat)
+            worst = max(worst, float(np.max(np.abs(shown - display))))
+        return worst
+
+    def test_mesh_solve_is_subpixel(self) -> None:
+        self.assertLess(self._worst_miss(_mesh()), 0.1)
+
+    def test_rbf_solve_is_exact(self) -> None:
+        self.assertLess(self._worst_miss(_rbf()), 0.05)
 
 
 if __name__ == "__main__":

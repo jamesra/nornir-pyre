@@ -54,6 +54,7 @@ from pyre.ui.window_geometry import (
 )
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
+from pyre.stos_registration import load_stos_transform
 from pyre.observable import ObservableSet
 
 logger = logging.getLogger(__name__)
@@ -1435,7 +1436,10 @@ class StosWindow(PyreWindowBase):
         settings.stos.stos_opened_from_browser_folder = browser_folder
         settings.stos.stos_browser_flat_manual = browser_flat_manual
         settings.stos.stos_browser_basename = browser_basename
-        transform = nornir_imageregistration.transforms.LoadTransform(load_result.stos.Transform)  # type: ignore[arg-type]
+        transform = load_stos_transform(
+            load_result.stos.Transform,  # type: ignore[arg-type]
+            settings.stos.open_mesh_transforms_as,
+        )
         stos_transform_controller.TransformModel = transform
         # Do not rebase composite to framing from the previous file/transform.
         stos_transform_controller.discard_composite_display_cache()

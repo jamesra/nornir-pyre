@@ -9,6 +9,7 @@ from matplotlib.ticker import MaxNLocator
 from PyQt6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from nornir_shared.histogram import Histogram
+from pyre.ui.widgets.histogram_y_range import display_y_max, label_clipped_bins
 
 
 class ImageHistogramWidget(QWidget):
@@ -88,9 +89,8 @@ class ImageHistogramWidget(QWidget):
             widths = [float(hist.BinWidth)] * hist.NumBins
             self._axes.bar(bin_edges, hist.Bins, width=widths, align='edge',
                            color='#5b8def', edgecolor='none')
-            y_max = max((float(count) for count in hist.Bins), default=1.0)
-            if y_max <= 0:
-                y_max = 1.0
+            y_max = display_y_max(hist.Bins)
+            label_clipped_bins(self._axes, hist, y_max)
             self._axes.set_xlim(float(hist.MinValue), float(hist.MaxValue))
             self._axes.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
             self._axes.ticklabel_format(axis='y', style='plain', useOffset=False)

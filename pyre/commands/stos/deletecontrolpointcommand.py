@@ -11,6 +11,7 @@ from pyre import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import NavigationCommandBase, InstantCommandBase
 from pyre.commands.commandexceptions import RequiresSelectionError
+from pyre.commands.stos.actionmaphelpers import points_to_delete
 from pyre.commands.transform_undo import save_points_undo
 from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager, ICommandHistory
 from pyre.interfaces.controlpointselection import SetSelectionCallable
@@ -47,7 +48,9 @@ class DeleteControlPointCommand(InstantCommandBase):
         """
         super().__init__(completed_func=completed_func)
         self._selected_points = selected_points
-        self._selected_points.update(command_points)
+        deleted = points_to_delete(selected_points, command_points)
+        self._selected_points.clear()
+        self._selected_points.update(deleted)
         self._transform_controller = transform_controller
         self._history_manager = history_manager
         if len(selected_points) == 0:

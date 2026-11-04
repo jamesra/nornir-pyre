@@ -105,6 +105,26 @@ class TestGridRefinePreviewFlags(unittest.TestCase):
         self.assertEqual(512, settings.stos.point_registration.alignment_area)
         self.assertAlmostEqual(4.0, settings.stos.point_registration.angle_search_range.max_angle)
 
+    def test_open_mesh_transforms_as_round_trips(self) -> None:
+        settings = AppSettings()
+        dlg = TransformsSettingsDialog(settings)
+        self.assertEqual("mesh", dlg._open_mesh_as.currentData())
+        dlg._open_mesh_as.setCurrentIndex(dlg._open_mesh_as.findData("rbf"))
+        dlg.apply_to_settings()
+        self.assertEqual("rbf", settings.stos.open_mesh_transforms_as)
+        reopened = TransformsSettingsDialog(settings)
+        self.assertEqual("rbf", reopened._open_mesh_as.currentData())
+
+    def test_composite_drag_space_round_trips(self) -> None:
+        settings = AppSettings()
+        dlg = TransformsSettingsDialog(settings)
+        self.assertEqual("target", dlg._composite_drag_space.currentData())
+        dlg._composite_drag_space.setCurrentIndex(dlg._composite_drag_space.findData("source"))
+        dlg.apply_to_settings()
+        self.assertEqual("source", settings.stos.composite_point_drag_space)
+        reopened = TransformsSettingsDialog(settings)
+        self.assertEqual("source", reopened._composite_drag_space.currentData())
+
     def test_edit_settings_applies_only_when_accepted(self) -> None:
         settings = AppSettings()
         settings.stos.brute_registration.try_flipped = True

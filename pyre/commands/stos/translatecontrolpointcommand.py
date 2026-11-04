@@ -21,6 +21,7 @@ from pyre.container import IContainer
 from pyre.selection_event_data import PointPair
 from pyre import common as pyre_common
 from pyre.commands.transform_undo import save_points_undo
+from pyre.settings import AppSettings
 from pyre.views.gltiles import is_rigid_transform
 
 
@@ -32,6 +33,8 @@ class TranslateControlPointCommand(NavigationCommandBase):
     _space: Space
     _translate_origin: NDArray[np.floating] | None
     _original_points: NDArray[np.floating]
+    _composite_drag_space: str = "target"
+    _target_to_source_jacobian: NDArray[np.floating] | None = None
 
     _mouse_position_history: IMousePositionHistoryManager = Provide[IContainer.mouse_position_history]
     _window_manager: IWindowManager = Provide[IContainer.window_manager]
@@ -48,6 +51,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
                  translate_all: bool = False,  # True if all points in the transform should be translated
                  completed_func: StatusChangeCallback | None = None,
                  transform_controller: pyre.viewmodels.TransformController = Provide[IContainer.transform_controller],  # type: ignore[attr-defined]
+                 settings: AppSettings = Provide[IContainer.settings],
                  **kwargs):
         """
 
@@ -79,6 +83,9 @@ class TranslateControlPointCommand(NavigationCommandBase):
             raise RequiresSelectionError()
 
         self._original_points = transform_controller.copy_points()
+        stos_settings = getattr(settings, "stos", None)
+        self._composite_drag_space = getattr(stos_settings, "composite_point_drag_space", "target")
+        self._target_to_source_jacobian = None
 
     def __str__(self):
         return "TranslateControlPointCommand"
@@ -101,14 +108,55 @@ class TranslateControlPointCommand(NavigationCommandBase):
         edit TargetPoints, so composite drags must update Target even though the
         panel command space is Source.
         """
+        if self._is_composite_point_drag():
+            return Space.Source if self._composite_drag_moves_source() else Space.Target
+        return self.space
+
+    def _is_composite_point_drag(self) -> bool:
         model = self._transform_controller.TransformModel
-        if (
+        return (
                 self._view_type() == ViewType.Composite
                 and model is not None
                 and not is_rigid_transform(model)
-        ):
-            return Space.Target
-        return self.space
+        )
+
+    def _composite_drag_moves_source(self) -> bool:
+        """True when the "Composite drag moves" setting is Source and the model can edit source points."""
+        return (
+                self._composite_drag_space == "source"
+                and self._is_composite_point_drag()
+                and isinstance(self._transform_controller.TransformModel,
+                               nornir_imageregistration.transforms.ISourceSpaceControlPointEdit)
+        )
+
+    def _snapshot_target_to_source_jacobian(self) -> None:
+        """Local target -> source linear map at the dragged points, from the transform before the drag.
+
+        Re-mapping the cursor through the transform on every motion would feed the edit
+        back into the mapping (moving a source point changes InverseTransform there).
+        """
+        self._target_to_source_jacobian = np.eye(2)
+        targets = nornir_imageregistration.EnsureNumpyArray(
+            self._transform_controller.GetPoints(np.array(sorted(self._command_points)), Space.Target))
+        center = np.asarray(targets, dtype=np.float64).reshape(-1, 2).mean(axis=0)
+        probes = np.vstack((center, center + (1.0, 0.0), center + (0.0, 1.0)))
+        mapped = np.asarray(nornir_imageregistration.EnsureNumpyArray(
+            self._transform_controller.InverseTransform(probes, extrapolate=True)), dtype=np.float64)
+        jacobian = (mapped[1:] - mapped[0]).T
+        if np.all(np.isfinite(jacobian)) and abs(np.linalg.det(jacobian)) > 1e-9:
+            self._target_to_source_jacobian = jacobian
+
+    def _edit_delta(self, display_delta_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+        """MovePoint delta (Y, X) for a cursor move in the drag's display space.
+
+        Source mode keeps the point fixed on screen and slides the warped image with the
+        cursor: the source point moves opposite to the cursor, mapped into source space.
+        """
+        if not self._composite_drag_moves_source():
+            return display_delta_yx
+        if self._target_to_source_jacobian is None:
+            self._snapshot_target_to_source_jacobian()
+        return -(self._target_to_source_jacobian @ np.asarray(display_delta_yx, dtype=np.float64))
 
     def on_mouse_press(self, event: QMouseEvent):
         """Called when the mouse is pressed"""
@@ -141,7 +189,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
             self._translate_origin = world_point
             return
 
-        delta = world_point - self._translate_origin
+        delta = self._edit_delta(world_point - self._translate_origin)
         self._translate_origin = world_point
 
         new_selected_indicies = self._transform_controller.MovePoint(
@@ -177,7 +225,7 @@ class TranslateControlPointCommand(NavigationCommandBase):
         if nudge_yx is None or self.HighlightedPointIndex is None:  # type: ignore[attr-defined]
             return
 
-        dy, dx = nudge_yx
+        dy, dx = self._edit_delta(np.asarray(nudge_yx, dtype=np.float64))
         self._transform_controller.MovePoint(
             list(self._command_points),
             dx,
@@ -187,6 +235,8 @@ class TranslateControlPointCommand(NavigationCommandBase):
 
     def activate(self):
         super().activate()
+        if self._composite_drag_moves_source():
+            self._snapshot_target_to_source_jacobian()
         # Use the MovePoint space (Target on composite mesh/grid), not the panel command space.
         self._transform_controller.begin_interactive_edit(
             self._edit_space_for_translate(),

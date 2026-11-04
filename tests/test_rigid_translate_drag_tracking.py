@@ -1,9 +1,10 @@
 """Tests that a rigid translate drag tracks the mouse 1:1 in every STOS panel.
 
-Composite ``camera.lookat`` is target display space, so the target-space point under
-a fixed cursor does not move when ``TranslateWarped`` updates the registration.
-Re-deriving the drag origin after each step is therefore a no-op on Composite (as
-on the standalone panels) but remains safe. These tests pin the 1:1 invariant.
+`ManipulateRigidTransformCommand.on_mouse_motion` re-derives the drag origin after
+`Translate` has mutated the shared model. That looks redundant, but on the composite panel
+the drag quantity lives in target-display space, which the mutation just moved under a
+stationary cursor. Reusing the pre-mutation point there double-counts every step. These
+tests pin the 1:1 invariant so the re-derivation is not "optimised" away.
 """
 
 from __future__ import annotations
@@ -141,7 +142,7 @@ class TestTheDragTracksOneToOne(unittest.TestCase):
 
 
 class TestTheOriginMustBeRederived(unittest.TestCase):
-    """Display-native composite lookat makes re-derive a no-op (still safe)."""
+    """Why the second get_world_positions call cannot be removed."""
 
     def test_the_standalone_origin_is_transform_independent(self) -> None:
         """On the standalone panels re-deriving is provably a no-op."""
@@ -158,8 +159,8 @@ class TestTheOriginMustBeRederived(unittest.TestCase):
                         harness.get_world_positions((400.0, 600.0)))
                     np.testing.assert_allclose(before, after, atol=1e-6)
 
-    def test_the_composite_origin_is_transform_independent(self) -> None:
-        """Target-display mouse coords stay put when TranslateWarped moves the source."""
+    def test_the_composite_origin_moves_with_the_transform(self) -> None:
+        """On composite the same screen point maps elsewhere once the layer moves."""
         offset = np.array([37.0, -19.0])
         harness = _Harness(_controller(), Space.Source, ViewType.Composite)
         before = harness._world_point_for_translate(
@@ -167,15 +168,20 @@ class TestTheOriginMustBeRederived(unittest.TestCase):
         harness._transform_controller.Translate(offset, space=Space.Source)
         after = harness._world_point_for_translate(
             harness.get_world_positions((400.0, 600.0)))
-        np.testing.assert_allclose(before, after, atol=1e-6)
+        self.assertFalse(np.allclose(before, after))
+        np.testing.assert_allclose(np.abs(offset), np.abs(after - before), atol=1e-6)
 
-    def test_reusing_the_stale_origin_is_harmless_on_composite(self) -> None:
-        """With display-native lookat, skipping re-derive no longer double-counts."""
+    def test_reusing_the_stale_origin_overshoots_on_composite(self) -> None:
+        """Guards the removal this test file exists to prevent."""
         expected = _screen_delta(_PATH)
         stale = _drag(Space.Source, ViewType.Composite, 0.0, 1.0, rederive=False)
-        np.testing.assert_allclose(expected, stale, atol=1e-6)
+        self.assertFalse(np.allclose(expected, stale),
+                         'dropping the re-derivation must visibly break composite drag')
+        self.assertGreater(np.max(np.abs(stale)), np.max(np.abs(expected)),
+                           'the stale origin double-counts, so the layer overshoots')
 
     def test_reusing_the_stale_origin_is_harmless_on_the_source_panel(self) -> None:
+        """Which is why this looks like dead code until composite is considered."""
         np.testing.assert_allclose(
             _drag(Space.Source, ViewType.Source, 0.0, 1.0, rederive=True),
             _drag(Space.Source, ViewType.Source, 0.0, 1.0, rederive=False), atol=1e-6)

@@ -13,6 +13,7 @@ from nornir_imageregistration.stos_quality import (
     DEFAULT_HIST_MIN,
     build_quality_histogram,
 )
+from pyre.ui.widgets.histogram_y_range import display_y_max, label_clipped_bins
 
 
 class StosQualityHistogramWidget(QWidget):
@@ -62,7 +63,8 @@ class StosQualityHistogramWidget(QWidget):
         widths = [float(hist.BinWidth)] * hist.NumBins if hist.NumBins else []
         if hist.NumBins and hist.NumSamples > 0:
             axes.bar(bin_edges, hist.Bins, width=widths, align='edge', color='#5b8def', edgecolor='none')
-            y_max = max(hist.Bins) if hist.Bins else 1
+            y_max = display_y_max(hist.Bins)
+            label_clipped_bins(axes, hist, y_max * 1.15)
         else:
             y_max = 1
             axes.text(0.5, 0.5, 'No scores yet', transform=axes.transAxes,

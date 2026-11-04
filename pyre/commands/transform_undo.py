@@ -8,7 +8,7 @@ from typing import Any, Callable
 import numpy as np
 from numpy.typing import NDArray
 
-from nornir_imageregistration import IRigidTransform
+from nornir_imageregistration import IRigidTransform, cp
 from pyre.interfaces.managers.command_history import ICommandHistory
 
 
@@ -17,10 +17,11 @@ def save_points_undo(
         set_points: Callable[[NDArray[np.floating]], Any],
         points_before: NDArray[np.floating],
 ) -> None:
-    """Record a SetPoints restore for *points_before* (copied)."""
+    """Record a SetPoints restore for *points_before* (copied, on its own NumPy/CuPy backend)."""
+    xp = cp.get_array_module(points_before)
     history.SaveState(
         set_points,
-        np.asarray(points_before, dtype=np.float64).copy(),
+        xp.asarray(points_before, dtype=xp.float64).copy(),
     )
 
 

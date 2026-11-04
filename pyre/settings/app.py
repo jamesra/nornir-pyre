@@ -104,6 +104,12 @@ class StosSettings(BaseModel):
     stos_browser_flat_manual: bool = False
     stos_file_source: str = "auto"
     stos_browser_basename: str | None = None
+    # "mesh" or "rbf". .stos files store RBF transforms as MeshTransform, so the
+    # editing type of a loaded mesh cannot be recovered from the file itself.
+    open_mesh_transforms_as: str = "mesh"
+    # "target" or "source": which point a composite-view drag edits on mesh/RBF transforms.
+    # Grid transforms only edit target points, so they always use "target".
+    composite_point_drag_space: str = "target"
 
     @property
     def stos_fullpath(self) -> str | None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from PyQt6.QtCore import Qt
 
@@ -82,13 +82,27 @@ def resolve_delete_key_action(
     return ControlPointActionResult(ControlPointAction.DELETE, set(event.existing_selections))
 
 
+def points_to_delete(selected: Iterable[int], clicked: Iterable[int]) -> set[int]:
+    """Rows a delete removes: the selection when the click is on a selected point (or there is
+    no click, e.g. the Delete key), otherwise only the clicked points.
+
+    A new point is left selected, so merging the selection into every delete removed it
+    along with the point the user clicked.
+    """
+    selected = set(selected)
+    clicked = set(clicked)
+    if not clicked or clicked & selected:
+        return selected | clicked
+    return clicked
+
+
 def mesh_can_delete(
         point_count: int,
         event: SelectionEventData,
         interactions: set[int]) -> bool:
-    """True when deleting ``interactions`` would leave at least three control points."""
-    unique_selections = (event.existing_selections or set()) | interactions
-    return point_count - len(unique_selections) >= 3
+    """True when the delete would leave at least three control points."""
+    deleted = points_to_delete(event.existing_selections or (), interactions)
+    return point_count - len(deleted) >= 3
 
 
 def mesh_get_possible_actions(
