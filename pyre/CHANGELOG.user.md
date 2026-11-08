@@ -13,7 +13,9 @@ Notes for whoever updates this file. Comments like this one are not shown in Pyr
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Pyre shows new sections once after each upgrade (**Help → What's New** shows them anytime).
 
-## 1.8.11 — not yet released
+## 1.8.12 — not yet released
+
+## 1.8.11 — 2026-11-08
 
 ## 1.8.10 — 2026-11-08
 
