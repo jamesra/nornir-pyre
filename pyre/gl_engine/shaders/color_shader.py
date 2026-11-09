@@ -29,10 +29,9 @@ _color_fragment_shader_program = """
     #version 330  
     uniform vec4 color;
     layout(location = 0) out vec4 outputColor;
-    out float gl_FragDepth;
     void main() {
         outputColor = color;
-        gl_FragDepth = 0;
+        gl_FragDepth = 0.0;
     }
 """
 
