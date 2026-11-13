@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import cast
 
-import numpy as np
-from numpy.typing import NDArray
-
-from dependency_injector.wiring import Provide, inject
-
 import nornir_imageregistration
+import numpy as np
+from dependency_injector.wiring import Provide, inject
 from nornir_imageregistration.image_stats import (
     ApproximateHistogramOfArray,
     even_histogram_stride,
 )
 from nornir_shared.histogram import Histogram
+from numpy.typing import NDArray
+from PIL import Image
+
 from pyre.container import IContainer
 from pyre.settings.app import AppSettings, ImageDisplayContrast
 from pyre.space import Space
@@ -26,6 +27,13 @@ GAMMA_MAX: float = 10.0
 _MIN_SPAN: float = 1e-3
 # Float mosaics from ImagePermutationHelper are ~[0, 1]; contrast UI/shader use 0–255.
 _UNIT_INTERVAL_MAX: float = 1.5
+# Fraction of samples clipped at each end by Auto contrast (Contrast Adjustment "Auto" button).
+AUTO_MIN_PERCENTILE: float = 0.005
+AUTO_MAX_PERCENTILE: float = 0.005
+# PNG text chunk the Nornir importer writes into noise-crushed (Quantized) tiles and images.
+_CRUSH_PNG_CHUNK: str = "nornir_crush"
+
+logger = logging.getLogger(__name__)
 
 # Re-export for contrast UI callers.
 histogram_sample_stride = even_histogram_stride
@@ -78,6 +86,34 @@ def approximate_image_histogram(
         )
     except ValueError:
         return None
+
+
+def auto_contrast(image: NDArray, gamma: float = 1.0) -> ImageDisplayContrast | None:
+    """Min/max from *image*'s histogram percentiles (the Contrast Adjustment "Auto" levels).
+
+    None when the image has no samples to measure.
+    """
+    hist = approximate_image_histogram(image)
+    if hist is None or hist.NumSamples <= 0:
+        return None
+    lo, hi = hist.AutoLevel(AUTO_MIN_PERCENTILE, AUTO_MAX_PERCENTILE)
+    return normalize_contrast(ImageDisplayContrast(min=float(lo), max=float(hi), gamma=float(gamma)))
+
+
+def image_file_is_crushed(path: str | None) -> bool:
+    """True when *path* is a noise-crushed (Quantized) PNG, which carries a ``nornir_crush`` chunk.
+
+    Crushed images hold noise-step codes in the low part of the 8-bit range, so they look nearly black
+    without a contrast stretch. Only the PNG header is read.
+    """
+    if not path or not path.lower().endswith(".png"):
+        return False
+    try:
+        with Image.open(path) as im:
+            return _CRUSH_PNG_CHUNK in im.info
+    except OSError:
+        logger.debug("Could not read PNG header of %s", path, exc_info=True)
+        return False
 
 
 def is_identity_contrast(contrast: ImageDisplayContrast) -> bool:

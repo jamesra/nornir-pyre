@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock
 
 import numpy as np
-
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 from pyre.image_contrast import (
     ContrastedImagePermutationHelper,
     apply_contrast_array,
+    auto_contrast,
     contrasted_permutation_helper,
+    image_file_is_crushed,
     is_identity_contrast,
     normalize_contrast,
     reset_contrast_for_space,
@@ -139,6 +145,61 @@ class TestContrastedPermutationHelper(unittest.TestCase):
         contrasted = wrapped.ImageWithMaskAsNoise  # type: ignore[union-attr]
         self.assertIsNot(contrasted, raw)
         self.assertAlmostEqual(float(contrasted[0, 0]), 127.5, places=1)
+
+
+class TestCrushedImageAutoContrast(unittest.TestCase):
+    """Quantized (noise-crushed) images load with Auto contrast; other images keep their contrast."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.mkdtemp(prefix='pyre_crush_contrast_')
+        rng = np.random.default_rng(0)
+        # Crushed codes as in RC1_Crush Quantized ds32 images: 0-60, median ~29.
+        self.codes = np.clip(rng.normal(29, 4, (64, 64)), 0, 60).astype(np.uint8)
+        self.crushed_path = os.path.join(self._dir, 'crushed.png')
+        info = PngInfo()
+        info.add_text('nornir_crush', '{"bits": 8, "step": 412, "version": 1}')
+        Image.fromarray(self.codes).save(self.crushed_path, pnginfo=info)
+        self.plain_path = os.path.join(self._dir, 'plain.png')
+        Image.fromarray(self.codes).save(self.plain_path)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def test_detects_crush_chunk(self) -> None:
+        self.assertTrue(image_file_is_crushed(self.crushed_path))
+        self.assertFalse(image_file_is_crushed(self.plain_path))
+        self.assertFalse(image_file_is_crushed(os.path.join(self._dir, 'missing.png')))
+        self.assertFalse(image_file_is_crushed(None))
+
+    def test_auto_contrast_spans_the_codes(self) -> None:
+        contrast = auto_contrast(self.codes, gamma=1.5)
+        assert contrast is not None
+        self.assertGreaterEqual(contrast.min, float(self.codes.min()))
+        self.assertLessEqual(contrast.max, float(self.codes.max()) + 1)
+        self.assertLess(contrast.max - contrast.min, 60.0)
+        self.assertEqual(contrast.gamma, 1.5)
+
+    def test_load_sets_auto_contrast_only_for_crushed_images(self) -> None:
+        from pyre.ui.windows.stoswindow import StosWindow
+
+        def result(path: str) -> MagicMock:
+            r = MagicMock()
+            r.image_fullpath = path
+            r.permutations.Image = self.codes
+            return r
+
+        settings = AppSettings()
+        kept = ImageDisplayContrast(min=10.0, max=200.0, gamma=1.0)
+        set_contrast_for_space(Space.Target, kept, settings)
+        load_result = MagicMock()
+        load_result.source = result(self.crushed_path)
+        load_result.target = result(self.plain_path)
+
+        StosWindow.auto_contrast_crushed_images(load_result, settings)
+
+        self.assertEqual(settings.ui.source_contrast, auto_contrast(self.codes))
+        self.assertFalse(is_identity_contrast(settings.ui.source_contrast))
+        self.assertEqual(settings.ui.target_contrast, kept)
 
 
 if __name__ == '__main__':

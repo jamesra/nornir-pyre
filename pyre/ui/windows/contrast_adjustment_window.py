@@ -25,6 +25,7 @@ from pyre.image_contrast import (
     LEVEL_MAX,
     LEVEL_MIN,
     approximate_image_histogram,
+    auto_contrast,
     contrast_for_space,
     normalize_contrast,
     reset_contrast_for_space,
@@ -39,8 +40,6 @@ from pyre.ui.widgets.linked_slider_spin import LinkedSliderSpin
 
 logger = logging.getLogger(__name__)
 
-_AUTO_MIN_PERCENTILE: float = 0.005
-_AUTO_MAX_PERCENTILE: float = 0.005
 _VIEW_REFRESH_MS: int = 16
 
 
@@ -168,16 +167,18 @@ class _ContrastLayerPanel(QWidget):
 
     def _on_auto(self) -> None:
         """Set min/max from histogram percentiles; leave gamma unchanged."""
-        hist = self._histogram_for_layer()
-        if hist is None or hist.NumSamples <= 0:
+        try:
+            helper = self._image_manager[self._view_key()]
+        except KeyError:
             return
-        lo, hi = hist.AutoLevel(_AUTO_MIN_PERCENTILE, _AUTO_MAX_PERCENTILE)
-        gamma = self._gamma_control.value()
-        set_contrast_for_space(
-            self._space,
-            ImageDisplayContrast(min=float(lo), max=float(hi), gamma=float(gamma)),
-            self._settings,
-        )
+        try:
+            contrast = auto_contrast(helper.Image, gamma=float(self._gamma_control.value()))
+        except Exception:
+            logger.exception("Failed to build contrast histogram")
+            return
+        if contrast is None:
+            return
+        set_contrast_for_space(self._space, contrast, self._settings)
         self._load_controls_from_settings()
         self.contrastWritten.emit(self._space)
 

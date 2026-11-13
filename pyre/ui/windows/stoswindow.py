@@ -28,6 +28,12 @@ from pyre.common import (
     save_stos_object,
     stos_image_dims_from_stos_config,
 )
+from pyre.image_contrast import (
+    auto_contrast,
+    contrast_for_space,
+    image_file_is_crushed,
+    set_contrast_for_space,
+)
 from pyre.qt_eventmanager import qt_post_to_main
 from pyre.registration_job import get_registration_job_runner
 from pyre.settings import AppSettings, StosSettings, ImageAndMaskPath
@@ -1448,6 +1454,7 @@ class StosWindow(PyreWindowBase):
                                                       mask_fullpath=load_result.source.mask_fullpath)
         settings.stos.target_image = ImageAndMaskPath(image_fullpath=load_result.target.image_fullpath,
                                                       mask_fullpath=load_result.target.mask_fullpath)
+        StosWindow.auto_contrast_crushed_images(load_result, settings)
         stos_config = pyre.state.get_current_stos_config()
         if stos_config is not None:
             from pyre.stos_registration import (
@@ -1476,6 +1483,21 @@ class StosWindow(PyreWindowBase):
         StosWindow.update_window_titles(settings, window_manager)
         reset_stos_window_cameras(window_manager)
         return load_result
+
+    @staticmethod
+    def auto_contrast_crushed_images(load_result: LoadStosResult, settings: AppSettings) -> None:
+        """Set Auto contrast for each loaded image that is noise-crushed (Quantized).
+
+        Crushed images hold codes in the low part of the 8-bit range and look nearly black at the
+        identity contrast. Other images keep the contrast already in the settings.
+        """
+        for space, image_result in ((Space.Source, load_result.source), (Space.Target, load_result.target)):
+            if image_result is None or not image_file_is_crushed(image_result.image_fullpath):
+                continue
+            current = contrast_for_space(space, settings=settings)
+            contrast = auto_contrast(image_result.permutations.Image, gamma=float(current.gamma))
+            if contrast is not None:
+                set_contrast_for_space(space, contrast, settings)
 
     @staticmethod
     @inject

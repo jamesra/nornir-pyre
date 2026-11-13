@@ -15,6 +15,9 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.13 — not yet released
 
+- **Quantized images open with Auto contrast.** Images from Nornir's crushed (Quantized) filter store small codes, so they used to look almost black. When a STOS file opens a Quantized image, Pyre now sets that image's contrast the way the **Auto** button in the Contrast Adjustment window does, keeping your gamma. Other images keep the contrast you set.
+<!-- Detection: the PNG's nornir_crush text chunk (pyre.image_contrast.image_file_is_crushed). Applied in StosWindow.apply_stos_load_result, so browser loads and File > Open both get it. Registration uses the same contrast, as with manual Auto. Guard: tests/test_image_contrast.py TestCrushedImageAutoContrast. -->
+
 ## 1.8.12 — 2026-11-09
 
 - **Fix: Pyre would not start on Windows ARM64 (Snapdragon) and other strict OpenGL drivers.** Pyre stopped while opening its first window with "Buffers not initialized" because one of its drawing shaders was rejected with "gl_FragDepth redeclared". The shader now follows the OpenGL standard, so Pyre opens on these devices, including Snapdragon Surface laptops.
