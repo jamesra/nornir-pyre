@@ -378,3 +378,62 @@ def scan_stos_browser_rows(folder: str, mode: BrowseMode = BrowseMode.stos_group
 
     rows.sort(key=lambda row: row.sort_key)
     return rows
+
+
+VOLUME_DATA_FILENAME = "VolumeData.xml"
+
+
+@dataclass(frozen=True)
+class StosVolumeMismatch:
+    """Images of a STOS being saved that live in a different volume than its destination."""
+
+    destination_volume_root: str
+    # (image path, that image's volume root) for each image outside the destination volume.
+    mismatched_images: tuple[tuple[str, str], ...]
+
+
+def _normalized_path(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def find_volume_root(file_path: str) -> str | None:
+    """Return the nearest ancestor directory of *file_path* holding ``VolumeData.xml``.
+
+    The search starts at the directory containing *file_path* (which need not exist yet,
+    e.g. a save destination) and walks up to the filesystem root. Returns the normalized
+    directory path, or None when no ancestor is a Nornir volume.
+    """
+    if not file_path:
+        return None
+    directory = os.path.dirname(_normalized_path(file_path))
+    while True:
+        if os.path.isfile(os.path.join(directory, VOLUME_DATA_FILENAME)):
+            return directory
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return None
+        directory = parent
+
+
+def stos_volume_mismatch(
+        destination_path: str,
+        image_paths: list[str | None],
+) -> StosVolumeMismatch | None:
+    """Report images in *image_paths* whose volume differs from *destination_path*'s volume.
+
+    Returns None when everything matches, when the destination is not inside a volume, or
+    when an image is not inside a volume (those images are not compared).
+    """
+    destination_root = find_volume_root(destination_path)
+    if destination_root is None:
+        return None
+    mismatched: list[tuple[str, str]] = []
+    for image_path in image_paths:
+        if not image_path:
+            continue
+        image_root = find_volume_root(image_path)
+        if image_root is not None and image_root != destination_root:
+            mismatched.append((image_path, image_root))
+    if not mismatched:
+        return None
+    return StosVolumeMismatch(destination_root, tuple(mismatched))

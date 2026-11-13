@@ -1,7 +1,7 @@
 import os
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Protocol
+from typing import Protocol, cast
 
 import numpy as np
 
@@ -60,6 +60,7 @@ from pyre.ui.window_geometry import (
 )
 from pyre.ui.windows.pyrewindows import PyreWindowBase
 from pyre.stos_container import StosContainer
+from pyre.stos_manual_paths import stos_volume_mismatch
 from pyre.stos_registration import load_stos_transform
 from pyre.observable import ObservableSet
 
@@ -139,6 +140,9 @@ class StosWindow(PyreWindowBase):
     _stos_save_in_progress: bool = False
     _stos_save_initiator: 'StosWindow | None' = None
     _save_stos_menu_actions: list[QAction] = []
+    # Status text while the Stos Directory loads a pair in the background; None when idle.
+    # Save STOS stays disabled meanwhile: the panels and paths still belong to the old pair.
+    _browser_load_message: str | None = None
     _warped_save_in_progress: bool = False
     _warped_save_initiator: 'StosWindow | None' = None
     _save_warped_menu_actions: list[QAction] = []
@@ -1644,14 +1648,99 @@ class StosWindow(PyreWindowBase):
                             status_bar.clearMessage()
             cls._clear_warped_save_status()
 
+    @classmethod
+    def browser_load_in_progress(cls) -> bool:
+        """True while a Stos Directory load is queued or running and not yet applied."""
+        return cls._browser_load_message is not None
+
+    @classmethod
+    def _sync_save_stos_actions_enabled(cls) -> None:
+        enabled = not cls._stos_save_in_progress and cls._browser_load_message is None
+        for action in cls._save_stos_menu_actions:
+            action.setEnabled(enabled)
+
+    @staticmethod
+    def _stos_status_bars(window_manager: IWindowManager) -> list:
+        """Status bars of the open Source/Target/Composite windows.
+
+        Empty when the container is not wired (unit tests that drive the browser alone).
+        """
+        if isinstance(window_manager, cast(type, Provide)):  # unresolved marker
+            return []
+        return [window_manager[view_type].statusBar()
+                for view_type in (ViewType.Source, ViewType.Target, ViewType.Composite)
+                if view_type in window_manager]
+
+    @classmethod
+    @inject
+    def begin_browser_load(
+            cls,
+            stos_basename: str,
+            window_manager: IWindowManager = Provide[IContainer.window_manager]) -> None:
+        """Show "Loading <name>…" on the STOS windows and disable Save STOS until the load ends."""
+        message = f"Loading {stos_basename}…"
+        cls._browser_load_message = message
+        cls._sync_save_stos_actions_enabled()
+        for status_bar in cls._stos_status_bars(window_manager):
+            status_bar.showMessage(message)
+
+    @classmethod
+    @inject
+    def end_browser_load(
+            cls,
+            window_manager: IWindowManager = Provide[IContainer.window_manager]) -> None:
+        """Clear the loading status and re-enable Save STOS (after apply, failure or cancel)."""
+        message = cls._browser_load_message
+        if message is None:
+            return
+        cls._browser_load_message = None
+        cls._sync_save_stos_actions_enabled()
+        for status_bar in cls._stos_status_bars(window_manager):
+            if status_bar.currentMessage() == message:
+                status_bar.clearMessage()
+
     def onSaveStos(self):
         """Handle Save Stos File action."""
-        if self._transform_controller is None or StosWindow._stos_save_in_progress:
+        if (self._transform_controller is None or StosWindow._stos_save_in_progress
+                or StosWindow.browser_load_in_progress()):
             return
         fullpath = self._prompt_save_stos_path()
         if fullpath is None:
             return
+        if not self._confirm_save_across_volumes(fullpath):
+            return
         self._submit_async_stos_save(fullpath)
+
+    def _confirm_save_across_volumes(self, fullpath: str) -> bool:
+        """Warn when the open pair's images belong to another volume than *fullpath*.
+
+        Returns True to go on saving (no mismatch, or the user chose Save anyway).
+        """
+        stos = self._settings.stos
+        image_paths = [
+            None if stos.target_image is None else stos.target_image.image_fullpath,
+            None if stos.source_image is None else stos.source_image.image_fullpath,
+        ]
+        mismatch = stos_volume_mismatch(fullpath, image_paths)
+        if mismatch is None:
+            return True
+        image_lines = "\n".join(
+            f"{os.path.normpath(path)}\n    (volume {root})"
+            for path, root in mismatch.mismatched_images)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Save STOS to another volume?")
+        box.setText(
+            "The images in this STOS belong to a different volume than the folder you are "
+            "saving to. The pair on screen may not be the one you meant to save.")
+        box.setInformativeText(
+            f"Saving to volume:\n{mismatch.destination_volume_root}\n\n"
+            f"Images:\n{image_lines}")
+        save_anyway = box.addButton("Save anyway", QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
+        box.exec()
+        return box.clickedButton() is save_anyway
 
     def _prompt_save_stos_path(
             self,
@@ -1735,8 +1824,7 @@ class StosWindow(PyreWindowBase):
         """Re-enable Save actions and clear status text on all STOS windows."""
         cls._stos_save_in_progress = False
         cls._stos_save_initiator = None
-        for action in cls._save_stos_menu_actions:
-            action.setEnabled(True)
+        cls._sync_save_stos_actions_enabled()
 
     @classmethod
     def _on_stos_save_finished(cls, future: Future[str], fullpath: str) -> None:
@@ -1757,7 +1845,8 @@ class StosWindow(PyreWindowBase):
                         dialog_title="STOS save failed — choose where to retry",
                         initial_path=fullpath,
                     )
-                    if retry_path is not None:
+                    if (retry_path is not None
+                            and initiator._confirm_save_across_volumes(retry_path)):
                         retrying = True
                         initiator._submit_async_stos_save(retry_path)
                 return

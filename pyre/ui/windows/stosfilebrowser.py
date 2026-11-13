@@ -87,6 +87,10 @@ class _PendingStosLoad:
     filepath: str
     index: int
     browser_basename: str | None
+    # Folder and mode when the row was picked, so a folder change before the load
+    # finishes cannot attach the new folder to the old folder's file.
+    browser_folder: str | None = None
+    browser_flat_manual: bool = False
 
 
 class StosBrowserMouseNavigationFilter(QObject):
@@ -184,6 +188,7 @@ class StosFileBrowserWindow(QMainWindow):
     _manual_only_color = QColor("#8b6914")
     _load_generation: int
     _pending_load: _PendingStosLoad | None
+    _load_active: bool  # A load is queued or running and the STOS windows show "Loading..."
     _debounce_timer: QTimer
     # Background pool: folder scan, checksum validation, ZNCC scoring.
     _load_executor: ThreadPoolExecutor
@@ -228,6 +233,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._scan_future = None
         self._quality_cache = QualityCache()
         self._pending_load = None
+        self._load_active = False
         self._load_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="stos-nav-bg")
         self._stos_load_executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="stos-nav-load")
@@ -491,6 +497,9 @@ class StosFileBrowserWindow(QMainWindow):
         self._rows = []
         self._current_index = -1
         self._pending_select_path = None
+        # Nothing from the new folder is open yet: drop the old pair's highlight and title.
+        self._set_current_row(-1)
+        self.setWindowTitle("Stos Directory")
         self._list_widget.setRowCount(0)
         self._quality_histogram.set_histogram(histogram_from_rows([]), selected_score=None)
         self._update_source_selector_for_current_row()
@@ -1174,8 +1183,44 @@ class StosFileBrowserWindow(QMainWindow):
             filepath=filepath,
             index=index,
             browser_basename=browser_basename,
+            browser_folder=self._folder,
+            browser_flat_manual=self._browse_mode == BrowseMode.flat_manual,
         )
+        self._load_active = True
+        self._notify_load_started(os.path.basename(filepath))
         self._debounce_timer.start(self.NAV_LOAD_DEBOUNCE_MS)
+
+    def _notify_load_started(self, stos_basename: str) -> None:
+        """Show the loading status and block Save STOS on the STOS windows."""
+        from pyre.ui.windows.stoswindow import StosWindow
+        StosWindow.begin_browser_load(stos_basename)
+
+    def _notify_load_finished(self) -> None:
+        """Clear the loading status and re-enable Save STOS on the STOS windows."""
+        if not self._load_active:
+            return
+        self._load_active = False
+        from pyre.ui.windows.stoswindow import StosWindow
+        StosWindow.end_browser_load()
+
+    def _report_load_failure(self, filepath: str, exc: BaseException) -> None:
+        """Tell the user a STOS could not be opened and the previous pair is still shown.
+
+        Window-modal and non-blocking (``open``), so a failure arriving from a background load
+        never nests an event loop inside the load callback.
+        """
+        print(f"Error loading stos file {filepath}: {exc}")
+        box = QMessageBox(
+            QMessageBox.Icon.Warning,
+            "STOS not opened",
+            f"Could not open {os.path.basename(filepath)}.\n\n"
+            "The previously open pair is still shown; saving now would save that pair.\n\n"
+            f"{os.path.normpath(filepath)}\n\n{exc}",
+            QMessageBox.StandardButton.Ok,
+            self,
+        )
+        box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        box.open()
 
     def _execute_pending_load(self) -> None:
         """Start (or flush) the debounced STOS load for the latest pending request."""
@@ -1187,8 +1232,8 @@ class StosFileBrowserWindow(QMainWindow):
         generation = pending.generation
         filepath = pending.filepath
         browser_basename = pending.browser_basename
-        browser_folder = self._folder
-        browser_flat_manual = self._browse_mode == BrowseMode.flat_manual
+        browser_folder = pending.browser_folder
+        browser_flat_manual = pending.browser_flat_manual
 
         def _worker() -> object:
             from pyre.ui.windows.stoswindow import StosWindow
@@ -1197,11 +1242,12 @@ class StosFileBrowserWindow(QMainWindow):
         def _on_done(future: Future) -> None:
             def _apply() -> None:
                 if generation != self._load_generation:
-                    return
+                    return  # Superseded: the newer load owns the loading state.
                 try:
                     load_result = future.result()
                 except Exception as exc:
-                    print(f"Error loading stos file: {exc}")
+                    self._notify_load_finished()
+                    self._report_load_failure(filepath, exc)
                     return
                 from pyre.ui.windows.stoswindow import StosWindow
                 try:
@@ -1213,7 +1259,10 @@ class StosFileBrowserWindow(QMainWindow):
                         browser_basename=browser_basename,
                     )
                 except Exception as exc:
-                    print(f"Error applying stos file: {exc}")
+                    self._notify_load_finished()
+                    self._report_load_failure(filepath, exc)
+                    return
+                self._notify_load_finished()
 
             qt_post_to_main(_apply)
 
@@ -1308,6 +1357,7 @@ class StosFileBrowserWindow(QMainWindow):
         self._debounce_timer.stop()
         self._pending_load = None
         self._load_generation += 1  # supersede any in-flight apply
+        self._notify_load_finished()  # the superseded load will never clear its own status
         if self._score_future is not None and not self._score_future.done():
             self._quality_scores_incomplete = True  # resume on reopen; saved scores are kept
         self._score_generation += 1
