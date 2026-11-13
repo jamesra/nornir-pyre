@@ -239,6 +239,15 @@ def start_alignment_process_pool_warmup() -> None:
         target=_run, name="pyre-process-pool-warmup", daemon=True).start()
 
 
+def masked_registration_notice(count: int, min_unmasked: float) -> str:
+    """Status-bar text when Space skips mesh/RBF points whose alignment window is mostly masked."""
+    return (f"Space: {count} control point(s) not registered: under {min_unmasked:.0%} unmasked tissue "
+            f"in the alignment window (STOS masks)")
+
+
+NO_POINT_REGISTRATION_NOTICE = "Space: no control point under the cursor and none selected"
+
+
 def _to_numpy(arr: NDArray) -> NDArray:
     """Return a NumPy array, calling .get() when *arr* is a CuPy ndarray."""
     if hasattr(arr, 'get'):
@@ -1514,6 +1523,10 @@ class TransformController:
             mapped = _mapped_yx_host(mesh_hull_affine.map_points(model, query, forward=True, extrapolate=True))
             return PointPair(target=mapped, source=known)
         mapped = _mapped_yx_host(mesh_hull_affine.map_points(model, query, forward=False, extrapolate=True))
+        if np.all(np.isfinite(mapped)):
+            # The images are drawn with the forward map; take the source point it puts under the click, or adding
+            # the point moves the image by the forward/inverse mismatch (up to ~245 px on a real mesh).
+            mapped = mesh_hull_affine.source_under_target(model, known, mapped).astype(mapped.dtype)
         return PointPair(target=known, source=mapped)
 
     def _rebuild_id_to_index(self) -> None:
@@ -1805,6 +1818,10 @@ class TransformController:
                 len(masked_indices),
                 masked_indices,
             )
+            if masked_grid_relax.grid_model_or_none(self) is None:
+                # A mesh or RBF point has no relax fallback, so without this Space silently did nothing.
+                get_registration_job_runner().show_notice(
+                    masked_registration_notice(len(masked_indices), masked_grid_relax.resolve_min_unmasked()))
             if not register_indices:
                 self._enqueue_relax_for_masked_selection(masked_indices)
 

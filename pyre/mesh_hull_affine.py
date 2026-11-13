@@ -50,3 +50,58 @@ def _fill_outside_hull(model: Any, query: NDArray[np.floating], mapped: NDArray[
     mapped = mapped.copy()
     mapped[outside] = xp.asarray(extrapolator(rows), dtype=mapped.dtype)
     return mapped
+
+
+# Newton on the forward map: a mesh is affine inside a triangle, so one step lands exactly unless the
+# step crosses a triangle edge; a few more cover that. 1/100 px is far below anything visible.
+_FORWARD_INVERSE_MAX_STEPS = 12
+_FORWARD_INVERSE_TOLERANCE = 0.01
+_JACOBIAN_STEP = 1.0
+
+
+def _forward_host(model: Any, source_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+    """``map_points(forward=True)`` for host (N, 2) points, returned on the host as float64."""
+    mapped = map_points(model, source_yx, forward=True, extrapolate=True)
+    return nornir_imageregistration.EnsureNumpyArray(mapped, dtype=np.float64).reshape(-1, 2)
+
+
+def source_under_target(model: Any, target_yx: NDArray[np.floating],
+                        initial_source_yx: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Source point that the forward map (the one Pyre draws with) places at *target_yx*.
+
+    ``InverseTransform`` is fitted separately (a mesh triangulates the target points, an RBF is a second fit),
+    so where the two disagree it returns a source point drawn far from the click; adding that point then moves the
+    image. Starting from *initial_source_yx* (the inverse map's answer), Newton steps on the forward map with a
+    finite-difference Jacobian. Where the forward map is folded or singular, the closest point found is returned.
+    Host-only: one 2-float point, a few model calls.
+    """
+    target = np.asarray(target_yx, dtype=np.float64).reshape(2)
+    source = np.asarray(initial_source_yx, dtype=np.float64).reshape(2)
+    offsets = np.array([[0.0, 0.0], [_JACOBIAN_STEP, 0.0], [0.0, _JACOBIAN_STEP]])
+    best_source, best_error = source.copy(), np.inf
+    step_scale = 1.0
+    for _ in range(_FORWARD_INVERSE_MAX_STEPS):
+        mapped = _forward_host(model, source + offsets)
+        if not np.all(np.isfinite(mapped)):
+            break
+        residual = target - mapped[0]
+        error = float(np.hypot(*residual))
+        if error < best_error:
+            best_source, best_error = source.copy(), error
+            step_scale = 1.0
+        else:
+            # The step crossed into a triangle with a different affine and overshot; retry a shorter step from the
+            # best point so far.
+            step_scale *= 0.5
+            source = best_source
+            mapped = _forward_host(model, source + offsets)
+            residual = target - mapped[0]
+        if best_error <= _FORWARD_INVERSE_TOLERANCE:
+            break
+        jacobian = np.column_stack(((mapped[1] - mapped[0]), (mapped[2] - mapped[0]))) / _JACOBIAN_STEP
+        try:
+            step = np.linalg.solve(jacobian, residual)
+        except np.linalg.LinAlgError:
+            break
+        source = source + step_scale * step
+    return best_source

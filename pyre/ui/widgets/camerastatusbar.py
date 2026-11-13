@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from dependency_injector.wiring import Provide, inject
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -94,6 +94,17 @@ class CameraStatusBar(QStatusBar):
         self._job_container.hide()
         self.addPermanentWidget(self._job_container, 0)
 
+        # A short notice (e.g. why Space registered nothing). The coordinate labels below rewrite themselves on
+        # every mouse move, so the notice gets its own label and hides itself after a timeout.
+        self._notice = QLabel("", self)
+        self._notice.setStyleSheet("QLabel { color: palette(highlighted-text); background-color: palette(highlight);"
+                                   " padding: 0px 6px; }")
+        self._notice.hide()
+        self.addPermanentWidget(self._notice, 0)
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(self.hide_notice)
+
         # Create labels for each field
         self._labels = []
         for i in range(3):
@@ -169,6 +180,24 @@ class CameraStatusBar(QStatusBar):
         self._job_progress.setRange(0, 1)
         self._job_progress.setValue(0)
         self._job_cancel.setEnabled(True)
+
+    @property
+    def notice_text(self) -> str:
+        """Text of the notice label ("" when hidden)."""
+        return "" if self._notice.isHidden() else self._notice.text()
+
+    def show_notice(self, text: str, timeout_ms: int) -> None:
+        """Show *text* in the notice label for *timeout_ms* milliseconds."""
+        self._notice.setText(text)
+        self._notice.setToolTip(text)
+        self._notice.show()
+        self._notice_timer.start(int(timeout_ms))
+
+    def hide_notice(self) -> None:
+        """Hide the notice label."""
+        self._notice_timer.stop()
+        self._notice.hide()
+        self._notice.setText("")
 
     def _on_cancel_clicked(self) -> None:
         if self._cancel_handler is not None:

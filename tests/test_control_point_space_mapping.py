@@ -243,7 +243,8 @@ class TestMapPairForControlPointCreate(unittest.TestCase):
                 pair_src = controller.map_pair_for_control_point_create(
                     Space.Source, np.array((7.0, 8.0), dtype=np.float64))
         np.testing.assert_allclose(pair.target, [10.0, 20.0])
-        np.testing.assert_allclose(pair.source, [3.0, 4.0])
+        # The mocked inverse (3, 4) is only the starting guess: create refines it on the (identity) forward map.
+        np.testing.assert_allclose(pair.source, [10.0, 20.0], atol=0.01)
         self.assertIsInstance(pair.source, np.ndarray)
         np.testing.assert_allclose(pair_src.source, [7.0, 8.0])
         np.testing.assert_allclose(pair_src.target, [5.0, 6.0])

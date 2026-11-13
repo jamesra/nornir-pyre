@@ -30,6 +30,8 @@ from pyre.interfaces.managers import ICommandQueue, IMousePositionHistoryManager
     IControlPointActionMap, ControlPointManagerKey, IImageManager
 from pyre.interfaces.viewtype import ViewType
 from pyre.controllers import TransformController
+from pyre.controllers.transformcontroller import NO_POINT_REGISTRATION_NOTICE
+from pyre.registration_job import get_registration_job_runner
 import pyre.views.pointview
 from pyre.space import Space
 from pyre.commands.navigationcommandbase import NavigationCommandBase
@@ -495,9 +497,13 @@ class DefaultTransformCommand(NavigationCommandBase):
                 self.execute()
                 return True
             except RequiresSelectionError:
-                self.log.error(
-                    f"No control points selected for {new_action.action} command {self._action_to_command[new_action.action]}")
-                pass
+                if new_action.action == ControlPointAction.REGISTER:
+                    # Space with nothing hovered or selected: say so instead of doing nothing.
+                    get_registration_job_runner().show_notice(NO_POINT_REGISTRATION_NOTICE)
+                else:
+                    self.log.error(
+                        f"No control points selected for {new_action.action} command "
+                        f"{self._action_to_command[new_action.action]}")
 
         return False
 

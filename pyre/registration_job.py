@@ -25,6 +25,7 @@ PreviewFn = Callable[[object], None]
 CancelListenerFn = Callable[[], None]
 
 POINT_QUEUE_TITLE = "Registering control points"
+NOTICE_TIMEOUT_MS = 8000  # Long enough to read a sentence after pressing a key
 
 _logger = logging.getLogger(__name__)
 
@@ -172,6 +173,17 @@ class RegistrationJobRunner:
             return
         self._point_activity = None
         self._refresh_status_bars()
+
+    def show_notice(self, text: str, timeout_ms: int = NOTICE_TIMEOUT_MS) -> None:
+        """Show a short notice on every registered status bar and log it. Call on the GUI thread."""
+        _logger.warning("%s", text)
+        with self._lock:
+            bars = list(self._status_bars)
+        for bar in bars:
+            try:
+                bar.show_notice(text, timeout_ms)
+            except RuntimeError:
+                self.unregister_status_bar(bar)
 
     def _shown_activity(self) -> _Activity | None:
         """The most recently started active task, if any."""

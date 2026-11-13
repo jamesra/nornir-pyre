@@ -319,6 +319,14 @@ class TestCameraStatusBarProgress(unittest.TestCase):
         self.assertFalse(self.bar.activity_visible)
         self.assertEqual(self.bar.activity_text, "")
 
+    def test_runner_notice_shows_on_the_bar_and_hides(self) -> None:
+        get_registration_job_runner().register_status_bar(self.bar)
+        with self.assertLogs("pyre.registration_job", level="WARNING"):
+            get_registration_job_runner().show_notice("Space: no control point under the cursor", 60000)
+        self.assertEqual(self.bar.notice_text, "Space: no control point under the cursor")
+        self.bar.hide_notice()
+        self.assertEqual(self.bar.notice_text, "")
+
     def test_cancel_button_calls_handler(self) -> None:
         calls: list[bool] = []
         self.bar.set_cancel_handler(lambda: calls.append(True))

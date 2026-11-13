@@ -227,6 +227,33 @@ class TestControlPointMaskSkip(unittest.TestCase):
         self.assertEqual(added, [])
         relax.assert_called_once()
 
+    def test_spacebar_on_masked_mesh_point_shows_a_notice(self) -> None:
+        # RC1 0004/0005 mesh, 2026-11-13: Space did nothing near masked tissue and nothing said why.
+        controller = TransformController(_mesh())
+        src = _mask_covering_points(controller.SourcePoints)
+        tgt = _mask_covering_points(controller.TargetPoints, hole_index=0)
+        with patch(
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
+                return_value=(src, tgt),
+        ), patch("pyre.controllers.transformcontroller.get_registration_job_runner") as runner:
+            controller.enqueue_point_registrations([0], align_fn=lambda **_k: None)
+        runner.return_value.show_notice.assert_called_once()
+        notice = runner.return_value.show_notice.call_args.args[0]
+        self.assertIn("1 control point(s) not registered", notice)
+        self.assertIn("unmasked", notice)
+
+    def test_spacebar_on_masked_grid_point_relaxes_without_a_notice(self) -> None:
+        controller = TransformController(_identity_grid())
+        src = _mask_covering_points(controller.SourcePoints)
+        tgt = _mask_covering_points(controller.TargetPoints, hole_index=0)
+        with patch(
+                "pyre.controllers.masked_grid_relax.resolve_registration_gate_masks",
+                return_value=(src, tgt),
+        ), patch.object(controller, "enqueue_relax_exterior_grid_points"), \
+                patch("pyre.controllers.transformcontroller.get_registration_job_runner") as runner:
+            controller.enqueue_point_registrations([0], align_fn=lambda **_k: None)
+        runner.return_value.show_notice.assert_not_called()
+
     def test_spacebar_mixed_selection_registers_unmasked_only(self) -> None:
         controller = TransformController(_identity_grid())
         src = _mask_covering_points(controller.SourcePoints)
