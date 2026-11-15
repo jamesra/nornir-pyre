@@ -13,7 +13,9 @@ Notes for whoever updates this file. Comments like this one are not shown in Pyr
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Pyre shows new sections once after each upgrade (**Help → What's New** shows them anytime).
 
-## 1.8.13 — not yet released
+## 1.8.14 — not yet released
+
+## 1.8.13 — 2026-11-15
 
 - **Quantized images open with Auto contrast.** Images from Nornir's crushed (Quantized) filter store small codes, so they used to look almost black. When a STOS file opens a Quantized image, Pyre now sets that image's contrast the way the **Auto** button in the Contrast Adjustment window does, keeping your gamma. Other images keep the contrast you set.
 <!-- Detection: the PNG's nornir_crush text chunk (pyre.image_contrast.image_file_is_crushed). Applied in StosWindow.apply_stos_load_result, so browser loads and File > Open both get it. Registration uses the same contrast, as with manual Auto. Guard: tests/test_image_contrast.py TestCrushedImageAutoContrast. -->
