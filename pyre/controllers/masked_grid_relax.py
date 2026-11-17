@@ -312,20 +312,33 @@ def get_or_build_source_ok(
     source_points = np.asarray(
         nornir_imageregistration.EnsureNumpyArray(grid.SourcePoints),
         dtype=np.float64)
+    return source_ok_from_arrays(
+        cache, source_points, grid.cell_size, grid.grid_dims, min_unmasked, source_mask)
+
+
+def source_ok_from_arrays(
+        cache: SourcePinCache | None,
+        source_points: NDArray[np.floating],
+        cell_size: NDArray[np.integer] | tuple[int, int],
+        grid_dims: NDArray[np.integer] | tuple[int, int],
+        min_unmasked: float,
+        source_mask: NDArray[np.bool_] | None,
+) -> tuple[NDArray[np.bool_], SourcePinCache]:
+    """:func:`get_or_build_source_ok` on copied grid values, so a worker thread can run it."""
     n_points = int(source_points.shape[0])
     if cache is not None and cache.matches(
-            source_mask, grid.cell_size, min_unmasked, n_points, grid.grid_dims):
+            source_mask, cell_size, min_unmasked, n_points, grid_dims):
         return cache.source_ok, cache
 
     source_ok = source_ok_for_grid_points(
-        source_points, grid.cell_size, min_unmasked, source_mask=source_mask)
+        source_points, cell_size, min_unmasked, source_mask=source_mask)
     new_cache = SourcePinCache(
         source_ok=source_ok,
         mask_id=None if source_mask is None else id(source_mask),
-        cell_size=(int(grid.cell_size[0]), int(grid.cell_size[1])),
+        cell_size=(int(cell_size[0]), int(cell_size[1])),
         min_unmasked=float(min_unmasked),
         n_points=n_points,
-        grid_dims=(int(grid.grid_dims[0]), int(grid.grid_dims[1])),
+        grid_dims=(int(grid_dims[0]), int(grid_dims[1])),
     )
     return source_ok, new_cache
 

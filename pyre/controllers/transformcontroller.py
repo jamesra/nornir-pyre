@@ -539,6 +539,7 @@ class TransformController:
     _masked_relax_in_flight: bool
     _masked_relax_applying: bool
     _masked_relax_pending_seeds: set[int]
+    _masked_relax_pending_seed_all_fixed: bool
     _masked_relax_pending_undo: NDArray[np.floating] | None
     _masked_relax_undo_saved: bool
     _masked_relax_source_pin_cache: masked_grid_relax.SourcePinCache | None
@@ -767,9 +768,7 @@ class TransformController:
             self._interactive_moved_indices.clear()
             self._interactive_edit_points_snapshot = self.copy_points()
             # Discard in-flight masked relax while the user is editing.
-            self._masked_relax_generation += 1
-            self._masked_relax_pending_seeds.clear()
-            self._masked_relax_pending_undo = None
+            self._discard_masked_relax()
         self._interactive_edit_depth += 1
         nornir_imageregistration.interactive_edit.begin()
         self._pending_moved_indices.clear()
@@ -951,9 +950,7 @@ class TransformController:
         # once the model object changes.
         self._registration_batch_undo_points = None
         self._registration_batch_had_apply = False
-        self._masked_relax_generation += 1
-        self._masked_relax_pending_seeds.clear()
-        self._masked_relax_pending_undo = None
+        self._discard_masked_relax()
         self._masked_relax_source_pin_cache = None
 
         if self._TransformModel is not None:
@@ -1000,9 +997,7 @@ class TransformController:
         self._clear_control_point_selection()
         self._registration_batch_undo_points = None
         self._registration_batch_had_apply = False
-        self._masked_relax_generation += 1
-        self._masked_relax_pending_seeds.clear()
-        self._masked_relax_pending_undo = None
+        self._discard_masked_relax()
         self._masked_relax_source_pin_cache = None
 
         assert isinstance(value, nornir_imageregistration.ITransformChangeEvents)
@@ -1297,6 +1292,7 @@ class TransformController:
         self._masked_relax_in_flight = False
         self._masked_relax_applying = False
         self._masked_relax_pending_seeds = set()
+        self._masked_relax_pending_seed_all_fixed = False
         self._masked_relax_pending_undo = None
         self._masked_relax_undo_saved = False
         self._masked_relax_source_pin_cache = None
@@ -1608,17 +1604,15 @@ class TransformController:
         because the pool is shared; their results are discarded by epoch when
         they arrive. Points already applied stay applied, and the selection is
         not restored afterwards. Also stops an in-flight masked/exterior grid
-        relax wave (partial TargetPoints already committed stay).
+        relax wave, which then commits nothing.
         """
         was_active = (self._registration_queue_busy()
                       or self._registration_batch_total > 0)
         self._registration_reselect_ids.clear()
         self._suppress_registration_reselect = False
         self._cancel_all_registrations()
-        # Same generation bump as begin_interactive_edit / transform replace.
-        self._masked_relax_generation += 1
-        self._masked_relax_pending_seeds.clear()
-        self._masked_relax_pending_undo = None
+        # Same discard as begin_interactive_edit / transform replace.
+        self._discard_masked_relax()
         if was_active:
             _logger.info("Cancelled control-point registrations")
             # Remesh / RBF refresh for points applied before the cancel; nothing
@@ -1922,42 +1916,17 @@ class TransformController:
 
         *extra_seeds* are always included (e.g. the point just registered) so a
         visit-once wave still starts when the moved point no longer meets the
-        fixed-tissue threshold at its new location. No-op off grid, when every
-        point is fixed, or when there are no seeds.
+        fixed-tissue threshold at its new location. No-op off grid; the wave does
+        nothing when every point is fixed.
+
+        The fixed/free classification and the seed list are computed by the
+        worker, not here: on a large grid they cost the UI thread noticeable time
+        after every registration.
         """
-        grid_model = masked_grid_relax.grid_model_or_none(self)
-        if grid_model is None:
+        if masked_grid_relax.grid_model_or_none(self) is None:
             return
-        source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
-        min_unmasked = masked_grid_relax.resolve_min_unmasked()
-        source_ok, self._masked_relax_source_pin_cache = (
-            masked_grid_relax.get_or_build_source_ok(
-                self._masked_relax_source_pin_cache,
-                grid_model.grid,
-                min_unmasked,
-                source_mask,
-            ))
-        fixed_mask = masked_grid_relax.build_fixed_mask(
-            grid_model.grid,
-            min_unmasked,
-            source_mask,
-            target_mask,
-            source_ok=source_ok,
-        )
-        if not np.any(~fixed_mask):
-            return
-        seeds = [int(i) for i in np.flatnonzero(fixed_mask)]
-        if extra_seeds:
-            n = int(fixed_mask.shape[0])
-            seen = set(seeds)
-            for index in extra_seeds:
-                idx = int(index)
-                if 0 <= idx < n and idx not in seen:
-                    seen.add(idx)
-                    seeds.append(idx)
-        if not seeds:
-            return
-        self.enqueue_masked_grid_relax(seeds, undo_points=undo_points)
+        self.enqueue_masked_grid_relax(
+            list(extra_seeds or []), undo_points=undo_points, seed_all_fixed=True)
 
     def _pump_registration_queue(self) -> None:
         """Start pending alignments until the concurrency limit is reached."""
@@ -2376,17 +2345,27 @@ class TransformController:
                     extra_seeds=[int(applied_index)],
                 )
 
+    def _discard_masked_relax(self) -> None:
+        """Cancel the in-flight relax wave and drop queued seeds and undo."""
+        self._masked_relax_generation += 1
+        self._masked_relax_pending_seeds.clear()
+        self._masked_relax_pending_seed_all_fixed = False
+        self._masked_relax_pending_undo = None
+
     def enqueue_masked_grid_relax(
             self,
             seed_indices: Sequence[int],
             undo_points: NDArray[np.floating] | None = None,
+            *,
+            seed_all_fixed: bool = False,
     ) -> None:
         """Queue a background BFS relax of masked grid neighbors after a seed move.
 
         No-op when not in grid mode, during interactive drag, or while applying a
         prior relax result. Only one wave runs at a time: a new request cancels
-        the in-flight effort (partial TargetPoints already committed stay) and
-        coalesces seeds for a restart on the latest points.
+        the in-flight wave and coalesces seeds for a restart on the latest points.
+        *seed_all_fixed* adds every fixed (enough tissue) point as a seed; the
+        worker computes that set.
         """
         if self._masked_relax_applying:
             return
@@ -2396,7 +2375,7 @@ class TransformController:
         if grid_model is None:
             return
         seeds = [int(i) for i in seed_indices]
-        if not seeds:
+        if not seeds and not seed_all_fixed:
             return
 
         if undo_points is not None and self._masked_relax_pending_undo is None:
@@ -2406,41 +2385,38 @@ class TransformController:
 
         if self._masked_relax_in_flight:
             self._masked_relax_pending_seeds.update(seeds)
+            self._masked_relax_pending_seed_all_fixed |= seed_all_fixed
             # Cancel the active wave; its finish handler restarts with pending seeds.
             self._masked_relax_generation += 1
             return
 
-        self._start_masked_grid_relax_wave(seeds, grid_model)
+        self._start_masked_grid_relax_wave(seeds, grid_model, seed_all_fixed)
 
     def _start_masked_grid_relax_wave(
             self,
             seed_indices: list[int],
             grid_model: nornir_imageregistration.IGridTransform,
+            seed_all_fixed: bool = False,
     ) -> None:
-        """Copy current TargetPoints/masks and run the BFS wave off the UI thread."""
+        """Snapshot the grid and run classification and the BFS wave off the UI thread.
+
+        The UI thread only copies the N×2 point arrays and takes references to the
+        masks; masks are replaced, not edited in place, when a new one loads. The
+        wave commits once, when it finishes: committing partial results every few
+        nodes rebuilt the triangulation and redrew the views on the UI thread
+        thousands of times on a large grid. A wave cancelled by a newer move or
+        registration leaves the points alone and restarts from the latest ones.
+        """
         grid = grid_model.grid
         target_points = np.asarray(
             nornir_imageregistration.EnsureNumpyArray(grid_model.TargetPoints),
             dtype=np.float64).copy()
         source_mask, target_mask = masked_grid_relax.resolve_stos_masks()
         min_unmasked = masked_grid_relax.resolve_min_unmasked()
-        # Build / reuse the source pin cache against the live mask identity first,
-        # then copy arrays for the worker so we do not read live transform state off-UI.
-        source_ok, self._masked_relax_source_pin_cache = (
-            masked_grid_relax.get_or_build_source_ok(
-                self._masked_relax_source_pin_cache,
-                grid,
-                min_unmasked,
-                source_mask,
-            ))
-        if source_mask is not None:
-            source_mask = np.asarray(source_mask, dtype=bool).copy()
-        if target_mask is not None:
-            target_mask = np.asarray(target_mask, dtype=bool).copy()
-        source_ok_copy = np.asarray(source_ok, dtype=bool).copy()
+        pin_cache = self._masked_relax_source_pin_cache
         grid_dims = (int(grid.grid_dims[0]), int(grid.grid_dims[1]))
         grid_spacing = (float(grid.grid_spacing[0]), float(grid.grid_spacing[1]))
-        cell_size = (float(grid.cell_size[0]), float(grid.cell_size[1]))
+        cell_size = (int(grid.cell_size[0]), int(grid.cell_size[1]))
         source_points = np.asarray(
             nornir_imageregistration.EnsureNumpyArray(grid.SourcePoints),
             dtype=np.float64).copy()
@@ -2454,21 +2430,15 @@ class TransformController:
         def _should_cancel() -> bool:
             return generation != self._masked_relax_generation
 
-        def _post_progress(partial: NDArray[np.floating]) -> None:
-            if _should_cancel():
-                return
-            if QApplication.instance() is None:
-                self._on_masked_grid_relax_progress(generation, partial, undo_points)
-            else:
-                qt_post_to_main(
-                    self._on_masked_grid_relax_progress, generation, partial, undo_points)
-
         def _worker() -> None:
             updated: NDArray[np.floating] | None = None
+            new_pin_cache = pin_cache
             try:
                 from nornir_imageregistration.grid_subdivision import (
                     classify_fixed_grid_points,
                 )
+                source_ok, new_pin_cache = masked_grid_relax.source_ok_from_arrays(
+                    pin_cache, source_points, cell_size, grid_dims, min_unmasked, source_mask)
                 fixed_mask = classify_fixed_grid_points(
                     source_points=source_points,
                     target_points=target_points,
@@ -2476,30 +2446,35 @@ class TransformController:
                     min_unmasked=min_unmasked,
                     source_mask=source_mask,
                     target_mask=target_mask,
-                    source_ok=source_ok_copy,
+                    source_ok=source_ok,
                 )
-                if not np.any(~fixed_mask):
-                    updated = None
-                elif _should_cancel():
+                wave_seeds = seeds
+                if seed_all_fixed:
+                    wave_seeds = sorted(set(seeds).union(
+                        int(i) for i in np.flatnonzero(fixed_mask)))
+                if not wave_seeds or not np.any(~fixed_mask) or _should_cancel():
                     updated = None
                 else:
                     updated = masked_grid_relax.run_masked_grid_relax_wave(
                         target_points=target_points,
                         fixed_mask=fixed_mask,
-                        seed_indices=seeds,
+                        seed_indices=wave_seeds,
                         grid_dims=grid_dims,
                         grid_spacing=grid_spacing,
                         should_cancel=_should_cancel,
-                        on_progress=_post_progress,
                     )
+                    if _should_cancel():
+                        updated = None
             except Exception as _exc:
                 _logger.exception("Masked grid relax wave failed")
                 updated = None
             if QApplication.instance() is None:
-                self._on_masked_grid_relax_finished(generation, updated, undo_points)
+                self._on_masked_grid_relax_finished(
+                    generation, updated, undo_points, (grid_model, new_pin_cache))
             else:
                 qt_post_to_main(
-                    self._on_masked_grid_relax_finished, generation, updated, undo_points)
+                    self._on_masked_grid_relax_finished,
+                    generation, updated, undo_points, (grid_model, new_pin_cache))
 
         if QApplication.instance() is None:
             # Headless tests: run synchronously.
@@ -2511,44 +2486,35 @@ class TransformController:
             _worker,
         )
 
-    def _on_masked_grid_relax_progress(
-            self,
-            generation: int,
-            partial_targets: NDArray[np.floating],
-            undo_points: NDArray[np.floating] | None,
-    ) -> None:
-        """Commit an in-progress wave snapshot so cancels keep partial motion."""
-        if generation != self._masked_relax_generation:
-            return
-        undo = None if self._masked_relax_undo_saved else undo_points
-        self._apply_masked_grid_relax_result(partial_targets, undo)
-        if undo is not None:
-            self._masked_relax_undo_saved = True
-            self._masked_relax_pending_undo = None
-
     def _on_masked_grid_relax_finished(
             self,
             generation: int,
             updated_targets: NDArray[np.floating] | None,
             undo_points: NDArray[np.floating] | None,
+            pin_cache: tuple[object, masked_grid_relax.SourcePinCache | None] | None = None,
     ) -> None:
-        """Apply relaxed TargetPoints on the UI thread, or discard if superseded."""
+        """Apply relaxed TargetPoints on the UI thread, or discard if superseded.
+
+        *pin_cache* is (the grid model the wave ran on, its source pin cache); the cache is
+        kept only while that model is still the live one.
+        """
         self._masked_relax_in_flight = False
+        if pin_cache is not None and pin_cache[1] is not None and pin_cache[0] is self._TransformModel:
+            self._masked_relax_source_pin_cache = pin_cache[1]
         pending = sorted(self._masked_relax_pending_seeds)
+        pending_all_fixed = self._masked_relax_pending_seed_all_fixed
         self._masked_relax_pending_seeds.clear()
+        self._masked_relax_pending_seed_all_fixed = False
 
         if generation != self._masked_relax_generation:
-            # Preserve undo for the restart when no progress commit consumed it.
+            # Preserve undo for the restart; a cancelled wave commits nothing.
             if (
                 undo_points is not None
                 and not self._masked_relax_undo_saved
                 and self._masked_relax_pending_undo is None
             ):
                 self._masked_relax_pending_undo = undo_points
-            if pending:
-                grid_model = masked_grid_relax.grid_model_or_none(self)
-                if grid_model is not None:
-                    self._start_masked_grid_relax_wave(pending, grid_model)
+            self._restart_masked_grid_relax(pending, pending_all_fixed)
             return
 
         if updated_targets is not None:
@@ -2561,10 +2527,15 @@ class TransformController:
             # No free neighbors moved; drop unused undo snapshot for this wave.
             self._masked_relax_pending_undo = None
 
-        if pending:
-            grid_model = masked_grid_relax.grid_model_or_none(self)
-            if grid_model is not None:
-                self._start_masked_grid_relax_wave(pending, grid_model)
+        self._restart_masked_grid_relax(pending, pending_all_fixed)
+
+    def _restart_masked_grid_relax(self, pending: list[int], seed_all_fixed: bool) -> None:
+        """Start the wave queued while the previous one ran, if any."""
+        if not pending and not seed_all_fixed:
+            return
+        grid_model = masked_grid_relax.grid_model_or_none(self)
+        if grid_model is not None and not self.interactive_edit_in_progress:
+            self._start_masked_grid_relax_wave(pending, grid_model, seed_all_fixed)
 
     def _apply_masked_grid_relax_result(
             self,
