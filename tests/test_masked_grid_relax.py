@@ -425,14 +425,43 @@ class TestRelaxExteriorGridPoints(unittest.TestCase):
             enqueue.assert_not_called()
 
     def test_all_fixed_is_noop(self) -> None:
+        # The worker classifies fixed points now, so check the outcome: nothing moves, no undo.
         controller = TransformController(_identity_grid())
         src = np.ones((64, 64), dtype=bool)
         tgt = np.ones((64, 64), dtype=bool)
+        before = copy.deepcopy(controller.points)
         with patch('pyre.state.get_current_stos_config', return_value=self._mock_stos_masks(src, tgt)), \
                 patch('pyre.controllers.masked_grid_relax.resolve_min_unmasked', return_value=0.25), \
-                patch.object(controller, 'enqueue_masked_grid_relax') as enqueue:
-            controller.enqueue_relax_exterior_grid_points()
-            enqueue.assert_not_called()
+                patch("pyre.controllers.transformcontroller.QApplication.instance", return_value=None), \
+                patch.object(controller, '_apply_masked_grid_relax_result') as apply:
+            controller.enqueue_relax_exterior_grid_points(undo_points=before)
+            apply.assert_not_called()
+        np.testing.assert_array_equal(controller.points, before)
+        self.assertIsNone(controller._masked_relax_pending_undo)
+        self.assertFalse(controller._masked_relax_in_flight)
+
+    def test_relax_requested_mid_wave_restarts_with_all_fixed_seeds(self) -> None:
+        """A registration during a wave cancels it; the restart still seeds every fixed point."""
+        controller = TransformController(_identity_grid())
+        controller._masked_relax_in_flight = True
+        controller.enqueue_relax_exterior_grid_points(extra_seeds=[4])
+        self.assertTrue(controller._masked_relax_pending_seed_all_fixed)
+        self.assertEqual(controller._masked_relax_pending_seeds, {4})
+        with patch.object(controller, '_start_masked_grid_relax_wave') as start:
+            controller._on_masked_grid_relax_finished(
+                controller._masked_relax_generation - 1, None, None)
+        start.assert_called_once()
+        self.assertEqual(start.call_args.args[0], [4])
+        self.assertTrue(start.call_args.args[2])
+
+    def test_cancelled_wave_commits_nothing(self) -> None:
+        controller = TransformController(_identity_grid())
+        controller._masked_relax_in_flight = True
+        stale = np.asarray(controller.TargetPoints, dtype=np.float64) + 5.0
+        with patch.object(controller, '_apply_masked_grid_relax_result') as apply:
+            controller._on_masked_grid_relax_finished(
+                controller._masked_relax_generation - 1, stale, None)
+        apply.assert_not_called()
 
     def test_seeds_every_fixed_point_and_moves_free_exterior(self) -> None:
         """Warped fixed interior + free exterior: one bulk step settles free neighbors."""
