@@ -153,7 +153,7 @@ class TestStosFileBrowserAsyncScan(unittest.TestCase):
             browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
             with patch(
                     "pyre.ui.windows.stosfilebrowser.attach_quality_scores",
-                    side_effect=lambda folder, rows, source, cache=None: (list(rows), QualityCache(), []),
+                    side_effect=lambda folder, rows, source, cache=None, validate=True: (list(rows), QualityCache(), []),
             ):
                 browser._apply_folder(tmp, persist=False, confirm_manual=False)
                 browser.wait_for_scan_idle()
@@ -171,7 +171,7 @@ class TestStosFileBrowserAsyncScan(unittest.TestCase):
             browser = StosFileBrowserWindow(parent=None, settings=AppSettings())
             with patch(
                     "pyre.ui.windows.stosfilebrowser.attach_quality_scores",
-                    side_effect=lambda folder, rows, source, cache=None: (list(rows), QualityCache(), []),
+                    side_effect=lambda folder, rows, source, cache=None, validate=True: (list(rows), QualityCache(), []),
             ):
                 browser._apply_folder(tmp, persist=False, confirm_manual=False)
                 browser.wait_for_scan_idle()
