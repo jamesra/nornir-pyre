@@ -226,6 +226,20 @@ class ImageLoader(IImageLoader):
             self._viewmodel_cache[cache_key] = viewmodel
             return viewmodel
 
+    def release_unused_cache_entries(self, keep: set[FilepathCacheKey]) -> None:
+        """Drop cached images and viewmodels whose keys are not in *keep*; free the dropped viewmodels' GL textures.
+
+        Call on the main thread (GL) after the open pair is bound to its slots, with that pair's keys, so the
+        cache holds at most the open pair and does not grow with every STOS browsed.
+        """
+        with self._cache_lock:
+            for cache_key in [k for k in self._filepath_cache if k not in keep]:
+                del self._filepath_cache[cache_key]
+            dropped = [vm for k, vm in self._viewmodel_cache.items() if k not in keep]
+            self._viewmodel_cache = {k: vm for k, vm in self._viewmodel_cache.items() if k in keep}
+        for viewmodel in dropped:
+            viewmodel.release_gpu_resources()
+
     def create_image_viewmodel(self,
                                name: str | Enum | None = None,
                                permutations: nornir_imageregistration.ImagePermutationHelper | None = None,

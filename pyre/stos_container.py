@@ -58,7 +58,10 @@ class StosContainer(containers.DeclarativeContainer):
     glcontext_manager = providers.ThreadSafeSingleton(GLContextManager)
     window_manager = providers.ThreadSafeSingleton(WindowManager)
 
-    image_loader = providers.Factory(ImageLoader)
+    # One loader for the session: its filepath and viewmodel caches are what let a reopened STOS (or the
+    # next pair sharing an image) reuse decoded images and GL textures. A Factory gave every injection an
+    # empty cache, so each open decoded again and leaked the old viewmodels' textures.
+    image_loader = providers.ThreadSafeSingleton(ImageLoader)
     selected_points = providers.Object(ObservableSet[int](initial_set=None, call_wrapper=qt_post_to_main))
     transform_controller = providers.ThreadSafeSingleton(
         TransformController, selected_points=selected_points)

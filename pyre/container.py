@@ -88,7 +88,7 @@ class IContainer(containers.DeclarativeContainer):
     glcontext_manager: providers.AbstractSingleton[IGLContextManager] = providers.AbstractSingleton(IGLContextManager)
     window_manager: providers.AbstractSingleton[IWindowManager] = providers.AbstractSingleton(IWindowManager)
 
-    image_loader: providers.AbstractFactory[IImageLoader] = providers.AbstractFactory()
+    image_loader: providers.AbstractSingleton[IImageLoader] = providers.AbstractSingleton()
     transform_controller: providers.AbstractSingleton = providers.AbstractSingleton()
 
     control_point_map_manager: providers.AbstractSingleton[IControlPointMapManager] = providers.AbstractSingleton()

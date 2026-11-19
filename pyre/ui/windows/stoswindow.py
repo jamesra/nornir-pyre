@@ -1440,6 +1440,9 @@ class StosWindow(PyreWindowBase):
         image_loader.commit_load_results_to_image_manager(load_result)  # type: ignore[attr-defined]
         image_loader.create_image_viewmodel(load_result=load_result.source)
         image_loader.create_image_viewmodel(load_result=load_result.target)
+        # The previous pair's views were dropped by the slot change; free what this pair does not reuse.
+        image_loader.release_unused_cache_entries(  # type: ignore[attr-defined]
+            {load_result.source.filepath_cache_key, load_result.target.filepath_cache_key})
 
         settings.stos.stos_filename = filename
         settings.stos.stos_opened_from_browser_folder = browser_folder
