@@ -14,20 +14,25 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import pyre.commands.transform_undo  # noqa: F401  (wired in setUp)
+from dependency_injector import providers
 from nornir_imageregistration.alignment_record import AlignmentRecord
 from nornir_imageregistration.transforms import ITransform
 from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
 from nornir_imageregistration.transforms.two_way_rbftransform import (
     TwoWayRBFWithLinearCorrection,
 )
+from pyre.container import IContainer
 from pyre.controllers.transformcontroller import TransformController
 from pyre.observable import ObservableSet
 from pyre.registration_job import get_registration_job_runner
+from pyre.state.managers.command_history import CommandHistory
 from pyre.views.composite_display import (
     _ui_transform_point,
     display_lookat_for_composite,
@@ -103,6 +108,17 @@ class TestRegistrationApply(unittest.TestCase):
 
 class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
     """Repeated applies leave the composite display center where it was."""
+
+    def setUp(self) -> None:
+        # Wire a Ctrl+Z history as the app does. Without one, every batch commit logs a warning with a
+        # traceback, and that delay alone made the display drift here (a timing race this test does not
+        # cover; seen 2026-11-19).
+        history = CommandHistory()
+        IContainer.history_manager.override(providers.Singleton(lambda: history))
+        self.addCleanup(IContainer.history_manager.reset_override)
+        container = IContainer()
+        container.wire(modules=[sys.modules['pyre.commands.transform_undo']])
+        self.addCleanup(container.unwire)
 
     def _run(self, model: ITransform) -> np.ndarray:
         controller = _controller(model)

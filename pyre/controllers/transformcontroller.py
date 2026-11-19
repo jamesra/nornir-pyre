@@ -154,6 +154,9 @@ def _align_control_point_from_arrays(
         # seconds and lets a mis-scaled match win the translation.
         search_scale=False,
         use_gpu=False,
+        # Masked NCC: masked and out-of-image pixels take no part, instead of being noise-filled.
+        target_mask=target_mask,
+        source_mask=source_mask,
     )
 
 

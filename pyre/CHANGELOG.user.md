@@ -15,6 +15,9 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.13 — not yet released
 
+- **Spacebar registers much better near tissue edges.** Masked areas are now left out of the match instead of being filled with random noise, so a point next to the edge of the section, a fold or a hole no longer locks onto the noise or the edge. On four RC3 pairs, points with half their window off the tissue landed correctly about 3-4 times as often, interior points 1.5 times as often, and each point is a little faster.
+<!-- 2026-11-19 nornir-imageregistration masked_correlation (band-pass by normalized convolution + Padfield masked NCC, peaks ranked by atanh(r)*sqrt(overlap)); AttemptAlignPoint target_mask/source_mask; Pyre passes BlendedMask. A/B numbers in the imageregistration stage 2 commit. -->
+
 - **Fix: Ctrl+Z did not undo a Spacebar registration.** Space-registered points (and the grid points that settle after them) are undone with one Ctrl+Z again. The masked-tissue setting for skipping Space on mostly masked points is also read again; it had always used the default 25%.
 <!-- 2026-11-19, reported by James. The undo was saved through an @inject closure defined inside TransformController methods; dependency_injector injects only functions that exist when the pyre package is wired, so the closure got the Provide marker, SaveState raised, and the exception was logged at debug. Now module-level pyre.commands.transform_undo.save_points_undo_to_history and masked_grid_relax._min_unmasked_from_settings; failures log a warning. Guard: tests/test_undo_history_injection.py. -->
 
