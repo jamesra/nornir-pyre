@@ -30,7 +30,6 @@ from pyre.common import (
 )
 from pyre.image_contrast import (
     auto_contrast,
-    contrast_for_space,
     image_file_is_crushed,
     set_contrast_for_space,
 )
@@ -1493,13 +1492,13 @@ class StosWindow(PyreWindowBase):
         """Set Auto contrast for each loaded image that is noise-crushed (Quantized).
 
         Crushed images hold codes in the low part of the 8-bit range and look nearly black at the
-        identity contrast. Other images keep the contrast already in the settings.
+        identity contrast. They get the full Auto setting, gamma included. Other images keep the
+        contrast already in the settings.
         """
         for space, image_result in ((Space.Source, load_result.source), (Space.Target, load_result.target)):
             if image_result is None or not image_file_is_crushed(image_result.image_fullpath):
                 continue
-            current = contrast_for_space(space, settings=settings)
-            contrast = auto_contrast(image_result.permutations.Image, gamma=float(current.gamma))
+            contrast = auto_contrast(image_result.permutations.Image)
             if contrast is not None:
                 set_contrast_for_space(space, contrast, settings)
 

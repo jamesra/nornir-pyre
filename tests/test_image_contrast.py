@@ -15,6 +15,7 @@ from pyre.image_contrast import (
     ContrastedImagePermutationHelper,
     apply_contrast_array,
     auto_contrast,
+    auto_gamma,
     contrasted_permutation_helper,
     image_file_is_crushed,
     is_identity_contrast,
@@ -171,13 +172,17 @@ class TestCrushedImageAutoContrast(unittest.TestCase):
         self.assertFalse(image_file_is_crushed(os.path.join(self._dir, 'missing.png')))
         self.assertFalse(image_file_is_crushed(None))
 
-    def test_auto_contrast_spans_the_codes(self) -> None:
-        contrast = auto_contrast(self.codes, gamma=1.5)
+    def test_auto_contrast_spans_the_codes_and_locks_gamma(self) -> None:
+        contrast = auto_contrast(self.codes)
         assert contrast is not None
         self.assertGreaterEqual(contrast.min, float(self.codes.min()))
         self.assertLessEqual(contrast.max, float(self.codes.max()) + 1)
         self.assertLess(contrast.max - contrast.min, 60.0)
-        self.assertEqual(contrast.gamma, 1.5)
+        self.assertTrue(contrast.auto_gamma)
+        # The median code shows at mid grey, to within one code of the ~25-code window (histogram is sampled).
+        median = float(np.median(self.codes))
+        t = (median - contrast.min) / (contrast.max - contrast.min)
+        self.assertAlmostEqual(t ** (1.0 / contrast.gamma), 0.5, delta=0.1)
 
     def test_load_sets_auto_contrast_only_for_crushed_images(self) -> None:
         from pyre.ui.windows.stoswindow import StosWindow
@@ -200,6 +205,39 @@ class TestCrushedImageAutoContrast(unittest.TestCase):
         self.assertEqual(settings.ui.source_contrast, auto_contrast(self.codes))
         self.assertFalse(is_identity_contrast(settings.ui.source_contrast))
         self.assertEqual(settings.ui.target_contrast, kept)
+
+
+
+class TestAutoGamma(unittest.TestCase):
+    """Viking's Auto gamma: the median pixel between min and max shows at mid grey."""
+
+    @staticmethod
+    def _hist(values: np.ndarray):
+        from pyre.image_contrast import approximate_image_histogram
+        return approximate_image_histogram(values, sample_fraction=1.0)
+
+    def test_median_in_the_dark_quarter_lifts(self) -> None:
+        values = np.full((32, 32), 64, dtype=np.uint8)
+        gamma = auto_gamma(self._hist(values), 0.0, 255.0)
+        self.assertAlmostEqual((64.0 / 255.0) ** (1.0 / gamma), 0.5, delta=0.01)
+        self.assertGreater(gamma, 1.0)
+
+    def test_skips_bin_zero_and_pixels_outside_the_window(self) -> None:
+        values = np.zeros((40, 40), dtype=np.uint8)
+        values[:10] = 200       # inside the window
+        values[10:12] = 250     # above the window
+        self.assertAlmostEqual(auto_gamma(self._hist(values), 100.0, 240.0),
+                               float(np.log((200.0 - 100.0) / 140.0) / np.log(0.5)), places=2)
+
+    def test_limits_and_fallbacks(self) -> None:
+        self.assertEqual(auto_gamma(None, 0.0, 255.0), 1.0)
+        values = np.full((8, 8), 250, dtype=np.uint8)
+        self.assertEqual(auto_gamma(self._hist(values), 0.0, 100.0), 1.0)  # no pixel inside
+        self.assertEqual(auto_gamma(self._hist(np.full((8, 8), 1, dtype=np.uint8)), 0.0, 255.0), 4.0)
+
+    def test_normalize_keeps_the_flag(self) -> None:
+        c = normalize_contrast(ImageDisplayContrast(min=10, max=5, gamma=2.0, auto_gamma=True))
+        self.assertTrue(c.auto_gamma)
 
 
 if __name__ == '__main__':

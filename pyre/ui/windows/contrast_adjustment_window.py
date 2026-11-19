@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 
 from dependency_injector.wiring import Provide, inject
+from nornir_shared.histogram import Histogram
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QPushButton,
     QTabWidget,
@@ -26,6 +28,7 @@ from pyre.image_contrast import (
     LEVEL_MIN,
     approximate_image_histogram,
     auto_contrast,
+    auto_gamma,
     contrast_for_space,
     normalize_contrast,
     reset_contrast_for_space,
@@ -56,6 +59,8 @@ class _ContrastLayerPanel(QWidget):
     _min_control: LinkedSliderSpin
     _max_control: LinkedSliderSpin
     _gamma_control: LinkedSliderSpin
+    _auto_gamma_box: QCheckBox
+    _layer_histogram: Histogram | None
 
     def __init__(
             self,
@@ -69,6 +74,7 @@ class _ContrastLayerPanel(QWidget):
         self._settings = settings
         self._image_manager = image_manager
         self._updating = False
+        self._layer_histogram = None
 
         self._histogram = ImageHistogramWidget(self)
         self._min_control = LinkedSliderSpin(
@@ -80,8 +86,16 @@ class _ContrastLayerPanel(QWidget):
         self._gamma_control = LinkedSliderSpin(
             "Gamma", minimum=GAMMA_MIN, maximum=GAMMA_MAX, value=1.0,
             decimals=3, single_step=0.05, parent=self)
+        self._auto_gamma_box = QCheckBox("Auto", self)
+        self._auto_gamma_box.setToolTip(
+            "Keep the gamma that shows the median pixel between Min and Max at mid grey, following Min and Max "
+            "as they move. Clear it to set the gamma yourself.")
+        gamma_row = QHBoxLayout()
+        gamma_row.addWidget(self._gamma_control, 1)
+        gamma_row.addWidget(self._auto_gamma_box)
 
         auto_btn = QPushButton("Auto", self)
+        auto_btn.setToolTip("Clip the darkest and brightest 0.5% of the pixels and lock the gamma to Auto")
         reset_btn = QPushButton("Reset", self)
         button_row = QHBoxLayout()
         button_row.addWidget(auto_btn)
@@ -92,12 +106,13 @@ class _ContrastLayerPanel(QWidget):
         layout.addWidget(self._histogram)
         layout.addWidget(self._min_control)
         layout.addWidget(self._max_control)
-        layout.addWidget(self._gamma_control)
+        layout.addLayout(gamma_row)
         layout.addLayout(button_row)
 
         self._min_control.valueChanged.connect(self._on_min_changed)
         self._max_control.valueChanged.connect(self._on_max_changed)
         self._gamma_control.valueChanged.connect(self._on_gamma_changed)
+        self._auto_gamma_box.toggled.connect(self._on_auto_gamma_toggled)
         auto_btn.clicked.connect(self._on_auto)
         reset_btn.clicked.connect(self._on_reset)
 
@@ -109,6 +124,7 @@ class _ContrastLayerPanel(QWidget):
 
     def reload(self) -> None:
         """Refresh controls and histogram from settings and the loaded image."""
+        self._layer_histogram = self._histogram_for_layer()
         self._load_controls_from_settings()
         self._reload_histogram()
 
@@ -122,17 +138,32 @@ class _ContrastLayerPanel(QWidget):
             self._min_control.set_value(float(contrast.min))
             self._max_control.set_value(float(contrast.max))
             self._gamma_control.set_value(float(contrast.gamma))
+            self._auto_gamma_box.setChecked(bool(contrast.auto_gamma))
         finally:
             self._updating = False
+        self._gamma_control.setEnabled(not contrast.auto_gamma)
         self._histogram.set_markers(float(contrast.min), float(contrast.max))
+
+    def _follow_auto_gamma(self) -> None:
+        """With Auto checked, move the gamma control to the Auto gamma of the current Min and Max."""
+        if not self._auto_gamma_box.isChecked():
+            return
+        gamma = auto_gamma(self._layer_histogram, self._min_control.value(), self._max_control.value())
+        self._updating = True
+        try:
+            self._gamma_control.set_value(gamma)
+        finally:
+            self._updating = False
 
     def _write_contrast(self, *, prefer_max: bool = True) -> None:
         """Persist contrast from controls and notify the window to refresh views."""
+        self._follow_auto_gamma()
         before_min = self._min_control.value()
         before_max = self._max_control.value()
         before_gamma = self._gamma_control.value()
         contrast = normalize_contrast(
-            ImageDisplayContrast(min=before_min, max=before_max, gamma=before_gamma),
+            ImageDisplayContrast(min=before_min, max=before_max, gamma=before_gamma,
+                                 auto_gamma=self._auto_gamma_box.isChecked()),
             prefer_max=prefer_max,
         )
         set_contrast_for_space(self._space, contrast, self._settings)
@@ -165,14 +196,20 @@ class _ContrastLayerPanel(QWidget):
         if not self._updating:
             self._write_contrast()
 
+    def _on_auto_gamma_toggled(self, checked: bool) -> None:
+        """Checked locks the gamma to Auto; cleared, the gamma starts from that value and moves freely."""
+        self._gamma_control.setEnabled(not checked)
+        if not self._updating:
+            self._write_contrast()
+
     def _on_auto(self) -> None:
-        """Set min/max from histogram percentiles; leave gamma unchanged."""
+        """Set min/max from histogram percentiles and lock the gamma to Auto."""
         try:
             helper = self._image_manager[self._view_key()]
         except KeyError:
             return
         try:
-            contrast = auto_contrast(helper.Image, gamma=float(self._gamma_control.value()))
+            contrast = auto_contrast(helper.Image)
         except Exception:
             logger.exception("Failed to build contrast histogram")
             return
@@ -205,7 +242,7 @@ class _ContrastLayerPanel(QWidget):
     def _reload_histogram(self) -> None:
         contrast = self._current_contrast()
         self._histogram.set_histogram(
-            self._histogram_for_layer(),
+            self._layer_histogram,
             min_marker=float(contrast.min),
             max_marker=float(contrast.max),
         )

@@ -30,6 +30,10 @@ _UNIT_INTERVAL_MAX: float = 1.5
 # Fraction of samples clipped at each end by Auto contrast (Contrast Adjustment "Auto" button).
 AUTO_MIN_PERCENTILE: float = 0.005
 AUTO_MAX_PERCENTILE: float = 0.005
+# Auto gamma limits and how close the median may sit to min/max, as in Viking's CrushInfo.AutoGamma.
+AUTO_GAMMA_MIN: float = 0.25
+AUTO_GAMMA_MAX: float = 4.0
+_AUTO_GAMMA_EDGE: float = 0.02
 # PNG text chunk the Nornir importer writes into noise-crushed (Quantized) tiles and images.
 _CRUSH_PNG_CHUNK: str = "nornir_crush"
 
@@ -88,8 +92,33 @@ def approximate_image_histogram(
         return None
 
 
-def auto_contrast(image: NDArray, gamma: float = 1.0) -> ImageDisplayContrast | None:
-    """Min/max from *image*'s histogram percentiles (the Contrast Adjustment "Auto" levels).
+def auto_gamma(hist: Histogram | None, lo: float, hi: float) -> float:
+    """The gamma that shows the median pixel between *lo* and *hi* at mid grey (Viking's Auto gamma).
+
+    Display maps ``t ** (1 / gamma)``, so a median at fraction ``t`` of the window needs
+    ``gamma = log(t) / log(0.5)``. Bin 0 is skipped: masked and empty borders put most pixels there.
+    1 (linear) without a histogram or when no pixel lies inside the window.
+    """
+    if hist is None or not hi > lo:
+        return 1.0
+    inside = [(hist.BinRepresentativeValue(i), count) for i, count in enumerate(hist.Bins)
+              if i > 0 and count > 0 and lo <= hist.BinRepresentativeValue(i) <= hi]
+    total = sum(count for _, count in inside)
+    if total <= 0:
+        return 1.0
+    running = 0.0
+    median = inside[-1][0]
+    for value, count in inside:
+        running += count
+        if running * 2 >= total:
+            median = value
+            break
+    t = float(np.clip((median - lo) / (hi - lo), _AUTO_GAMMA_EDGE, 1.0 - _AUTO_GAMMA_EDGE))
+    return float(np.clip(np.log(t) / np.log(0.5), AUTO_GAMMA_MIN, AUTO_GAMMA_MAX))
+
+
+def auto_contrast(image: NDArray) -> ImageDisplayContrast | None:
+    """The Contrast Adjustment "Auto" setting: min/max from histogram percentiles, gamma locked to Auto.
 
     None when the image has no samples to measure.
     """
@@ -97,7 +126,8 @@ def auto_contrast(image: NDArray, gamma: float = 1.0) -> ImageDisplayContrast | 
     if hist is None or hist.NumSamples <= 0:
         return None
     lo, hi = hist.AutoLevel(AUTO_MIN_PERCENTILE, AUTO_MAX_PERCENTILE)
-    return normalize_contrast(ImageDisplayContrast(min=float(lo), max=float(hi), gamma=float(gamma)))
+    return normalize_contrast(ImageDisplayContrast(
+        min=float(lo), max=float(hi), gamma=auto_gamma(hist, float(lo), float(hi)), auto_gamma=True))
 
 
 def image_file_is_crushed(path: str | None) -> bool:
@@ -146,7 +176,7 @@ def normalize_contrast(
             hi = min(LEVEL_MAX, lo + _MIN_SPAN)
             if lo >= hi:
                 lo = max(LEVEL_MIN, hi - _MIN_SPAN)
-    return ImageDisplayContrast(min=lo, max=hi, gamma=gamma)
+    return ImageDisplayContrast(min=lo, max=hi, gamma=gamma, auto_gamma=bool(contrast.auto_gamma))
 
 
 def apply_contrast_array(

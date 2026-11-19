@@ -138,6 +138,8 @@ class ImageDisplayContrast(BaseModel):
     min: float = 0.0
     max: float = 255.0
     gamma: float = 1.0
+    # Gamma follows min/max: it shows the median pixel between them at mid grey (Viking's Auto gamma).
+    auto_gamma: bool = False
 
 
 class UISettings(BaseModel):
