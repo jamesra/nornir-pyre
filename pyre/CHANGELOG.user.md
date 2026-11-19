@@ -13,7 +13,14 @@ Notes for whoever updates this file. Comments like this one are not shown in Pyr
 Curated notes for **end users** of the Windows installer (not a full developer git log).
 Pyre shows new sections once after each upgrade (**Help → What's New** shows them anytime).
 
-## 1.8.13 — not yet released
+## 1.8.15 — not yet released
+
+## 1.8.14 — 2026-11-17
+
+- **Fix: large grid transforms froze after Space or a point drag.** After each registration or drag on a grid transform, Pyre settles the masked and exterior grid points. On a large grid this kept the window busy for many seconds, so you could not move or register the next point. Settling now runs in the background, and the result appears in one step when it finishes. If you move or register another point first, Pyre starts the settling again from the new positions.
+<!-- 2026-11-16. Two causes. (1) grid_layout_relax.set_local_similarity_rest_offsets found each free edge's nearest fixed-fixed sample with a linear scan, O(edges x samples): 12.6 s on a 126x126 grid, now a KD-tree with the same tie-break (0.30 s); guard: nornir-imageregistration tests/test_grid_layout_relax.py test_rest_offsets_match_the_linear_scan. (2) The wave committed partial points every 8 nodes, each a Delaunay rebuild and redraw on the UI thread (1224 commits on 126x126), and the fixed/free classification ran on the UI thread; now the worker classifies and the wave commits once. UI-thread time for one post-registration relax, 126x126 grid, redraws not counted: 36.9 s before, 0.03 s after (worker 13.4 s -> 0.85 s); 64x64: 2.54 s -> 0.01 s. Guards: tests/test_masked_grid_relax.py. -->
+
+## 1.8.13 — 2026-11-15
 
 - **Spacebar registers much better near tissue edges.** Masked areas are now left out of the match instead of being filled with random noise, so a point next to the edge of the section, a fold or a hole no longer locks onto the noise or the edge. On four RC3 pairs, points with half their window off the tissue landed correctly about 3-4 times as often, interior points 1.5 times as often, and each point is a little faster.
 <!-- 2026-11-19 nornir-imageregistration masked_correlation (band-pass by normalized convolution + Padfield masked NCC, peaks ranked by atanh(r)*sqrt(overlap)); AttemptAlignPoint target_mask/source_mask; Pyre passes BlendedMask. A/B numbers in the imageregistration stage 2 commit. -->
