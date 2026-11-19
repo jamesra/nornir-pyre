@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
+from dependency_injector.wiring import Provide, inject
 from numpy.typing import NDArray
 
 import nornir_imageregistration
@@ -26,6 +27,7 @@ from nornir_imageregistration.transforms.base import IGridTransform
 
 if TYPE_CHECKING:
     from pyre.controllers.transformcontroller import TransformController
+    from pyre.settings.app import AppSettings
 
 _logger = logging.getLogger(__name__)
 
@@ -237,18 +239,17 @@ def resolve_registration_gate_masks() -> tuple[NDArray[np.bool_] | None, NDArray
     return resolve_stos_masks()
 
 
+@inject
+def _min_unmasked_from_settings(settings: AppSettings = Provide["settings"]) -> float:
+    # Module level so wiring injects it; an @inject closure made at call time never was (it always
+    # fell back to 0.25). The provider is named by string: importing pyre.container here is circular.
+    return float(settings.stos.grid_refine.masked_relax_min_unmasked)
+
+
 def resolve_min_unmasked() -> float:
     """Return masked_relax_min_unmasked from AppSettings, or the default 0.25."""
     try:
-        from dependency_injector.wiring import Provide, inject
-        from pyre.container import IContainer
-        from pyre.settings.app import AppSettings
-
-        @inject
-        def _from_container(settings: AppSettings = Provide[IContainer.settings]) -> float:
-            return float(settings.stos.grid_refine.masked_relax_min_unmasked)
-
-        return _from_container()
+        return _min_unmasked_from_settings()
     except Exception:
         return 0.25
 

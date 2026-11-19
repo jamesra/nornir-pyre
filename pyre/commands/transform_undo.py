@@ -6,6 +6,7 @@ import copy
 from typing import Any, Callable
 
 import numpy as np
+from dependency_injector.wiring import Provide, inject
 from numpy.typing import NDArray
 
 from nornir_imageregistration import IRigidTransform, cp
@@ -23,6 +24,22 @@ def save_points_undo(
         set_points,
         xp.asarray(points_before, dtype=xp.float64).copy(),
     )
+
+
+@inject
+def save_points_undo_to_history(
+        set_points: Callable[[NDArray[np.floating]], Any],
+        points_before: NDArray[np.floating],
+        history: ICommandHistory = Provide["history_manager"],
+) -> None:
+    """save_points_undo onto the app's Ctrl+Z history.
+
+    For callers without an injected history. It must stay at module level: dependency_injector only
+    injects functions that exist when the package is wired, so an @inject closure made inside a
+    method gets the Provide marker itself (that silently dropped the Spacebar undo, 2026-11-19).
+    The provider is named by string because importing pyre.container from here is circular.
+    """
+    save_points_undo(history, set_points, points_before)
 
 
 def restore_rigid_state(controller: object, state: dict[str, Any]) -> None:

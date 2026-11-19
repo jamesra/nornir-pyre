@@ -2560,19 +2560,10 @@ class TransformController:
 
         if undo_points is not None:
             try:
-                from dependency_injector.wiring import Provide, inject
-                from pyre.container import IContainer
-                from pyre.interfaces.managers.command_history import ICommandHistory
-
-                @inject
-                def _save(
-                        history: ICommandHistory = Provide[IContainer.command_history],
-                ) -> None:
-                    history.SaveState(self.SetPoints, undo_points)
-
-                _save()
+                from pyre.commands.transform_undo import save_points_undo_to_history
+                save_points_undo_to_history(self.SetPoints, undo_points)
             except Exception:
-                _logger.debug("Could not save undo state for masked grid relax", exc_info=True)
+                _logger.warning("Could not save undo state for masked grid relax", exc_info=True)
 
         changed = np.flatnonzero(
             np.any(~np.isclose(updated, current, rtol=1e-5, atol=1e-3), axis=1))
@@ -2625,22 +2616,10 @@ class TransformController:
                 and np.allclose(current, snapshot, rtol=1e-5, atol=1e-3)
             ):
                 return
-            from dependency_injector.wiring import Provide, inject
-            from pyre.container import IContainer
-            from pyre.commands.transform_undo import save_points_undo
-            from pyre.interfaces.managers.command_history import ICommandHistory
-
-            @inject
-            def _save(
-                    history: ICommandHistory = Provide[IContainer.history_manager],
-            ) -> None:
-                save_points_undo(history, self.SetPoints, snapshot)
-
-            _save()
+            from pyre.commands.transform_undo import save_points_undo_to_history
+            save_points_undo_to_history(self.SetPoints, snapshot)
         except Exception:
-            _logger.debug(
-                "Could not save undo state for registration batch",
-                exc_info=True)
+            _logger.warning("Could not save undo state for registration batch", exc_info=True)
 
     def SetPoints(self, points: NDArray | nornir_imageregistration.IControlPoints):
         """Set transform points to the passed array"""

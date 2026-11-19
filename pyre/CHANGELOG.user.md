@@ -15,6 +15,9 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.13 — not yet released
 
+- **Fix: Ctrl+Z did not undo a Spacebar registration.** Space-registered points (and the grid points that settle after them) are undone with one Ctrl+Z again. The masked-tissue setting for skipping Space on mostly masked points is also read again; it had always used the default 25%.
+<!-- 2026-11-19, reported by James. The undo was saved through an @inject closure defined inside TransformController methods; dependency_injector injects only functions that exist when the pyre package is wired, so the closure got the Provide marker, SaveState raised, and the exception was logged at debug. Now module-level pyre.commands.transform_undo.save_points_undo_to_history and masked_grid_relax._min_unmasked_from_settings; failures log a warning. Guard: tests/test_undo_history_injection.py. -->
+
 - **Gamma can follow Min and Max, as in Viking.** The Contrast Adjustment window has an **Auto** box next to Gamma. While it is checked, Pyre keeps the gamma that shows the median pixel between Min and Max at mid grey, and moves it as you move Min or Max; the Gamma control is greyed out. Clear the box to set the gamma yourself, starting from that value. The **Auto** button now also checks the box, so it sets the gamma along with Min and Max.
 <!-- 2026-11-19, copied from Viking's CrushContrastWindow / CrushInfo.AutoGamma: median of the histogram inside [min, max] with bin 0 skipped, gamma = log(t)/log(0.5) with t clamped to [0.02, 0.98] and gamma to [0.25, 4]. Stored as ImageDisplayContrast.auto_gamma (default off, so existing settings keep their gamma). Guards: tests/test_image_contrast.py TestAutoGamma, test_auto_contrast_spans_the_codes_and_locks_gamma. -->
 
