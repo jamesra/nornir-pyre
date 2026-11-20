@@ -461,7 +461,16 @@ class ImageTransformViewPanel(imagetransformpanelbase.ImageTransformPanelBase):
     def subscribe_context_activation(self, glcontext_manager: IGLContextManager):
         glcontext_manager.add_glcontext_added_event_listener(self.create_objects)
 
-    def activate_command(self, previous_command=None):
+    def activate_command(self, previous_command: ICommand | None = None) -> None:
+        """Activate the next queued command, or a default one, as this panel's only event handler.
+
+        ``previous_command`` is set when called back by a finished command. If that command is no
+        longer the active one, a model change already replaced it, so the callback is stale: a
+        second command would chain onto the first's mouse handlers and both would pan
+        (James, 2026-11-19: Source/Target panned at twice the cursor speed).
+        """
+        if previous_command is not None and previous_command is not self._command:
+            return
         command_factory = self._transform_type_to_command_action_map[self.transform_controller.type]  # type: ignore[index]
         self._command = self._command_queue.get()
         if self._command is None:
