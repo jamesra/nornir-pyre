@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import cast
 
@@ -120,12 +121,17 @@ def auto_gamma(hist: Histogram | None, lo: float, hi: float) -> float:
 def auto_contrast(image: NDArray) -> ImageDisplayContrast | None:
     """The Contrast Adjustment "Auto" setting: min/max from histogram percentiles, gamma locked to Auto.
 
-    None when the image has no samples to measure.
+    Bin 0 is left out, as in :func:`auto_gamma` and Viking: masked and empty borders put most pixels
+    there (about 17% on RC3), which pinned min at 0. None when the image has no samples to measure.
     """
     hist = approximate_image_histogram(image)
     if hist is None or hist.NumSamples <= 0:
         return None
-    lo, hi = hist.AutoLevel(AUTO_MIN_PERCENTILE, AUTO_MAX_PERCENTILE)
+    tissue = copy.deepcopy(hist)
+    tissue.Bins[0] = 0
+    if sum(tissue.Bins) <= 0:
+        tissue = hist
+    lo, hi = tissue.AutoLevel(AUTO_MIN_PERCENTILE, AUTO_MAX_PERCENTILE)
     return normalize_contrast(ImageDisplayContrast(
         min=float(lo), max=float(hi), gamma=auto_gamma(hist, float(lo), float(hi)), auto_gamma=True))
 

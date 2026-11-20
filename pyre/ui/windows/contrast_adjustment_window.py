@@ -142,7 +142,7 @@ class _ContrastLayerPanel(QWidget):
         finally:
             self._updating = False
         self._gamma_control.setEnabled(not contrast.auto_gamma)
-        self._histogram.set_markers(float(contrast.min), float(contrast.max))
+        self._histogram.set_markers(float(contrast.min), float(contrast.max), float(contrast.gamma))
 
     def _follow_auto_gamma(self) -> None:
         """With Auto checked, move the gamma control to the Auto gamma of the current Min and Max."""
@@ -181,7 +181,7 @@ class _ContrastLayerPanel(QWidget):
                 self._gamma_control.set_value(float(contrast.gamma))
             finally:
                 self._updating = False
-        self._histogram.set_markers(float(contrast.min), float(contrast.max))
+        self._histogram.set_markers(float(contrast.min), float(contrast.max), float(contrast.gamma))
         self.contrastWritten.emit(self._space)
 
     def _on_min_changed(self, _value: float) -> None:
@@ -245,6 +245,7 @@ class _ContrastLayerPanel(QWidget):
             self._layer_histogram,
             min_marker=float(contrast.min),
             max_marker=float(contrast.max),
+            gamma=float(contrast.gamma),
         )
 
 

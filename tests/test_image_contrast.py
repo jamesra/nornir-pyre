@@ -240,5 +240,26 @@ class TestAutoGamma(unittest.TestCase):
         self.assertTrue(c.auto_gamma)
 
 
+class TestAutoContrastIgnoresMaskedPixels(unittest.TestCase):
+    """Auto skips bin 0, as auto_gamma and Viking do (RC3 1025, 2026-11-20).
+
+    About 17% of an RC3 section image is masked border at 0, which pinned Auto's min at 0
+    and so its gamma at the 0.25 limit.
+    """
+
+    def test_min_comes_from_the_tissue_not_the_border(self) -> None:
+        rng = np.random.default_rng(1)
+        values = rng.integers(135, 188, size=(200, 200)).astype(np.uint8)
+        values[:40] = 0
+        contrast = auto_contrast(values)
+        self.assertIsNotNone(contrast)
+        self.assertGreater(contrast.min, 130.0)
+        self.assertLess(contrast.max, 190.0)
+        self.assertGreater(contrast.gamma, 0.5)
+
+    def test_an_all_zero_image_still_returns_a_setting(self) -> None:
+        self.assertIsNotNone(auto_contrast(np.zeros((16, 16), dtype=np.uint8)))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -66,6 +66,27 @@ class TestWidgetsUseTheRobustRange(unittest.TestCase):
         self.assertAlmostEqual(widget._axes.get_ylim()[1], 353 * CLIPPED_HEADROOM, places=3)
         self.assertEqual(len(widget._axes.texts), 1, "the clipped bar is labelled")
 
+    def test_gamma_curve_and_mid_grey_line_follow_the_markers(self):
+        """The tone curve runs from black at Min to white at Max; the dashed line is the mid-grey intensity."""
+        from PyQt6.QtWidgets import QApplication
+        from pyre.ui.widgets.image_histogram_widget import ImageHistogramWidget
+
+        _app = QApplication.instance() or QApplication([])
+        widget = ImageHistogramWidget()
+        widget.set_histogram(Histogram.FromArray([100] * 256, 0.0, 1.0),
+                             min_marker=100.0, max_marker=200.0, gamma=2.0)
+        x, y = widget._curve_line.get_data()
+        self.assertAlmostEqual(float(x[0]), 100.0)
+        self.assertAlmostEqual(float(x[-1]), 200.0)
+        self.assertAlmostEqual(float(y[0]), 0.0)
+        self.assertAlmostEqual(float(y[-1]), 1.0)
+        self.assertAlmostEqual(float(widget._mid_line.get_xdata()[0]), 100.0 + 100.0 * 0.25)
+
+        widget.set_markers(50.0, 150.0, 1.0)
+        self.assertAlmostEqual(float(widget._mid_line.get_xdata()[0]), 100.0)
+        widget.set_markers(50.0, 150.0, None)
+        self.assertFalse(widget._curve_line.get_visible())
+
 
 if __name__ == '__main__':
     unittest.main()
