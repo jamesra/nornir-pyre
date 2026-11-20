@@ -24,7 +24,7 @@ import pyre.commands.transform_undo  # noqa: F401  (wired in setUp)
 from dependency_injector import providers
 from nornir_imageregistration.alignment_record import AlignmentRecord
 from nornir_imageregistration.transforms import ITransform
-from nornir_imageregistration.transforms.meshwithrbffallback import MeshWithRBFFallback
+from nornir_imageregistration.transforms.meshwithrbffallback import GetTransformPrewarmPool, MeshWithRBFFallback
 from nornir_imageregistration.transforms.two_way_rbftransform import (
     TwoWayRBFWithLinearCorrection,
 )
@@ -111,8 +111,10 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
 
     def setUp(self) -> None:
         # Wire a Ctrl+Z history as the app does. Without one, every batch commit logs a warning with a
-        # traceback, and that delay alone made the display drift here (a timing race this test does not
-        # cover; seen 2026-11-19).
+        # traceback. That delay let the RBF prewarm finish mid-run, and with no QApplication its install
+        # (and the rebase it triggers) runs on the pool thread, concurrently with the next apply: the
+        # display drifted 1-2 px (2026-11-19). The app posts the install to the GUI thread, so it never
+        # overlaps an apply; test_*_settled below covers an install between every pair of results.
         history = CommandHistory()
         IContainer.history_manager.override(providers.Singleton(lambda: history))
         self.addCleanup(IContainer.history_manager.reset_override)
@@ -120,7 +122,12 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
         container.wire(modules=[sys.modules['pyre.commands.transform_undo']])
         self.addCleanup(container.unwire)
 
-    def _run(self, model: ITransform) -> np.ndarray:
+    def _run(self, model: ITransform, settle_prewarm: bool = False) -> np.ndarray:
+        """Apply 20 results to one point; return how far the composite display center moved.
+
+        With *settle_prewarm*, the RBF prewarm finishes and installs after each result, as it does on
+        the app's GUI thread when the user pauses between Spacebar presses.
+        """
         controller = _controller(model)
         camera = SimpleNamespace(lookat=np.array([380.0, 330.0]), visible_world_size=None)
 
@@ -135,6 +142,9 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
         rng = np.random.default_rng(5)
         for _ in range(20):
             _register(controller, 27, (float(rng.normal(0.0, 3.0)), float(rng.normal(0.0, 3.0))))
+            if settle_prewarm:
+                GetTransformPrewarmPool().wait_completion()
+                self.assertTrue(controller.rbf_prewarm_ready, "the prewarm installed its RBF")
             display_lookat_for_composite(camera, controller)  # a paint between results
         return display_lookat_for_composite(camera, controller) - start
 
@@ -143,6 +153,12 @@ class TestCompositeRebaseHoldsDisplay(unittest.TestCase):
 
     def test_rbf_display_does_not_drift(self) -> None:
         np.testing.assert_allclose(self._run(_rbf()), [0.0, 0.0], atol=1e-6)
+
+    def test_mesh_display_does_not_drift_settled(self) -> None:
+        np.testing.assert_allclose(self._run(_mesh(), settle_prewarm=True), [0.0, 0.0], atol=1e-6)
+
+    def test_rbf_display_does_not_drift_settled(self) -> None:
+        np.testing.assert_allclose(self._run(_rbf(), settle_prewarm=True), [0.0, 0.0], atol=1e-6)
 
 
 class TestDisplaySolve(unittest.TestCase):
