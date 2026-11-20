@@ -9,7 +9,8 @@ from pyre.observable import ObservableSet
 from nornir_imageregistration import ImagePermutationHelper
 
 import pyre
-from pyre.image_contrast import contrasted_permutation_helper
+from pyre.image_contrast import contrast_for_space, contrasted_permutation_helper
+from pyre.space import Space
 from pyre.interfaces import StatusChangeCallback
 from pyre.commands import InstantCommandBase
 from pyre.interfaces.managers import IImageManager
@@ -139,11 +140,11 @@ class RegisterControlPointCommand(InstantCommandBase):
         if not published:
             source = contrasted_permutation_helper(
                 self._image_manager[self._source_image],
-                self._app_settings.ui.source_contrast,
+                contrast_for_space(Space.Source, settings=self._app_settings),
             )
             target = contrasted_permutation_helper(
                 self._image_manager[self._target_image],
-                self._app_settings.ui.target_contrast,
+                contrast_for_space(Space.Target, settings=self._app_settings),
             )
         self._transform_controller.enqueue_point_registrations(
             queued,

@@ -15,6 +15,10 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.15 — not yet released
 
+- **Contrast is kept per image.** Each image remembers its own contrast, so opening another pair no longer shows the last pair's settings on the new images. An image you have not adjusted opens at the normal contrast (Auto for noise-crushed images).
+<!-- 2026-11-20, James "97) Yes": RC3 1025 showed 0325's 169.6/218.9 because Source/Target contrast was global. UISettings.image_contrasts keyed by contrast_key(path). -->
+- **Auto contrast ignores the masked border.** Auto used to count the black border around the section, which set Min near 0 and the gamma to its limit. The histogram now also shows the gamma curve and the mid-grey intensity, as in Viking.
+- **Brute Force asks how much to search.** **Rotate/Translate → Brute Force** opens a window for the angles, scale search, flipped check and image size, shows how big the search is, and keeps your choice for next time. **Defaults** goes back to the full search. Its progress bar now runs once from start to end instead of restarting for every scale.
 - **Right-drag pans Source and Target at cursor speed again.** After a registration or other change replaced the transform, those panels could end up with two active mouse handlers and pan twice as far as the mouse moved.
 - **Spacebar registers much better near tissue edges.** Masked areas are now left out of the match instead of being filled with random noise, so a point next to the edge of the section, a fold or a hole no longer locks onto the noise or the edge. On four RC3 pairs, points with half their window off the tissue landed correctly about 3-4 times as often, interior points 1.5 times as often, and each point is a little faster.
 <!-- 2026-11-19 nornir-imageregistration masked_correlation (band-pass by normalized convolution + Padfield masked NCC, peaks ranked by atanh(r)*sqrt(overlap)); AttemptAlignPoint target_mask/source_mask; Pyre passes BlendedMask. A/B numbers in the imageregistration stage 2 commit. -->

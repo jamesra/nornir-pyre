@@ -458,6 +458,17 @@ class TestSessionPointIds(unittest.TestCase):
 
 
 class TestRegistrationApply(unittest.TestCase):
+    """Tests without their own QApplication patch expect none to exist, so results apply synchronously.
+
+    A test module that runs earlier may have created a real QApplication (any dialog test does), so
+    the default here is an explicit "no application"; tests that need one still patch it themselves.
+    """
+
+    def setUp(self) -> None:
+        no_app = patch("pyre.controllers.transformcontroller.QApplication.instance", return_value=None)
+        no_app.start()
+        self.addCleanup(no_app.stop)
+
     def test_enqueue_dedup_while_in_flight(self) -> None:
         controller = TransformController(_mesh(4))
         pool = MagicMock()

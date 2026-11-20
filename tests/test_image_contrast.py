@@ -16,6 +16,8 @@ from pyre.image_contrast import (
     apply_contrast_array,
     auto_contrast,
     auto_gamma,
+    contrast_for_space,
+    contrast_key,
     contrasted_permutation_helper,
     image_file_is_crushed,
     is_identity_contrast,
@@ -149,7 +151,7 @@ class TestContrastedPermutationHelper(unittest.TestCase):
 
 
 class TestCrushedImageAutoContrast(unittest.TestCase):
-    """Quantized (noise-crushed) images load with Auto contrast; other images keep their contrast."""
+    """Each image keeps its own contrast; a new one starts at Auto when noise-crushed (Quantized), else the identity."""
 
     def setUp(self) -> None:
         self._dir = tempfile.mkdtemp(prefix='pyre_crush_contrast_')
@@ -184,28 +186,67 @@ class TestCrushedImageAutoContrast(unittest.TestCase):
         t = (median - contrast.min) / (contrast.max - contrast.min)
         self.assertAlmostEqual(t ** (1.0 / contrast.gamma), 0.5, delta=0.1)
 
-    def test_load_sets_auto_contrast_only_for_crushed_images(self) -> None:
+    def _result(self, path: str) -> MagicMock:
+        r = MagicMock()
+        r.image_fullpath = path
+        r.permutations.Image = self.codes
+        return r
+
+    def _load(self, settings: AppSettings, source: str, target: str) -> None:
+        from pyre.settings.app import ImageAndMaskPath
         from pyre.ui.windows.stoswindow import StosWindow
 
-        def result(path: str) -> MagicMock:
-            r = MagicMock()
-            r.image_fullpath = path
-            r.permutations.Image = self.codes
-            return r
-
-        settings = AppSettings()
-        kept = ImageDisplayContrast(min=10.0, max=200.0, gamma=1.0)
-        set_contrast_for_space(Space.Target, kept, settings)
+        settings.stos.source_image = ImageAndMaskPath(image_fullpath=source, mask_fullpath=None)
+        settings.stos.target_image = ImageAndMaskPath(image_fullpath=target, mask_fullpath=None)
         load_result = MagicMock()
-        load_result.source = result(self.crushed_path)
-        load_result.target = result(self.plain_path)
-
+        load_result.source = self._result(source)
+        load_result.target = self._result(target)
         StosWindow.auto_contrast_crushed_images(load_result, settings)
+
+    def test_load_gives_crushed_images_auto_and_others_the_identity(self) -> None:
+        """A new image never shows the previous pair's contrast (RC3 1025 showed 0325's, 2026-11-20)."""
+        settings = AppSettings()
+        settings.ui.target_contrast = ImageDisplayContrast(min=10.0, max=200.0, gamma=1.0)
+
+        self._load(settings, self.crushed_path, self.plain_path)
 
         self.assertEqual(settings.ui.source_contrast, auto_contrast(self.codes))
         self.assertFalse(is_identity_contrast(settings.ui.source_contrast))
-        self.assertEqual(settings.ui.target_contrast, kept)
+        self.assertTrue(is_identity_contrast(settings.ui.target_contrast))
 
+    def test_each_image_keeps_its_own_contrast_across_pairs(self) -> None:
+        """James, 2026-11-20, "97) Yes": contrast is saved per image."""
+        other_path = os.path.join(self._dir, 'other.png')
+        Image.fromarray(self.codes).save(other_path)
+        settings = AppSettings()
+        self._load(settings, self.plain_path, other_path)
+        mine = ImageDisplayContrast(min=20.0, max=180.0, gamma=1.2)
+        set_contrast_for_space(Space.Source, mine, settings)
+
+        self._load(settings, other_path, self.crushed_path)  # another pair in between
+        self.assertTrue(is_identity_contrast(contrast_for_space(Space.Source, settings=settings)))
+
+        self._load(settings, self.crushed_path, self.plain_path)  # the image comes back, in the other space
+        self.assertEqual(mine, contrast_for_space(Space.Target, settings=settings))
+        self.assertEqual(mine, settings.ui.target_contrast)
+
+    def test_a_crushed_image_keeps_a_contrast_the_user_set(self) -> None:
+        settings = AppSettings()
+        self._load(settings, self.crushed_path, self.plain_path)
+        mine = ImageDisplayContrast(min=5.0, max=50.0, gamma=1.0)
+        set_contrast_for_space(Space.Source, mine, settings)
+        self._load(settings, self.crushed_path, self.plain_path)
+        self.assertEqual(mine, settings.ui.source_contrast)
+
+    def test_the_key_ignores_case_and_relative_paths_on_windows(self) -> None:
+        cwd = os.getcwd()
+        try:
+            os.chdir(self._dir)
+            self.assertEqual(contrast_key(self.plain_path), contrast_key('plain.png'))
+        finally:
+            os.chdir(cwd)
+        if os.name == 'nt':
+            self.assertEqual(contrast_key(self.plain_path), contrast_key(self.plain_path.upper()))
 
 
 class TestAutoGamma(unittest.TestCase):

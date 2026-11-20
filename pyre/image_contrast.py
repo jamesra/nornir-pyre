@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 from typing import cast
 
 import nornir_imageregistration
@@ -215,12 +216,34 @@ def apply_contrast_array(
     return out.astype(arr.dtype, copy=False)
 
 
+def contrast_key(path: str) -> str:
+    """The key of an image file in ``UISettings.image_contrasts``: its absolute path, case-folded on Windows."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def image_path_for_space(space: Space, settings: AppSettings) -> str | None:
+    """The image file shown in *space*, or None when there is none."""
+    image = settings.stos.target_image if space == Space.Target else settings.stos.source_image
+    return image.image_fullpath if image is not None and image.image_fullpath else None
+
+
+def saved_image_contrast(path: str | None, settings: AppSettings) -> ImageDisplayContrast | None:
+    """The contrast saved for the image at *path*, or None when it has none."""
+    if not path:
+        return None
+    saved = settings.ui.image_contrasts.get(contrast_key(path))
+    return normalize_contrast(saved) if saved is not None else None
+
+
 @inject
 def contrast_for_space(
         space: Space,
         settings: AppSettings = Provide[IContainer.settings],
 ) -> ImageDisplayContrast:
-    """Return normalized contrast for Source or Target from AppSettings."""
+    """Return normalized contrast for Source or Target: the shown image's own, else the space's."""
+    saved = saved_image_contrast(image_path_for_space(space, settings), settings)
+    if saved is not None:
+        return saved
     if space == Space.Target:
         return normalize_contrast(settings.ui.target_contrast)
     return normalize_contrast(settings.ui.source_contrast)
@@ -231,13 +254,48 @@ def set_contrast_for_space(
         contrast: ImageDisplayContrast,
         settings: AppSettings,
 ) -> ImageDisplayContrast:
-    """Write normalized contrast into settings for *space*; return stored value."""
+    """Write normalized contrast for *space* and for the image it shows; return stored value."""
     normalized = normalize_contrast(contrast)
     if space == Space.Target:
         settings.ui.target_contrast = normalized
     else:
         settings.ui.source_contrast = normalized
+    path = image_path_for_space(space, settings)
+    if path:
+        contrasts = dict(settings.ui.image_contrasts)
+        contrasts[contrast_key(path)] = normalized
+        settings.ui.image_contrasts = contrasts
     return normalized
+
+
+def contrast_for_loaded_image(
+        space: Space,
+        path: str | None,
+        image: NDArray | None,
+        settings: AppSettings,
+) -> ImageDisplayContrast:
+    """Give *space* the contrast of the image just loaded into it, and return it.
+
+    The image's saved contrast when it has one. Otherwise Auto for a noise-crushed image, which
+    looks nearly black without a stretch, and the identity for any other image, so a new image
+    never shows the contrast of the pair opened before it (RC3 1025 showed 0325's).
+    """
+    saved = saved_image_contrast(path, settings)
+    if saved is not None:
+        contrast = saved
+    elif image is not None and image_file_is_crushed(path):
+        contrast = auto_contrast(image) or ImageDisplayContrast()
+    else:
+        contrast = ImageDisplayContrast()
+    if space == Space.Target:
+        settings.ui.target_contrast = contrast
+    else:
+        settings.ui.source_contrast = contrast
+    if saved is None and path and not is_identity_contrast(contrast):
+        contrasts = dict(settings.ui.image_contrasts)
+        contrasts[contrast_key(path)] = contrast
+        settings.ui.image_contrasts = contrasts
+    return contrast
 
 
 def reset_contrast_for_space(space: Space, settings: AppSettings) -> ImageDisplayContrast:

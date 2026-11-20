@@ -29,9 +29,8 @@ from pyre.common import (
     stos_image_dims_from_stos_config,
 )
 from pyre.image_contrast import (
-    auto_contrast,
-    image_file_is_crushed,
-    set_contrast_for_space,
+    contrast_for_loaded_image,
+    contrast_for_space,
 )
 from pyre.qt_eventmanager import qt_post_to_main
 from pyre.registration_job import get_registration_job_runner
@@ -974,6 +973,16 @@ class StosWindow(PyreWindowBase):
         """Run rotate-translate estimate using the selected registration method."""
         logger.debug("Rotate translate estimate triggered method=%s", method.name)
         settings = self._settings.stos.brute_registration
+        limit_image_size = True
+        if method == SliceToSliceMethod.BruteForce:
+            # Brute Force asks how much to search (angles, scales, flip, image size) and keeps the
+            # answer for the next run (James, 2026-11-20).
+            from pyre.ui.windows.brute_search_dialog import BruteSearchDialog
+            chosen = BruteSearchDialog.ask(self._settings, self)
+            if chosen is None:
+                return
+            settings = chosen
+            limit_image_size = False
         title = (
             "Brute-force rotate/translate"
             if method == SliceToSliceMethod.BruteForce
@@ -985,7 +994,7 @@ class StosWindow(PyreWindowBase):
                 source_image_key=Space.Source,  # type: ignore[arg-type]
                 target_image_key=Space.Target,  # type: ignore[arg-type]
                 settings=settings,
-                LimitImageSize=True,
+                LimitImageSize=limit_image_size,
                 method=method,
                 cancel_event=cancel_event,
                 progress_callback=progress_callback,
@@ -1028,11 +1037,11 @@ class StosWindow(PyreWindowBase):
         from pyre.image_contrast import contrasted_permutation_helper
         source_for_refine = contrasted_permutation_helper(
             self._image_manager[ViewType.Source],
-            self._settings.ui.source_contrast,
+            contrast_for_space(Space.Source, settings=self._settings),
         )
         target_for_refine = contrasted_permutation_helper(
             self._image_manager[ViewType.Target],
-            self._settings.ui.target_contrast,
+            contrast_for_space(Space.Target, settings=self._settings),
         )
         # Host mesh so the worker never shares CuPy control points with paintGL.
         # Always taken from the live TransformController model (manual rigid edits
@@ -1246,6 +1255,7 @@ class StosWindow(PyreWindowBase):
                     config.LoadSourceImage(filename)
                     self._settings.stos.source_image = _with_new_image(
                         self._settings.stos.source_image, filename)
+                    self._load_image_contrast(Space.Source, filename)
                     StosWindow.update_window_titles(self._settings, self._window_manager)
 
     onOpenFixedImage = onOpenSourceImage
@@ -1268,9 +1278,19 @@ class StosWindow(PyreWindowBase):
                     config.LoadTargetImage(filename)
                     self._settings.stos.target_image = _with_new_image(
                         self._settings.stos.target_image, filename)
+                    self._load_image_contrast(Space.Target, filename)
                     StosWindow.update_window_titles(self._settings, self._window_manager)
 
     onOpenWarpedImage = onOpenTargetImage
+
+    def _load_image_contrast(self, space: Space, path: str) -> None:
+        """Show the contrast saved for the image just opened in *space* (identity or Auto when it has none)."""
+        try:
+            helper = self._image_manager[ViewType.Target if space == Space.Target else ViewType.Source]
+            image = helper.Image
+        except KeyError:
+            image = None
+        contrast_for_loaded_image(space, path, image, self._settings)
 
     def onOpenSourceImageMask(self):
         """Handle Open Source Image Mask action."""
@@ -1492,18 +1512,17 @@ class StosWindow(PyreWindowBase):
 
     @staticmethod
     def auto_contrast_crushed_images(load_result: LoadStosResult, settings: AppSettings) -> None:
-        """Set Auto contrast for each loaded image that is noise-crushed (Quantized).
+        """Give each loaded image its own saved contrast, or a starting one when it has none.
 
-        Crushed images hold codes in the low part of the 8-bit range and look nearly black at the
-        identity contrast. They get the full Auto setting, gamma included. Other images keep the
-        contrast already in the settings.
+        A starting contrast is Auto, gamma included, for a noise-crushed (Quantized) image, whose
+        codes sit in the low part of the 8-bit range and look nearly black at the identity, and the
+        identity for any other image. The contrast of the previous pair is never carried over.
         """
         for space, image_result in ((Space.Source, load_result.source), (Space.Target, load_result.target)):
-            if image_result is None or not image_file_is_crushed(image_result.image_fullpath):
+            if image_result is None:
                 continue
-            contrast = auto_contrast(image_result.permutations.Image)
-            if contrast is not None:
-                set_contrast_for_space(space, contrast, settings)
+            contrast_for_loaded_image(space, image_result.image_fullpath, image_result.permutations.Image,
+                                      settings)
 
     @staticmethod
     @inject

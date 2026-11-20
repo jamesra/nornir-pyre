@@ -88,6 +88,23 @@ class GridRefineDefaults(BaseModel):
         return AngleSearchRange(max_angle=self.max_angle, angle_step_size=self.angle_step_size)
 
 
+class BruteSearchDefaults(BaseModel):
+    """How much Rotate/Translate > Brute Force searches; edited in its dialog, kept across runs.
+
+    The defaults are what the menu item did before the dialog: every angle around the circle
+    every 2 degrees, eleven scales, the flipped image too, images shrunk to 818 px.
+    """
+
+    full_circle: bool = True
+    # +/- degrees around 0 when full_circle is off.
+    max_angle: float = 15.0
+    angle_step_size: float = 2.0
+    search_scale: bool = True
+    try_flipped: bool = True
+    min_overlap: float = 0.75
+    largest_dimension: int = 818
+
+
 class StosSettings(BaseModel):
     stos_dirname: str | None = None  # The last directory loaded or saved by the user
     stos_filename: str | None = None  # The last filename loaded or saved by the user
@@ -98,6 +115,7 @@ class StosSettings(BaseModel):
         method=nornir_imageregistration.settings.SliceToSliceMethod.LogPolar)  # field(default_factory=StosBruteSettings)
     point_registration: PointRegistrationSettings = PointRegistrationSettings()  # Used when the user selects a single point to register
     grid_refine: GridRefineDefaults = GridRefineDefaults()
+    brute_search: BruteSearchDefaults = BruteSearchDefaults()
     source_image: ImageAndMaskPath | None = None  # The last source image loaded by the user
     target_image: ImageAndMaskPath | None = None  # The last target image loaded by the user
     stos_opened_from_browser_folder: str | None = None
@@ -154,8 +172,12 @@ class UISettings(BaseModel):
         str, str] = {}  # field(default_factory=dict)  # Paths to try replacing when searching for files
     stos_browser_folder: str | None = None  # Last folder opened in the Stos File Browser
     window_geometry: dict[str, WindowGeometry] = {}
+    # The contrast of the image shown in each space; kept in step with image_contrasts.
     source_contrast: ImageDisplayContrast = ImageDisplayContrast()
     target_contrast: ImageDisplayContrast = ImageDisplayContrast()
+    # Contrast per image file, keyed by pyre.image_contrast.contrast_key(path). An image keeps
+    # its own contrast when other pairs are opened in between (James, 2026-11-20, "97) Yes").
+    image_contrasts: dict[str, ImageDisplayContrast] = {}
 
 
 class AppSettings(BaseModel):

@@ -35,6 +35,7 @@ from pyre.interfaces.managers.command_history import ICommandHistory
 from pyre.interfaces.viewtype import ViewType
 from pyre.controllers.transformcontroller import TransformController
 from pyre.settings import AppSettings
+from pyre.space import Space
 from pyre.stos_registration import normalize_rigid_transform_for_pyre_editing, resolve_source_and_target_image_data
 
 if TYPE_CHECKING:
@@ -343,9 +344,9 @@ def RefineRigidTransformLocal(
         settings_source_image_path=source_settings_path,
         settings_target_image_path=target_settings_path,
     )
-    from pyre.image_contrast import contrasted_permutation_helper
-    warped_image = contrasted_permutation_helper(warped_image, app_settings.ui.source_contrast)
-    fixed_image = contrasted_permutation_helper(fixed_image, app_settings.ui.target_contrast)
+    from pyre.image_contrast import contrast_for_space, contrasted_permutation_helper
+    warped_image = contrasted_permutation_helper(warped_image, contrast_for_space(Space.Source, settings=app_settings))
+    fixed_image = contrasted_permutation_helper(fixed_image, contrast_for_space(Space.Target, settings=app_settings))
 
     center_deg = float(numpy.degrees(getattr(current_transform, "angle", 0.0)))
     angles = build_refine_angle_grid_deg(center_deg) if search_angle else [center_deg]
@@ -421,9 +422,9 @@ def RotateTranslateWarpedImage(source_image_key: str,
         settings_source_image_path=source_settings_path,
         settings_target_image_path=target_settings_path,
     )
-    from pyre.image_contrast import contrasted_permutation_helper
-    warped_image = contrasted_permutation_helper(warped_image, app_settings.ui.source_contrast)
-    fixed_image = contrasted_permutation_helper(fixed_image, app_settings.ui.target_contrast)
+    from pyre.image_contrast import contrast_for_space, contrasted_permutation_helper
+    warped_image = contrasted_permutation_helper(warped_image, contrast_for_space(Space.Source, settings=app_settings))
+    fixed_image = contrasted_permutation_helper(fixed_image, contrast_for_space(Space.Target, settings=app_settings))
     working_settings = copy.copy(settings)
     if method is not None:
         working_settings.method = method
