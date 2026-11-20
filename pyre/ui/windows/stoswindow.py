@@ -155,6 +155,7 @@ class StosWindow(PyreWindowBase):
     _action_reverse_angle: QAction
     _action_refine_rigid: QAction
     _action_refine_rigid_angle_search: QAction
+    _action_estimate_scale: QAction
     _action_refine_grid: QAction
     _action_rotate_log_polar: QAction
     _action_rotate_brute: QAction
@@ -448,6 +449,9 @@ class StosWindow(PyreWindowBase):
         assert self._action_refine_rigid_angle_search is not None
         self._action_refine_rigid_angle_search.triggered.connect(  # type: ignore[union-attr]
             self.onRefineRigidAngleSearch)
+        self._action_estimate_scale = menu.addAction("Estimate S&cale")
+        assert self._action_estimate_scale is not None
+        self._action_estimate_scale.triggered.connect(self.onEstimateScale)  # type: ignore[union-attr]
         self._action_refine_grid = menu.addAction("Refine w/ &Grid…")
         assert self._action_refine_grid is not None
         self._action_refine_grid.triggered.connect(self.onRefineGrid)  # type: ignore[union-attr]
@@ -457,6 +461,7 @@ class StosWindow(PyreWindowBase):
             self._action_rotate_brute,
             self._action_refine_rigid,
             self._action_refine_rigid_angle_search,
+            self._action_estimate_scale,
             self._action_refine_grid,
         ]
 
@@ -865,6 +870,7 @@ class StosWindow(PyreWindowBase):
             nornir_imageregistration.IGridTransform)
         self._action_refine_rigid.setVisible(is_rigid)
         self._action_refine_rigid_angle_search.setVisible(is_rigid)
+        self._action_estimate_scale.setVisible(is_rigid)
         self._action_relax_exterior_grid.setEnabled(is_grid)
 
     def cancel_all_long_running(self) -> None:
@@ -931,6 +937,44 @@ class StosWindow(PyreWindowBase):
     def onRefineRigidAngleSearch(self) -> None:
         """BruteForce refine of angle (±7.5°), translation and scale."""
         self.start_rigid_refine_job(search_angle=True)
+
+    def onEstimateScale(self) -> None:
+        """Measure the scale between the images and set it on the rigid transform; Ctrl+Z undoes it.
+
+        Only the scale changes: the angle, flip and the rotation pivot's place on the target stay.
+        """
+        current_transform = self._transform_controller.TransformModel
+        if not isinstance(current_transform, nornir_imageregistration.IRigidTransform):
+            QMessageBox.warning(self, "Estimate Scale", "Estimate Scale requires a rigid transform.")
+            return
+
+        def _worker(cancel_event, progress_callback):
+            return pyre.common.EstimateRigidScale(
+                current_transform=current_transform,
+                source_image_key=Space.Source,  # type: ignore[arg-type]
+                target_image_key=Space.Target,  # type: ignore[arg-type]
+                cancel_event=cancel_event,
+                progress_callback=progress_callback,
+            )
+
+        def _on_success(scale: float | None) -> None:
+            model = self._transform_controller.TransformModel
+            if scale is None or model is not current_transform:
+                return  # images missing, or the transform was replaced while the job ran
+            from pyre.commands.transform_undo import save_rigid_undo
+            state_before = model.GetRigidState()  # type: ignore[union-attr]
+            pyre.common.apply_rigid_scale(model, scale)
+            save_rigid_undo(self._history_manager, self._transform_controller, state_before)
+            logger.info("Estimate Scale: %.5f -> %.5f", float(state_before.get("scalar", 1.0)), scale)
+            from pyre.common import repaint_peer_stos_gl_panels
+            repaint_peer_stos_gl_panels(self._window_manager)
+
+        self._submit_registration_job(
+            title="Estimate scale",
+            worker=_worker,
+            on_success=_on_success,
+            error_title="Estimate Scale",
+        )
 
     def start_rigid_refine_job(self, search_angle: bool) -> None:
         """Run rigid refine as a cancellable background job; install the result on success."""

@@ -378,6 +378,41 @@ def RefineRigidTransformLocal(
     return _preserve_rigid_refine_attributes(transform, current_transform)
 
 
+def EstimateRigidScale(current_transform: ITransform,
+                       cancel_event: threading.Event | None = None,
+                       progress_callback=None,
+                       **kwargs) -> float | None:
+    """Measure the scale between the images at the current angle; None when the images are missing.
+
+    The same search as Refine Translation and Scale (translation over the whole section, scale
+    around the current one), but only its scale is returned.
+    """
+    refined = RefineRigidTransformLocal(current_transform=current_transform, search_angle=False,
+                                        cancel_event=cancel_event, progress_callback=progress_callback,
+                                        **kwargs)
+    if refined is None:
+        return None
+    return float(getattr(refined, "scalar", 1.0))
+
+
+def apply_rigid_scale(transform: ITransform, scale: float) -> None:
+    """Set *transform*'s scale in place, keeping its rotation pivot where it is on the target.
+
+    Angle, flip and the pivot's target position stay as they are, so only the size changes.
+    """
+    if not isinstance(transform, nornir_imageregistration.IRigidTransform) or not hasattr(transform, "_scalar"):
+        raise TypeError("Estimate Scale needs a rigid transform with a scale")
+    center = getattr(transform, "source_space_center_of_rotation", None)
+    if center is None:
+        raise TypeError("Estimate Scale needs a rigid transform with a rotation centre")
+
+    def _set_scale() -> None:
+        transform._scalar = float(scale)  # type: ignore[attr-defined]
+
+    transform._pin_source_point_under_mutation(  # type: ignore[attr-defined]
+        numpy.asarray(center, dtype=numpy.float32), _set_scale)
+
+
 @inject
 def RotateTranslateWarpedImage(source_image_key: str,
                                target_image_key: str,

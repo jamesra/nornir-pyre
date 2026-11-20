@@ -15,6 +15,8 @@ Pyre shows new sections once after each upgrade (**Help → What's New** shows t
 
 ## 1.8.15 — not yet released
 
+- **New: Registration → Estimate Scale** (rigid transforms). Measures the scale between the two images at the current angle and sets it, keeping the angle and the rotation centre in place. **Ctrl+Z** undoes it. The measurement is new and rough: on some pairs it stays close to the scale you start from, so check the result by eye.
+<!-- 2026-11-20, James asked for it. Uses RefineRigidTransformLocal's scale; on 4 RC3 pairs it stayed near its seed or hit the [0.90, 1.12] search edge (.cursor/issue-handoff/pyre-estimate-scale.md). -->
 - **Contrast is kept per image.** Each image remembers its own contrast, so opening another pair no longer shows the last pair's settings on the new images. An image you have not adjusted opens at the normal contrast (Auto for noise-crushed images).
 <!-- 2026-11-20, James "97) Yes": RC3 1025 showed 0325's 169.6/218.9 because Source/Target contrast was global. UISettings.image_contrasts keyed by contrast_key(path). -->
 - **Auto contrast ignores the masked border.** Auto used to count the black border around the section, which set Min near 0 and the gamma to its limit. The histogram now also shows the gamma curve and the mid-grey intensity, as in Viking.
